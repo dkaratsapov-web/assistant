@@ -1,0 +1,46 @@
+"""Загрузка конфигурации из переменных окружения."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _require(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"Не задана обязательная переменная окружения {name}. "
+            f"Скопируй .env.example в .env и заполни."
+        )
+    return value
+
+
+@dataclass(frozen=True)
+class Config:
+    bot_token: str
+    owner_id: int
+    anthropic_api_key: str | None
+    anthropic_model: str
+    tz: str
+    digest_hour: int
+    db_path: str
+
+    @property
+    def ai_enabled(self) -> bool:
+        return bool(self.anthropic_api_key)
+
+
+def load_config() -> Config:
+    return Config(
+        bot_token=_require("BOT_TOKEN"),
+        owner_id=int(_require("OWNER_ID")),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8"),
+        tz=os.getenv("TZ", "Europe/Moscow"),
+        digest_hour=int(os.getenv("DIGEST_HOUR", "9")),
+        db_path=os.getenv("DB_PATH", "data/assistant.db"),
+    )
