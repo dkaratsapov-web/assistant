@@ -28,6 +28,7 @@ class Config:
     tz: str
     digest_hour: int
     db_path: str
+    proxy_url: str | None
 
     @property
     def ai_enabled(self) -> bool:
@@ -43,4 +44,5 @@ def load_config() -> Config:
         tz=os.getenv("TZ", "Europe/Moscow"),
         digest_hour=int(os.getenv("DIGEST_HOUR", "9")),
         db_path=os.getenv("DB_PATH", "data/assistant.db"),
+        proxy_url=os.getenv("PROXY_URL") or None,
     )

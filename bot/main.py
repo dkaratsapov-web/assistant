@@ -6,6 +6,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
@@ -50,7 +51,16 @@ async def main() -> None:
     if ai is None:
         logger.warning("ANTHROPIC_API_KEY не задан — ИИ-помощник отключён.")
 
-    bot = Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Прокси нужен, если хостинг режет доступ к Telegram (частая беда РФ-серверов)
+    session = AiohttpSession(proxy=config.proxy_url) if config.proxy_url else None
+    if config.proxy_url:
+        logger.info("Использую прокси для Telegram: %s", config.proxy_url.split("@")[-1])
+
+    bot = Bot(
+        token=config.bot_token,
+        session=session,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
     access = AccessMiddleware(db, config, ai)
