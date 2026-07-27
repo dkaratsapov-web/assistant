@@ -11,7 +11,7 @@ assets = { directory = "./public", binding = "ASSETS" }
 [[d1_databases]]
 binding = "DB"
 database_name = "assistant-db"
-database_id = "PLACEHOLDER_DB_ID"
+database_id = "da843004-b80f-4534-8945-61bfb6f5a7c3"
 
 # Фоновые задачи: напоминания (каждые 5 минут) и утренний дайджест (ежечасная проверка)
 [triggers]
