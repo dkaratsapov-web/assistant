@@ -113,11 +113,22 @@ Telegram `initData`, доступ только у пользователей б�
 Чтобы кнопка приложения появилась, задай `WEBAPP_URL` (публичный HTTPS-адрес хостинга)
 и привяжи Mini App у @BotFather (`/newapp` или Bot Settings → Menu Button).
 
-## Деплой (рекомендуется PaaS с автосборкой из GitHub)
+## Деплой
 
-В репозитории есть `Dockerfile` — платформа сама соберёт и запустит проект.
-Подходят Amvera, Timeweb Cloud Apps (оплата рублёвой картой, Telegram доступен),
-а также Railway/Render/Fly (нужна зарубежная карта).
+В репозитории есть `Dockerfile` — любая платформа соберёт проект сама.
+Есть готовые конфиги: `render.yaml` (Render, деплой в один клик) и `amvera.yml` (Amvera).
+
+### Вариант 1 — Render (в один клик, есть кнопка)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/dkaratsapov-web/assistant)
+
+Клик по кнопке → авторизуешь GitHub → Render читает `render.yaml` → просит ввести
+`BOT_TOKEN` и `OWNER_ID` → деплоит и выдаёт HTTPS-адрес. Затем впиши этот адрес в
+переменную `WEBAPP_URL` и привяжи Mini App у @BotFather.
+
+### Вариант 2 — Railway / Amvera / другой PaaS
+
+Подходят Railway, Amvera, Timeweb Cloud Apps, Fly.io и т.п.
 
 Общий порядок (без терминала, только веб-панель):
 1. Подключить GitHub-репозиторий к платформе, тип сборки — Docker.

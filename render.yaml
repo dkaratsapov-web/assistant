@@ -1,0 +1,26 @@
+# Blueprint для деплоя на Render (render.com) — «в один клик».
+# Render сам соберёт проект по Dockerfile, поднимет веб-сервис и выдаст HTTPS-адрес.
+# Постоянный диск на /data хранит базу SQLite между передеплоями.
+services:
+  - type: web
+    name: assistant-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter        # always-on + постоянный диск (free-тариф засыпает и не хранит данные)
+    healthCheckPath: /health
+    autoDeploy: true      # каждый git push → автоматический передеплой
+    envVars:
+      - key: BOT_TOKEN
+        sync: false       # вводится в панели при деплое
+      - key: OWNER_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WEBAPP_URL
+        sync: false       # вписать после первого деплоя (адрес сервиса)
+      - key: DB_PATH
+        value: /data/assistant.db
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
