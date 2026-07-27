@@ -103,24 +103,40 @@ bot/
 **Стек:** Python 3.11+, [aiogram 3](https://docs.aiogram.dev/), aiosqlite, APScheduler,
 [anthropic SDK](https://github.com/anthropics/anthropic-sdk-python).
 
-## Хостинг
+## Mini App (веб-интерфейс)
 
-Боту нужно быть постоянно запущенным. Варианты: VPS (`python -m bot.main` под
-`systemd`/`screen`), Railway, Render, любой сервер с Python. База — обычный файл SQLite,
-достаточно бэкапить `data/assistant.db`.
+Кроме чата, у бота есть Mini App — доска задач внутри Telegram (вкладки «Задачи /
+Клиенты / Заметки», создание задач, смена статусов). Веб-сервер поднимается в том же
+процессе (`bot/web.py`), интерфейс — `bot/webapp/index.html`. Авторизация — по подписи
+Telegram `initData`, доступ только у пользователей бота.
 
-Пример unit-файла systemd:
+Чтобы кнопка приложения появилась, задай `WEBAPP_URL` (публичный HTTPS-адрес хостинга)
+и привяжи Mini App у @BotFather (`/newapp` или Bot Settings → Menu Button).
 
-```ini
-[Unit]
-Description=Marketing Assistant Bot
-After=network.target
+## Деплой (рекомендуется PaaS с автосборкой из GitHub)
 
-[Service]
-WorkingDirectory=/opt/assistant
-ExecStart=/opt/assistant/.venv/bin/python -m bot.main
-Restart=always
+В репозитории есть `Dockerfile` — платформа сама соберёт и запустит проект.
+Подходят Amvera, Timeweb Cloud Apps (оплата рублёвой картой, Telegram доступен),
+а также Railway/Render/Fly (нужна зарубежная карта).
 
-[Install]
-WantedBy=multi-user.target
+Общий порядок (без терминала, только веб-панель):
+1. Подключить GitHub-репозиторий к платформе, тип сборки — Docker.
+2. Задать переменные окружения: `BOT_TOKEN`, `OWNER_ID` (и `ANTHROPIC_API_KEY` при
+   необходимости). Для постоянной базы — примонтировать диск и указать
+   `DB_PATH=/data/assistant.db`.
+3. Задеплоить → платформа выдаст HTTPS-адрес.
+4. Прописать этот адрес в `WEBAPP_URL`, передеплоить.
+5. У @BotFather привязать Mini App к боту (Menu Button → этот адрес).
+
+Для Amvera уже есть `amvera.yml` (постоянный диск на `/data`, порт 8080).
+
+> Если хостинг в РФ режет Telegram — задай `TELEGRAM_API_URL` (свой прокси на
+> Cloudflare Workers) или `PROXY_URL` (зарубежный SOCKS5). См. `.env.example`.
+
+### Локальный запуск (для разработки)
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env      # заполни BOT_TOKEN и OWNER_ID
+python -m bot.main
 ```

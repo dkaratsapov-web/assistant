@@ -10,7 +10,13 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand
+from aiogram.types import (
+    BotCommand,
+    MenuButtonCommands,
+    MenuButtonWebApp,
+    WebAppInfo,
+)
+from aiohttp import web
 
 from .ai import AIClient
 from .config import load_config
@@ -18,6 +24,7 @@ from .db import Database
 from .handlers import register_handlers
 from .middlewares import AccessMiddleware
 from .scheduler import setup_scheduler
+from .web import build_web_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +46,27 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="help", description="Помощь"),
     ]
     await bot.set_my_commands(commands)
+
+
+async def setup_menu_button(bot: Bot, webapp_url: str | None) -> None:
+    """Кнопка-меню слева от поля ввода: открывает Mini App, если задан URL."""
+    if webapp_url:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="📲 Открыть", web_app=WebAppInfo(url=webapp_url))
+        )
+    else:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
+
+async def start_web(config, db) -> web.AppRunner:
+    """Поднимает веб-сервер Mini App в том же процессе."""
+    app = build_web_app(db, config)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, config.web_host, config.web_port)
+    await site.start()
+    logger.info("Веб-сервер Mini App слушает %s:%s", config.web_host, config.web_port)
+    return runner
 
 
 async def main() -> None:
@@ -80,13 +108,21 @@ async def main() -> None:
     scheduler = setup_scheduler(bot, db, config)
     scheduler.start()
 
+    web_runner = await start_web(config, db)
+
     await set_commands(bot)
+    await setup_menu_button(bot, config.webapp_url)
+    if config.webapp_url:
+        logger.info("Mini App доступен: %s", config.webapp_url)
+    else:
+        logger.warning("WEBAPP_URL не задан — кнопка Mini App не активна (интерфейс откроется после деплоя).")
     logger.info("Бот запущен. Владелец: %s, модель ИИ: %s", config.owner_id, config.anthropic_model)
 
     try:
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)
+        await web_runner.cleanup()
         await db.close()
         await bot.session.close()
 

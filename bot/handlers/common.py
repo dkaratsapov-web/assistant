@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    WebAppInfo,
+)
 
 from .. import db as dbmod
 from .. import keyboards as kb
@@ -55,6 +60,20 @@ async def cmd_help(message: Message):
 async def cmd_menu(message: Message, user):
     is_owner = user is not None and user["role"] == dbmod.ROLE_OWNER
     await message.answer("Меню внизу 👇", reply_markup=kb.main_menu(is_owner))
+
+
+@router.message(Command("app"))
+async def cmd_app(message: Message, config: Config):
+    if not config.webapp_url:
+        await message.answer(
+            "Веб-интерфейс (Mini App) ещё не подключён — появится после деплоя на хостинг. "
+            "Пока пользуйся кнопками меню."
+        )
+        return
+    kbrd = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📲 Открыть приложение", web_app=WebAppInfo(url=config.webapp_url))
+    ]])
+    await message.answer("Открой доску задач в удобном интерфейсе:", reply_markup=kbrd)
 
 
 @router.message(Command("digest"))

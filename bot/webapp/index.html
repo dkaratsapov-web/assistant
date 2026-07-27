@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ассистент</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #17212b);
+      --secondary-bg: var(--tg-theme-secondary-bg-color, #232e3c);
+      --text: var(--tg-theme-text-color, #ffffff);
+      --hint: var(--tg-theme-hint-color, #8794a1);
+      --link: var(--tg-theme-link-color, #64baf0);
+      --button: var(--tg-theme-button-color, #3390ec);
+      --button-text: var(--tg-theme-button-text-color, #ffffff);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); font-size: 15px;
+      padding-bottom: 90px;
+    }
+    header { padding: 16px; display: flex; align-items: center; gap: 12px; }
+    header img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: var(--secondary-bg); }
+    header .title { font-weight: 600; font-size: 17px; }
+    header .subtitle { color: var(--hint); font-size: 12px; }
+
+    .tabs { display: flex; padding: 0 12px; gap: 8px; position: sticky; top: 0; background: var(--bg); z-index: 10; padding-bottom: 8px; }
+    .tab { flex: 1; padding: 8px; text-align: center; border-radius: 10px; background: var(--secondary-bg); color: var(--hint); font-weight: 500; cursor: pointer; font-size: 14px; }
+    .tab.active { background: var(--button); color: var(--button-text); }
+
+    .filters { display: flex; gap: 8px; padding: 12px 16px 4px; }
+    .chip { padding: 5px 12px; border-radius: 14px; background: var(--secondary-bg); color: var(--hint); font-size: 13px; cursor: pointer; }
+    .chip.active { background: var(--link); color: #fff; }
+
+    .list { padding: 8px 12px; }
+    .card { background: var(--secondary-bg); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+    .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .card .name { font-weight: 600; flex: 1; }
+    .card .meta { color: var(--hint); font-size: 13px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,.08); }
+    .badge.open { color: #64baf0; } .badge.in_progress { color: #f5c518; } .badge.done { color: #6ece6e; }
+    .due-overdue { color: #ff6b6b; } .due-today { color: #f5c518; }
+    .desc { color: var(--hint); font-size: 13px; margin-top: 6px; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    .btn { flex: 1; padding: 8px; border: none; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; background: rgba(255,255,255,.08); color: var(--text); }
+    .btn.primary { background: var(--button); color: var(--button-text); }
+    .btn.danger { background: rgba(255,80,80,.15); color: #ff6b6b; flex: 0 0 44px; }
+
+    .empty { text-align: center; color: var(--hint); padding: 40px 20px; }
+    .loading { text-align: center; color: var(--hint); padding: 40px; }
+
+    .fab { position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--button); color: var(--button-text); border: none; font-size: 28px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.3); z-index: 20; }
+
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; z-index: 30; }
+    .modal-bg.show { display: flex; }
+    .modal { background: var(--bg); width: 100%; border-radius: 16px 16px 0 0; padding: 20px; }
+    .modal h3 { margin-bottom: 14px; }
+    .modal input, .modal select { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--secondary-bg); background: var(--secondary-bg); color: var(--text); font-size: 15px; margin-bottom: 10px; }
+    .modal .hint { color: var(--hint); font-size: 12px; margin: -6px 0 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <img id="avatar" alt="">
+    <div>
+      <div class="title">Ассистент</div>
+      <div class="subtitle" id="subtitle">Загрузка…</div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="tasks">📋 Задачи</div>
+    <div class="tab" data-tab="clients">👥 Клиенты</div>
+    <div class="tab" data-tab="notes">📝 Заметки</div>
+  </div>
+
+  <div class="filters" id="filters">
+    <div class="chip active" data-status="active">Активные</div>
+    <div class="chip" data-status="done">Готовые</div>
+    <div class="chip" data-status="all">Все</div>
+  </div>
+
+  <div class="list" id="list"><div class="loading">Загрузка…</div></div>
+
+  <button class="fab" id="fab">+</button>
+
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <h3>Новая задача</h3>
+      <input id="t-title" placeholder="Что нужно сделать?">
+      <input id="t-due" placeholder="Дедлайн: завтра, пятница, 15.03 14:00">
+      <div class="hint">Можно оставить пустым</div>
+      <select id="t-client"><option value="">Без клиента</option></select>
+      <div class="actions">
+        <button class="btn" id="m-cancel">Отмена</button>
+        <button class="btn primary" id="m-save">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.ready(); tg.expand();
+    const INIT = tg.initData || "";
+    let currentTab = "tasks";
+    let currentStatus = "active";
+    let clientsCache = [];
+
+    const STATUS_LABEL = { open: "Открыта", in_progress: "В работе", done: "Готово" };
+
+    async function api(path, opts = {}) {
+      const res = await fetch("/api" + path, {
+        ...opts,
+        headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": INIT, ...(opts.headers || {}) },
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || res.status);
+      }
+      return res.json();
+    }
+
+    function fmtDue(iso) {
+      if (!iso) return "";
+      const d = new Date(iso), now = new Date();
+      const days = Math.floor((d - now) / 86400000);
+      const s = d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      if (d < now) return `<span class="due-overdue">⚠️ ${s}</span>`;
+      if (d.toDateString() === now.toDateString()) return `<span class="due-today">🔥 сегодня ${d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span>`;
+      return s;
+    }
+
+    function esc(s) { return (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+    async function renderTasks() {
+      const list = document.getElementById("list");
+      list.innerHTML = '<div class="loading">Загрузка…</div>';
+      try {
+        const { tasks } = await api("/tasks?status=" + currentStatus);
+        if (!tasks.length) { list.innerHTML = '<div class="empty">Задач нет 🎉<br>Нажми «+», чтобы добавить.</div>'; return; }
+        list.innerHTML = tasks.map(t => `
+          <div class="card">
+            <div class="top">
+              <div class="name">${esc(t.title)}</div>
+              <span class="badge ${t.status}">${STATUS_LABEL[t.status]}</span>
+            </div>
+            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+            <div class="meta">
+              ${t.due_at ? `<span>${fmtDue(t.due_at)}</span>` : ""}
+              ${t.client ? `<span class="badge">👥 ${esc(t.client)}</span>` : ""}
+            </div>
+            <div class="actions">
+              ${t.status !== "done" ? `<button class="btn" onclick="setStatus(${t.id}, 'in_progress')">🟡 В работу</button>
+                <button class="btn primary" onclick="setStatus(${t.id}, 'done')">✅ Готово</button>`
+                : `<button class="btn" onclick="setStatus(${t.id}, 'open')">↩️ Вернуть</button>`}
+              <button class="btn danger" onclick="delTask(${t.id})">🗑</button>
+            </div>
+          </div>`).join("");
+      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
+    }
+
+    async function renderClients() {
+      const list = document.getElementById("list");
+      list.innerHTML = '<div class="loading">Загрузка…</div>';
+      const PLAT = { direct: "Директ", google: "Google Ads", tg: "TG Ads", vk: "VK", avito: "Авито", site: "Сайт" };
+      try {
+        const { clients } = await api("/clients");
+        clientsCache = clients;
+        if (!clients.length) { list.innerHTML = '<div class="empty">Клиентов нет</div>'; return; }
+        list.innerHTML = clients.map(c => {
+          const plats = (c.platforms || "").split(",").filter(Boolean).map(p => PLAT[p] || p).join(", ");
+          return `<div class="card">
+            <div class="top"><div class="name">${c.status === "active" ? "🟢" : "⏸"} ${esc(c.name)}</div></div>
+            <div class="meta"><span>${plats || "—"}</span>${c.budget ? `<span class="badge">💰 ${esc(c.budget)}</span>` : ""}</div>
+          </div>`;
+        }).join("");
+      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
+    }
+
+    async function renderNotes() {
+      const list = document.getElementById("list");
+      list.innerHTML = '<div class="loading">Загрузка…</div>';
+      try {
+        const { notes } = await api("/notes");
+        if (!notes.length) { list.innerHTML = '<div class="empty">Заметок нет.<br>В чате боту: сообщение с «!» в начале.</div>'; return; }
+        list.innerHTML = notes.map(n => `<div class="card"><div>${esc(n.text)}</div>${n.tags ? `<div class="meta"><span class="badge">🏷 ${esc(n.tags)}</span></div>` : ""}</div>`).join("");
+      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
+    }
+
+    function render() {
+      document.getElementById("filters").style.display = currentTab === "tasks" ? "flex" : "none";
+      document.getElementById("fab").style.display = currentTab === "tasks" ? "block" : "none";
+      if (currentTab === "tasks") renderTasks();
+      else if (currentTab === "clients") renderClients();
+      else renderNotes();
+    }
+
+    window.setStatus = async (id, status) => { tg.HapticFeedback?.impactOccurred("light"); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
+    window.delTask = async (id) => { if (!confirm("Удалить задачу?")) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTasks(); };
+
+    document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active"); currentTab = tab.dataset.tab; render();
+    });
+    document.querySelectorAll(".chip").forEach(chip => chip.onclick = () => {
+      document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active"); currentStatus = chip.dataset.status; renderTasks();
+    });
+
+    // Модалка создания задачи
+    const modal = document.getElementById("modal");
+    document.getElementById("fab").onclick = async () => {
+      if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch {} }
+      const sel = document.getElementById("t-client");
+      sel.innerHTML = '<option value="">Без клиента</option>' + clientsCache.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+      document.getElementById("t-title").value = "";
+      document.getElementById("t-due").value = "";
+      modal.classList.add("show");
+    };
+    document.getElementById("m-cancel").onclick = () => modal.classList.remove("show");
+    document.getElementById("m-save").onclick = async () => {
+      const title = document.getElementById("t-title").value.trim();
+      if (!title) { tg.showAlert("Введи название задачи"); return; }
+      await api("/tasks", { method: "POST", body: JSON.stringify({
+        title, due: document.getElementById("t-due").value, client_id: document.getElementById("t-client").value || null,
+      }) });
+      modal.classList.remove("show"); renderTasks();
+    };
+
+    // Старт
+    (async () => {
+      try {
+        const me = await api("/me");
+        document.getElementById("subtitle").textContent = me.role === "owner" ? "Владелец" : (me.role === "member" ? "Команда" : "Клиент");
+      } catch (e) {
+        document.getElementById("subtitle").textContent = "Нет доступа";
+        document.getElementById("list").innerHTML = `<div class="empty">Нет доступа.<br>Открой приложение из своего бота и получи доступ у владельца.</div>`;
+        return;
+      }
+      const photo = tg.initDataUnsafe?.user?.photo_url;
+      if (photo) document.getElementById("avatar").src = photo;
+      render();
+    })();
+  </script>
+</body>
+</html>

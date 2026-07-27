@@ -30,6 +30,9 @@ class Config:
     db_path: str
     proxy_url: str | None
     telegram_api_url: str | None
+    web_host: str
+    web_port: int
+    webapp_url: str | None
 
     @property
     def ai_enabled(self) -> bool:
@@ -47,4 +50,8 @@ def load_config() -> Config:
         db_path=os.getenv("DB_PATH", "data/assistant.db"),
         proxy_url=os.getenv("PROXY_URL") or None,
         telegram_api_url=(os.getenv("TELEGRAM_API_URL") or "").rstrip("/") or None,
+        web_host=os.getenv("WEB_HOST", "0.0.0.0"),
+        # PaaS-платформы передают порт через PORT; иначе WEB_PORT, иначе 8080
+        web_port=int(os.getenv("PORT") or os.getenv("WEB_PORT") or "8080"),
+        webapp_url=(os.getenv("WEBAPP_URL") or "").rstrip("/") or None,
     )
