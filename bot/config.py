@@ -29,6 +29,7 @@ class Config:
     digest_hour: int
     db_path: str
     proxy_url: str | None
+    telegram_api_url: str | None
 
     @property
     def ai_enabled(self) -> bool:
@@ -45,4 +46,5 @@ def load_config() -> Config:
         digest_hour=int(os.getenv("DIGEST_HOUR", "9")),
         db_path=os.getenv("DB_PATH", "data/assistant.db"),
         proxy_url=os.getenv("PROXY_URL") or None,
+        telegram_api_url=(os.getenv("TELEGRAM_API_URL") or "").rstrip("/") or None,
     )

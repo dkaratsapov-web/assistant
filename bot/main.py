@@ -7,6 +7,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
@@ -51,10 +52,17 @@ async def main() -> None:
     if ai is None:
         logger.warning("ANTHROPIC_API_KEY не задан — ИИ-помощник отключён.")
 
-    # Прокси нужен, если хостинг режет доступ к Telegram (частая беда РФ-серверов)
-    session = AiohttpSession(proxy=config.proxy_url) if config.proxy_url else None
+    # Если хостинг режет доступ к Telegram (частая беда РФ-серверов), ходим в обход:
+    # - TELEGRAM_API_URL: свой адрес Telegram Bot API (например, прокси на Cloudflare Workers)
+    # - PROXY_URL: SOCKS5/HTTP прокси
+    session_kwargs: dict = {}
+    if config.telegram_api_url:
+        session_kwargs["api"] = TelegramAPIServer.from_base(config.telegram_api_url)
+        logger.info("Telegram API через: %s", config.telegram_api_url)
     if config.proxy_url:
-        logger.info("Использую прокси для Telegram: %s", config.proxy_url.split("@")[-1])
+        session_kwargs["proxy"] = config.proxy_url
+        logger.info("Telegram через прокси: %s", config.proxy_url.split("@")[-1])
+    session = AiohttpSession(**session_kwargs) if session_kwargs else None
 
     bot = Bot(
         token=config.bot_token,
