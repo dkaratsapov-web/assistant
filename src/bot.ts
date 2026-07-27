@@ -1,0 +1,713 @@
+import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
+import { askAI } from "./ai";
+import { DB } from "./db";
+import { buildClientsOverview, buildDigest } from "./reports";
+import {
+  Env,
+  PLATFORMS,
+  ROLE_CLIENT,
+  ROLE_MEMBER,
+  ROLE_OWNER,
+  ROLE_PENDING,
+  TASK_DONE,
+  TASK_IN_PROGRESS,
+  TASK_OPEN,
+  TASK_STATUS_LABELS,
+  User,
+} from "./types";
+import { escapeHtml, extractTags, formatDue, parseDue, platformsToText, tzOffsetOf } from "./utils";
+
+export type MyContext = Context & {
+  db: DB;
+  env: Env;
+  origin: string;
+  ownerId: number;
+  appUser: User | null;
+};
+
+// Кнопки главного меню (текст = триггер)
+const BTN_TASKS = "📋 Задачи";
+const BTN_ADD_TASK = "➕ Задача";
+const BTN_CLIENTS = "👥 Клиенты";
+const BTN_NOTES = "📝 Заметки";
+const BTN_AI = "🤖 ИИ-помощник";
+const BTN_DIGEST = "📊 Сводка";
+const BTN_HELP = "❓ Помощь";
+const BTN_APP = "📲 Приложение";
+
+const WELCOME =
+  "Привет! Я твой рабочий ассистент 🤝\n\n" +
+  "Помогаю держать под контролем задачи, дедлайны, клиентов и заметки, " +
+  "а ещё умею писать тексты объявлений и подкидывать идеи через ИИ.\n\n" +
+  "Пользуйся кнопками меню внизу. Полный список — /help.";
+
+const HELP_TEXT = `<b>Что я умею</b>
+
+<b>📋 Задачи и дедлайны</b>
+• «➕ Задача» или /addtask — добавить задачу (пошагово)
+• «📋 Задачи» или /tasks — список активных задач
+• «📲 Приложение» — доска задач в удобном интерфейсе
+
+<b>👥 Клиенты и проекты</b>
+• /addclient — новый клиент
+• /clients — список; /client &lt;номер&gt; — карточка
+
+<b>📝 Заметки и идеи</b>
+• Пришли текст с «!» в начале — сохраню как заметку
+• /notes — заметки; /findnote &lt;слово&gt; — поиск
+
+<b>🤖 ИИ-помощник</b>
+• «🤖 ИИ-помощник» — режим диалога; /ai &lt;запрос&gt; — быстрый вопрос
+
+<b>📊 Прочее</b>
+• «📊 Сводка» или /digest — задачи на сегодня; утренний дайджест приходит сам
+
+<b>Владелец:</b> /users, /kick &lt;ID&gt;
+
+<i>Дедлайн можно писать словами: «завтра», «пятница», «через 3 дня», «15.03 14:00».</i>`;
+
+function mainMenu(origin: string): Keyboard {
+  return new Keyboard()
+    .text(BTN_ADD_TASK).text(BTN_TASKS).row()
+    .text(BTN_CLIENTS).text(BTN_NOTES).row()
+    .text(BTN_AI).text(BTN_DIGEST).row()
+    .webApp(BTN_APP, origin).text(BTN_HELP).row()
+    .resized();
+}
+
+function taskActions(id: number, status: string): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (status !== TASK_DONE) {
+    if (status === TASK_OPEN) kb.text("🟡 В работу", `task:progress:${id}`);
+    kb.text("✅ Готово", `task:done:${id}`);
+  } else {
+    kb.text("↩️ Вернуть", `task:reopen:${id}`);
+  }
+  kb.text("🗑 Удалить", `task:del:${id}`);
+  return kb;
+}
+
+function platformsPicker(selected: string[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const entries = Object.entries(PLATFORMS);
+  entries.forEach(([key, label], i) => {
+    kb.text(`${selected.includes(key) ? "✅ " : ""}${label}`, `plat:toggle:${key}`);
+    if (i % 2 === 1) kb.row();
+  });
+  kb.row().text("Готово ▶️", "plat:done");
+  return kb;
+}
+
+function clientActions(id: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("📋 Задачи клиента", `client:tasks:${id}`).row()
+    .text("⏸ Пауза/актив", `client:togglestatus:${id}`)
+    .text("🗑 Удалить", `client:del:${id}`);
+}
+
+function pendingActions(uid: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ В команду", `access:member:${uid}`)
+    .text("👤 Как клиента", `access:client:${uid}`).row()
+    .text("🚫 Отклонить", `access:reject:${uid}`);
+}
+
+function taskLine(t: { id: number; title: string; description: string; status: string; due_at: string | null }, clientName: string | null, tzOffset: number): string {
+  const status = TASK_STATUS_LABELS[t.status] ?? t.status;
+  const due = formatDue(t.due_at, tzOffset);
+  const meta = [status];
+  if (due) meta.push(due);
+  if (clientName) meta.push(`👥 ${escapeHtml(clientName)}`);
+  let s = `<b>#${t.id}</b> ${escapeHtml(t.title)}\n${meta.join(" · ")}`;
+  if (t.description) s += `\n<i>${escapeHtml(t.description)}</i>`;
+  return s;
+}
+
+function userDisplay(u: User): string {
+  const name = u.full_name || "Без имени";
+  return `${name}${u.username ? ` (@${u.username})` : ""}`;
+}
+
+const HTML = { parse_mode: "HTML" as const };
+
+export function createBot(env: Env, origin: string): Bot<MyContext> {
+  // botInfo задаём вручную (id берём из токена), чтобы grammy не звал getMe
+  // на каждый webhook — на serverless это лишний сетевой вызов.
+  const botId = Number(env.BOT_TOKEN.split(":")[0]) || 0;
+  const botInfo = {
+    id: botId,
+    is_bot: true as const,
+    first_name: "Assistant",
+    username: "assistant_bot",
+    can_join_groups: false,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+    can_connect_to_business: false,
+    has_main_web_app: false,
+    has_topics_enabled: false,
+    allows_users_to_create_topics: false,
+    can_manage_bots: false,
+    supports_join_request_queries: false,
+  };
+  const bot = new Bot<MyContext>(env.BOT_TOKEN, { botInfo });
+  const db = new DB(env.DB);
+  const ownerId = parseInt(env.OWNER_ID, 10);
+  const tz = tzOffsetOf(env);
+
+  // --- Контекст + контроль доступа ---
+  bot.use(async (ctx, next) => {
+    ctx.db = db;
+    ctx.env = env;
+    ctx.origin = origin;
+    ctx.ownerId = ownerId;
+    const from = ctx.from;
+    if (!from) {
+      ctx.appUser = null;
+      return;
+    }
+
+    if (from.id === ownerId) await db.ensureOwner(ownerId);
+    let user = await db.getUser(from.id);
+    ctx.appUser = user;
+
+    if (user) {
+      const fn = [from.first_name, from.last_name].filter(Boolean).join(" ") || null;
+      if (user.username !== (from.username ?? null) || user.full_name !== fn) {
+        await db.updateProfile(from.id, from.username ?? null, fn);
+      }
+    }
+
+    const isKnown = user && user.role !== ROLE_PENDING;
+    const text = ctx.message?.text ?? "";
+    const isStart = text.startsWith("/start");
+
+    if (isKnown || isStart) return next();
+
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true });
+      return;
+    }
+    if (user && user.role === ROLE_PENDING) {
+      await ctx.reply("⏳ Заявка на доступ отправлена. Ждём подтверждения владельца.");
+    } else {
+      await ctx.reply("Нет доступа. Нажми /start, чтобы отправить заявку владельцу бота.");
+    }
+  });
+
+  // --- /start и доступ ---
+  bot.command("start", async (ctx) => {
+    const from = ctx.from!;
+    if (from.id === ownerId) {
+      await ctx.reply(WELCOME, { reply_markup: mainMenu(origin) });
+      return;
+    }
+    const user = ctx.appUser;
+    if (user && user.role !== ROLE_PENDING) {
+      await ctx.reply(WELCOME, { reply_markup: mainMenu(origin) });
+      return;
+    }
+    if (user && user.role === ROLE_PENDING) {
+      await ctx.reply("⏳ Заявка уже отправлена. Ждём подтверждения владельца.");
+      return;
+    }
+    const fn = [from.first_name, from.last_name].filter(Boolean).join(" ") || null;
+    await db.requestAccess(from.id, from.username ?? null, fn);
+    await ctx.reply("Заявка на доступ отправлена владельцу бота. Как подтвердит — я напишу 👌");
+    const disp = `${from.first_name}${from.username ? ` (@${from.username})` : ""}`;
+    try {
+      await ctx.api.sendMessage(ownerId, `🔔 Новая заявка на доступ:\n${disp}\nID: <code>${from.id}</code>`, {
+        ...HTML,
+        reply_markup: pendingActions(from.id),
+      });
+    } catch {}
+  });
+
+  bot.callbackQuery(/^access:(member|client|reject):(\d+)$/, async (ctx) => {
+    if (ctx.from!.id !== ownerId) {
+      await ctx.answerCallbackQuery({ text: "Только владелец управляет доступом.", show_alert: true });
+      return;
+    }
+    const action = ctx.match![1];
+    const uid = parseInt(ctx.match![2], 10);
+    const target = await db.getUser(uid);
+    if (!target) {
+      await ctx.answerCallbackQuery({ text: "Пользователь не найден.", show_alert: true });
+      await ctx.editMessageReplyMarkup();
+      return;
+    }
+    let note: string;
+    let notify: string | null;
+    if (action === "member") {
+      await db.setRole(uid, ROLE_MEMBER);
+      note = "Добавлен в команду ✅";
+      notify = "✅ Доступ выдан! Тебя добавили в команду. Нажми /start.";
+    } else if (action === "client") {
+      await db.setRole(uid, ROLE_CLIENT);
+      note = "Добавлен как клиент 👤";
+      notify = "✅ Доступ выдан (роль: клиент). Нажми /start.";
+    } else {
+      await db.deleteUser(uid);
+      note = "Заявка отклонена 🚫";
+      notify = null;
+    }
+    await ctx.editMessageText(`${ctx.callbackQuery.message?.text ?? ""}\n\n→ ${note}`);
+    if (notify) {
+      try {
+        await ctx.api.sendMessage(uid, notify, { reply_markup: mainMenu(origin) });
+      } catch {}
+    }
+    await ctx.answerCallbackQuery({ text: note });
+  });
+
+  // --- Помощь / меню / приложение ---
+  bot.command("help", async (ctx) => ctx.reply(HELP_TEXT, HTML));
+  bot.command("menu", async (ctx) => ctx.reply("Меню внизу 👇", { reply_markup: mainMenu(origin) }));
+  bot.command("app", async (ctx) => {
+    await ctx.reply("Открой доску задач в удобном интерфейсе:", {
+      reply_markup: new InlineKeyboard().webApp("📲 Открыть приложение", origin),
+    });
+  });
+
+  // --- Задачи ---
+  bot.command(["addtask"], async (ctx) => startAddTask(ctx));
+  bot.command("tasks", async (ctx) => listTasks(ctx));
+  bot.command("digest", async (ctx) => {
+    const text = await buildDigest(db, ctx.from!.id, ctx.appUser!.role, tz);
+    await ctx.reply(text);
+  });
+
+  // --- Клиенты ---
+  bot.command("clients", async (ctx) => {
+    const text = await buildClientsOverview(db);
+    await ctx.reply(text + "\n\nДобавить: /addclient");
+  });
+  bot.command("client", async (ctx) => {
+    const id = parseInt(ctx.match.trim(), 10);
+    if (!id) {
+      await ctx.reply("Использование: /client <номер>. Список — /clients");
+      return;
+    }
+    const c = await db.getClient(id);
+    if (!c) {
+      await ctx.reply("Клиент не найден.");
+      return;
+    }
+    await ctx.reply(clientCard(c), { ...HTML, reply_markup: clientActions(c.id) });
+  });
+  bot.command("addclient", async (ctx) => {
+    if (!ctx.appUser || ctx.appUser.role === ROLE_CLIENT) {
+      await ctx.reply("Добавлять клиентов может только команда.");
+      return;
+    }
+    await db.setState(ctx.from!.id, { step: "addclient_name" });
+    await ctx.reply("Название клиента / проекта? («отмена» — прервать)");
+  });
+
+  // --- Заметки ---
+  bot.command("notes", async (ctx) => {
+    const notes = await db.listNotes(ctx.from!.id);
+    if (!notes.length) {
+      await ctx.reply(
+        "Заметок пока нет.\nСовет: пришли сообщение, начав с «!» — сохраню как заметку.\nНапример: <code>!идея: тест креативов для VK</code>",
+        HTML
+      );
+      return;
+    }
+    const lines = ["📝 Последние заметки:\n"];
+    for (const n of notes) lines.push(`#${n.id} · ${escapeHtml(n.text)}${n.tags ? `  🏷 ${n.tags}` : ""}`);
+    lines.push("\nУдалить: /delnote <номер>   Поиск: /findnote <слово>");
+    await ctx.reply(lines.join("\n"), HTML);
+  });
+  bot.command("findnote", async (ctx) => {
+    const q = ctx.match.trim();
+    if (!q) {
+      await ctx.reply("Использование: /findnote <слово>");
+      return;
+    }
+    const notes = await db.searchNotes(ctx.from!.id, q);
+    if (!notes.length) {
+      await ctx.reply(`По запросу «${q}» ничего не нашёл.`);
+      return;
+    }
+    const lines = [`🔍 Найдено (${notes.length}):\n`];
+    for (const n of notes) lines.push(`#${n.id} · ${escapeHtml(n.text)}`);
+    await ctx.reply(lines.join("\n"), HTML);
+  });
+  bot.command("delnote", async (ctx) => {
+    const id = parseInt(ctx.match.trim(), 10);
+    if (!id) {
+      await ctx.reply("Использование: /delnote <номер>");
+      return;
+    }
+    await db.deleteNote(id, ctx.from!.id);
+    await ctx.reply("🗑 Заметка удалена (если была твоей).");
+  });
+  bot.command("note", async (ctx) => {
+    const payload = ctx.match.trim();
+    if (payload) {
+      const id = await db.addNote(ctx.from!.id, payload, extractTags(payload));
+      await ctx.reply("📝 Сохранил.", { reply_markup: new InlineKeyboard().text("🗑 Удалить заметку", `note:del:${id}`) });
+      return;
+    }
+    await db.setState(ctx.from!.id, { step: "note_text" });
+    await ctx.reply("Напиши заметку одним сообщением. (можно с #тегами)");
+  });
+
+  // --- ИИ ---
+  bot.command("ai", async (ctx) => {
+    const prompt = ctx.match.trim();
+    if (!prompt) {
+      await ctx.reply("Использование: /ai <запрос>\nПример: /ai напиши объявление для Авито: ремонт ноутбуков");
+      return;
+    }
+    await replyAI(ctx, prompt);
+  });
+  bot.command("stop", async (ctx) => {
+    await db.clearState(ctx.from!.id);
+    await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
+  });
+
+  // --- Владелец: пользователи ---
+  bot.command("users", async (ctx) => {
+    if (ctx.appUser?.role !== ROLE_OWNER) {
+      await ctx.reply("Команда доступна только владельцу.");
+      return;
+    }
+    const [members, clients, pending] = [
+      await db.listUsers(ROLE_MEMBER),
+      await db.listUsers(ROLE_CLIENT),
+      await db.listUsers(ROLE_PENDING),
+    ];
+    const lines = ["👥 Пользователи\n", "Владелец: ты"];
+    if (members.length) {
+      lines.push("\n🧑‍💼 Команда:");
+      members.forEach((u) => lines.push(`  ${userDisplay(u)} — /kick ${u.user_id}`));
+    }
+    if (clients.length) {
+      lines.push("\n👤 Клиенты:");
+      clients.forEach((u) => lines.push(`  ${userDisplay(u)} — /kick ${u.user_id}`));
+    }
+    if (pending.length) {
+      lines.push("\n⏳ Ожидают:");
+      pending.forEach((u) => lines.push(`  ${userDisplay(u)} — ID ${u.user_id}`));
+    }
+    if (!members.length && !clients.length && !pending.length) {
+      lines.push("\nПока только ты. Дай доступ команде — пусть напишут боту /start.");
+    }
+    await ctx.reply(lines.join("\n"));
+  });
+  bot.command("kick", async (ctx) => {
+    if (ctx.appUser?.role !== ROLE_OWNER) {
+      await ctx.reply("Команда доступна только владельцу.");
+      return;
+    }
+    const uid = parseInt(ctx.match.trim(), 10);
+    if (!uid) {
+      await ctx.reply("Использование: /kick <ID пользователя>");
+      return;
+    }
+    if (uid === ownerId) {
+      await ctx.reply("Нельзя удалить владельца.");
+      return;
+    }
+    await db.deleteUser(uid);
+    await ctx.reply(`Пользователь ${uid} удалён из доступа.`);
+  });
+
+  // --- Callback-и задач ---
+  bot.callbackQuery(/^task:(done|progress|reopen|del):(\d+)$/, async (ctx) => {
+    const action = ctx.match![1];
+    const id = parseInt(ctx.match![2], 10);
+    const task = await db.getTask(id);
+    if (!task) {
+      await ctx.answerCallbackQuery({ text: "Задача не найдена.", show_alert: true });
+      await ctx.editMessageReplyMarkup();
+      return;
+    }
+    if (action === "del") {
+      await db.deleteTask(id);
+      await ctx.editMessageText(`🗑 Задача #${id} удалена.`);
+      await ctx.answerCallbackQuery({ text: "Удалено" });
+      return;
+    }
+    const map: Record<string, string> = { done: TASK_DONE, progress: TASK_IN_PROGRESS, reopen: TASK_OPEN };
+    await db.setTaskStatus(id, map[action]);
+    const updated = (await db.getTask(id))!;
+    const client = updated.client_id ? await db.getClient(updated.client_id) : null;
+    await ctx.editMessageText(taskLine(updated, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(id, updated.status) });
+    await ctx.answerCallbackQuery({ text: action === "done" ? "Готово ✅" : "Обновлено" });
+  });
+
+  // Привязка задачи к клиенту (шаг создания)
+  bot.callbackQuery(/^taskclient:(none|\d+)$/, async (ctx) => {
+    const state = await db.getState(ctx.from!.id);
+    if (state.step !== "addtask_client") {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const draft = (state.draft ?? {}) as { title: string; due: string | null };
+    const clientId = ctx.match![1] === "none" ? null : parseInt(ctx.match![1], 10);
+    const taskId = await db.addTask({
+      title: draft.title,
+      creatorId: ctx.from!.id,
+      assigneeId: ctx.from!.id,
+      clientId,
+      dueAt: draft.due,
+    });
+    await db.clearState(ctx.from!.id);
+    const dueTxt = formatDue(draft.due, tz);
+    let suffix = dueTxt ? `\nДедлайн: ${dueTxt}` : "";
+    if (clientId) {
+      const c = await db.getClient(clientId);
+      if (c) suffix += `\nКлиент: ${c.name}`;
+    }
+    await ctx.editMessageText(`✅ Задача #${taskId} создана: ${escapeHtml(draft.title)}${suffix}`);
+    await ctx.answerCallbackQuery({ text: "Готово" });
+  });
+
+  // --- Callback-и клиентов ---
+  bot.callbackQuery(/^plat:(toggle|done):?(\w+)?$/, async (ctx) => {
+    const state = await db.getState(ctx.from!.id);
+    if (state.step !== "addclient_platforms") {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const draft = (state.draft ?? { name: "", platforms: [] }) as { name: string; platforms: string[] };
+    if (ctx.match![1] === "toggle") {
+      const key = ctx.match![2]!;
+      draft.platforms = draft.platforms.includes(key)
+        ? draft.platforms.filter((p) => p !== key)
+        : [...draft.platforms, key];
+      await db.setState(ctx.from!.id, { step: "addclient_platforms", draft });
+      await ctx.editMessageReplyMarkup({ reply_markup: platformsPicker(draft.platforms) });
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    // done
+    await db.setState(ctx.from!.id, { step: "addclient_budget", draft });
+    await ctx.editMessageText(`Площадки: ${platformsToText(draft.platforms.join(","))}`);
+    await ctx.reply("Месячный бюджет? (например «50 000 ₽» или «-»)");
+    await ctx.answerCallbackQuery();
+  });
+
+  bot.callbackQuery(/^client:(tasks|togglestatus|del|delconfirm|delcancel):(\d+)$/, async (ctx) => {
+    const action = ctx.match![1];
+    const id = parseInt(ctx.match![2], 10);
+    const c = await db.getClient(id);
+    if (!c) {
+      await ctx.answerCallbackQuery({ text: "Клиент не найден.", show_alert: true });
+      return;
+    }
+    if (action === "tasks") {
+      const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], clientId: id });
+      if (!tasks.length) await ctx.reply(`У «${c.name}» нет активных задач.`);
+      else {
+        const lines = [`📋 Задачи «${c.name}»:\n`];
+        for (const t of tasks) {
+          const due = formatDue(t.due_at, tz);
+          lines.push(`  #${t.id} ${t.title}${due ? ` — ${due}` : ""}`);
+        }
+        await ctx.reply(lines.join("\n"));
+      }
+    } else if (action === "togglestatus") {
+      await db.updateClientStatus(id, c.status === "active" ? "paused" : "active");
+      const updated = (await db.getClient(id))!;
+      await ctx.editMessageText(clientCard(updated), { ...HTML, reply_markup: clientActions(id) });
+    } else if (action === "del") {
+      await ctx.editMessageText(`Удалить клиента «${c.name}»? Задачи останутся, но отвяжутся.`, {
+        reply_markup: new InlineKeyboard().text("✅ Да, удалить", `client:delconfirm:${id}`).text("Отмена", `client:delcancel:${id}`),
+      });
+    } else if (action === "delconfirm") {
+      await db.deleteClient(id);
+      await ctx.editMessageText(`🗑 Клиент «${c.name}» удалён.`);
+    } else if (action === "delcancel") {
+      await ctx.editMessageText(clientCard(c), { ...HTML, reply_markup: clientActions(id) });
+    }
+    await ctx.answerCallbackQuery();
+  });
+
+  // --- Callback удаления заметки ---
+  bot.callbackQuery(/^note:del:(\d+)$/, async (ctx) => {
+    await db.deleteNote(parseInt(ctx.match![1], 10), ctx.from!.id);
+    await ctx.editMessageText("🗑 Заметка удалена.");
+    await ctx.answerCallbackQuery({ text: "Удалено" });
+  });
+
+  // --- Свободный текст: шаги FSM, заметки, кнопки меню, ИИ ---
+  bot.on("message:text", async (ctx) => {
+    const text = ctx.message.text;
+    const state = await db.getState(ctx.from!.id);
+    const step = state.step as string | undefined;
+
+    if (step) return handleStep(ctx, step, state, text);
+
+    if (text.startsWith("!")) {
+      const body = text.slice(1).trim();
+      if (!body) {
+        await ctx.reply("Пустая заметка. Напиши текст после «!».");
+        return;
+      }
+      const id = await db.addNote(ctx.from!.id, body, extractTags(body));
+      await ctx.reply("📝 Сохранил заметку.", { reply_markup: new InlineKeyboard().text("🗑 Удалить заметку", `note:del:${id}`) });
+      return;
+    }
+
+    switch (text) {
+      case BTN_ADD_TASK: return startAddTask(ctx);
+      case BTN_TASKS: return listTasks(ctx);
+      case BTN_CLIENTS: {
+        const t = await buildClientsOverview(db);
+        await ctx.reply(t + "\n\nДобавить: /addclient");
+        return;
+      }
+      case BTN_NOTES: return ctx.reply("Заметки: /notes\nБыстро сохранить — пришли текст с «!» в начале.");
+      case BTN_DIGEST: {
+        const t = await buildDigest(db, ctx.from!.id, ctx.appUser!.role, tz);
+        await ctx.reply(t);
+        return;
+      }
+      case BTN_HELP: return ctx.reply(HELP_TEXT, HTML);
+      case BTN_AI: {
+        if (!env.ANTHROPIC_API_KEY) {
+          await ctx.reply("ИИ-помощник не настроен. Добавь ключ ANTHROPIC_API_KEY, чтобы включить.");
+          return;
+        }
+        await db.setState(ctx.from!.id, { step: "ai_mode" });
+        await ctx.reply(
+          "🤖 Режим ИИ включён.\nСпрашивай что угодно по маркетингу — напишу объявления, офферы, идеи.\nВыйти — «стоп» или /stop."
+        );
+        return;
+      }
+      default:
+        await ctx.reply("Не понял. Открой меню кнопками или /help.");
+    }
+  });
+
+  // ===== Вспомогательные обработчики шагов =====
+
+  async function startAddTask(ctx: MyContext) {
+    await db.setState(ctx.from!.id, { step: "addtask_title" });
+    await ctx.reply("Что нужно сделать? Напиши название задачи.\n(«отмена» — прервать)");
+  }
+
+  async function listTasks(ctx: MyContext) {
+    const role = ctx.appUser!.role;
+    const assignee = role === ROLE_OWNER ? null : ctx.from!.id;
+    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: assignee });
+    if (!tasks.length) {
+      await ctx.reply("Активных задач нет. Добавь через «➕ Задача» или открой «📲 Приложение».");
+      return;
+    }
+    await ctx.reply(`📋 Активные задачи: ${tasks.length}`);
+    for (const t of tasks.slice(0, 12)) {
+      const client = t.client_id ? await db.getClient(t.client_id) : null;
+      await ctx.reply(taskLine(t, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(t.id, t.status) });
+    }
+    if (tasks.length > 12) await ctx.reply(`…и ещё ${tasks.length - 12}. Полный список — в приложении «📲».`);
+  }
+
+  async function replyAI(ctx: MyContext, prompt: string) {
+    if (!env.ANTHROPIC_API_KEY) {
+      await ctx.reply("ИИ-помощник не настроен. Добавь ключ ANTHROPIC_API_KEY, чтобы включить.");
+      return;
+    }
+    const thinking = await ctx.reply("💭 Думаю…");
+    const answer = await askAI(env.ANTHROPIC_API_KEY, env.ANTHROPIC_MODEL ?? "claude-opus-4-8", prompt);
+    try {
+      await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id);
+    } catch {}
+    for (const chunk of splitText(answer)) await ctx.reply(chunk);
+  }
+
+  async function handleStep(ctx: MyContext, step: string, state: Record<string, unknown>, text: string) {
+    const low = text.toLowerCase();
+    if (low === "отмена" && step !== "ai_mode") {
+      await db.clearState(ctx.from!.id);
+      await ctx.reply("Отменил.");
+      return;
+    }
+
+    if (step === "addtask_title") {
+      await db.setState(ctx.from!.id, { step: "addtask_deadline", draft: { title: text.trim() } });
+      await ctx.reply("Когда дедлайн?\nСловами: «завтра», «пятница», «через 3 дня», «15.03 14:00». Или «-» без дедлайна.");
+      return;
+    }
+    if (step === "addtask_deadline") {
+      const due = parseDue(text, tz);
+      if (due === null && !["-", "нет", "без"].includes(low.trim())) {
+        await ctx.reply("Не понял дату. Попробуй «завтра», «15.03», «через 2 дня» или «-» без дедлайна.");
+        return;
+      }
+      const draft = { ...(state.draft as object), due };
+      await db.setState(ctx.from!.id, { step: "addtask_client", draft });
+      const clients = await db.listClients();
+      const kb = new InlineKeyboard().text("Без клиента", "taskclient:none").row();
+      clients.filter((c) => c.status === "active").slice(0, 20).forEach((c) => kb.text(c.name, `taskclient:${c.id}`).row());
+      await ctx.reply("Привязать к клиенту?", { reply_markup: kb });
+      return;
+    }
+    if (step === "addclient_name") {
+      await db.setState(ctx.from!.id, { step: "addclient_platforms", draft: { name: text.trim(), platforms: [] } });
+      await ctx.reply("Какие площадки ведём? Отметь нужные и нажми «Готово».", { reply_markup: platformsPicker([]) });
+      return;
+    }
+    if (step === "addclient_budget") {
+      const draft = state.draft as { name: string; platforms: string[] };
+      const budget = ["-", "нет"].includes(low.trim()) ? "" : text.trim();
+      await db.setState(ctx.from!.id, { step: "addclient_contact", draft: { ...draft, budget } });
+      await ctx.reply("Контакт клиента? (телефон/@ник/email или «-»)");
+      return;
+    }
+    if (step === "addclient_contact") {
+      const draft = state.draft as { name: string; platforms: string[]; budget: string };
+      const contact = ["-", "нет"].includes(low.trim()) ? "" : text.trim();
+      const id = await db.addClient(draft.name, [...draft.platforms].sort().join(","), draft.budget ?? "", contact);
+      await db.clearState(ctx.from!.id);
+      const c = (await db.getClient(id))!;
+      await ctx.reply("✅ Клиент добавлен:\n\n" + clientCard(c), HTML);
+      return;
+    }
+    if (step === "note_text") {
+      await db.clearState(ctx.from!.id);
+      const id = await db.addNote(ctx.from!.id, text.trim(), extractTags(text));
+      await ctx.reply("📝 Сохранил.", { reply_markup: new InlineKeyboard().text("🗑 Удалить заметку", `note:del:${id}`) });
+      return;
+    }
+    if (step === "ai_mode") {
+      if (["стоп", "stop", "выход", "отмена"].includes(low)) {
+        await db.clearState(ctx.from!.id);
+        await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
+        return;
+      }
+      await replyAI(ctx, text);
+      return;
+    }
+  }
+
+  function clientCard(c: { id: number; name: string; status: string; platforms: string; budget: string; contact: string; notes: string }): string {
+    const status = c.status === "active" ? "🟢 активен" : "⏸ на паузе";
+    const lines = [`<b>#${c.id} ${escapeHtml(c.name)}</b>`, `Статус: ${status}`, `Площадки: ${platformsToText(c.platforms)}`];
+    if (c.budget) lines.push(`Бюджет: ${escapeHtml(c.budget)}`);
+    if (c.contact) lines.push(`Контакт: ${escapeHtml(c.contact)}`);
+    if (c.notes) lines.push(`Заметки: ${escapeHtml(c.notes)}`);
+    return lines.join("\n");
+  }
+
+  bot.catch((err) => console.error("Bot error:", err));
+  return bot;
+}
+
+function splitText(text: string, limit = 4000): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    if (current.length + line.length + 1 > limit) {
+      chunks.push(current);
+      current = "";
+    }
+    current += line + "\n";
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}

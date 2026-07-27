@@ -1,0 +1,24 @@
+name = "assistant-bot"
+main = "src/index.ts"
+compatibility_date = "2024-11-27"
+compatibility_flags = ["nodejs_compat"]
+
+# Статика Mini App (интерфейс) — отдаётся с этого же воркера
+assets = { directory = "./public", binding = "ASSETS" }
+
+# База данных D1 (SQLite). ID подставится после `wrangler d1 create assistant-db`
+# или создастся автоматически при первом деплое через дашборд.
+[[d1_databases]]
+binding = "DB"
+database_name = "assistant-db"
+database_id = "PLACEHOLDER_DB_ID"
+
+# Фоновые задачи: напоминания (каждые 5 минут) и утренний дайджест (ежечасная проверка)
+[triggers]
+crons = ["*/5 * * * *", "0 * * * *"]
+
+[vars]
+# Несекретные настройки. OWNER_ID и BOT_TOKEN задаются как секреты (см. README).
+ANTHROPIC_MODEL = "claude-opus-4-8"
+TZ_OFFSET = "3"       # смещение часового пояса от UTC (Москва = 3)
+DIGEST_HOUR = "9"     # час утреннего дайджеста по местному времени

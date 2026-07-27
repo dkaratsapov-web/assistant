@@ -1,49 +1,22 @@
 name: CI
 
-# Проверяет на каждый push, что код компилируется, зависимости ставятся,
-# а Docker-образ собирается — то есть деплой не сломается.
+# Проверяет на каждый push, что воркер собирается и типы в порядке.
 on:
   push:
     branches: ["**"]
   pull_request:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Compile check
-        run: python -m py_compile bot/*.py bot/handlers/*.py
-      - name: Smoke test (web app + auth)
-        env:
-          BOT_TOKEN: "123:FAKE"
-          OWNER_ID: "111"
-        run: |
-          python - <<'PY'
-          import asyncio, tempfile
-          from bot.config import load_config
-          from bot.db import Database
-          from bot.web import build_web_app, validate_init_data
-          assert validate_init_data("", "123:FAKE") is None
-
-          async def main():
-              cfg = load_config()
-              db = Database(tempfile.mktemp(suffix=".db"))
-              await db.connect(); await db.ensure_owner(111)
-              build_web_app(db, cfg)
-              await db.close()
-          asyncio.run(main())
-          print("CI smoke test OK")
-          PY
-
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t assistant-bot .
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build (wrangler dry-run)
+        run: npx wrangler deploy --dry-run --outdir=dist

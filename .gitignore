@@ -1,26 +1,27 @@
-# Секреты и окружение
+# Секреты
 .env
+.dev.vars
 *.env
 !.env.example
+!.dev.vars.example
 
-# База данных
+# Node / Cloudflare
+node_modules/
+dist/
+.wrangler/
+*.log
+
+# Локальная база (Python-версия)
 *.db
 *.sqlite
 *.sqlite3
-data/
+legacy-python/data/
 
-# Python
+# Python (legacy)
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
 venv/
-env/
-.Python
-
-# Логи
-*.log
-logs/
 
 # IDE / ОС
 .vscode/

@@ -1,0 +1,9 @@
+# Локальные секреты для `wrangler dev` (скопируй в .dev.vars, НЕ коммить).
+# В проде эти значения задаются как Secrets в панели Cloudflare.
+
+BOT_TOKEN=123456:ABC-DEF...
+OWNER_ID=123456789
+# Любая длинная случайная строка — защищает webhook (придумай сам)
+WEBHOOK_SECRET=change-me-to-a-long-random-string
+# Ключ Claude (необязательно; без него ИИ выключен)
+ANTHROPIC_API_KEY=
