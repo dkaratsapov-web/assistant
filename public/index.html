@@ -2,246 +2,413 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Ассистент</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Sara — ассистент</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root {
-      --bg: var(--tg-theme-bg-color, #17212b);
-      --secondary-bg: var(--tg-theme-secondary-bg-color, #232e3c);
-      --text: var(--tg-theme-text-color, #ffffff);
-      --hint: var(--tg-theme-hint-color, #8794a1);
-      --link: var(--tg-theme-link-color, #64baf0);
-      --button: var(--tg-theme-button-color, #3390ec);
-      --button-text: var(--tg-theme-button-text-color, #ffffff);
+      --bg: var(--tg-theme-bg-color, #0e1621);
+      --surface: var(--tg-theme-secondary-bg-color, #182533);
+      --surface-2: rgba(255,255,255,.04);
+      --text: var(--tg-theme-text-color, #f5f7fa);
+      --hint: var(--tg-theme-hint-color, #8fa0b3);
+      --border: rgba(255,255,255,.08);
+      --brand-1: #6d5efc;
+      --brand-2: #9b6dff;
+      --accent: #ff7a9c;
+      --ok: #37d39b;
+      --warn: #ffcf5c;
+      --danger: #ff6b6b;
+      --radius: 18px;
+      --shadow: 0 8px 24px rgba(0,0,0,.28);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: var(--tg-theme-bg-color, #eef1f6);
+        --surface: var(--tg-theme-bg-color, #ffffff);
+        --surface-2: rgba(0,0,0,.03);
+        --text: var(--tg-theme-text-color, #0e1621);
+        --hint: var(--tg-theme-hint-color, #6b7787);
+        --border: rgba(0,0,0,.08);
+        --shadow: 0 8px 24px rgba(20,30,60,.10);
+      }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg); color: var(--text); font-size: 15px;
-      padding-bottom: 90px;
+      background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45;
+      padding-bottom: calc(76px + env(safe-area-inset-bottom));
+      overflow-x: hidden;
     }
-    header { padding: 16px; display: flex; align-items: center; gap: 12px; }
-    header img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: var(--secondary-bg); }
-    header .title { font-weight: 600; font-size: 17px; }
-    header .subtitle { color: var(--hint); font-size: 12px; }
+    .wrap { max-width: 620px; margin: 0 auto; padding: 0 14px; }
 
-    .tabs { display: flex; padding: 0 12px; gap: 8px; position: sticky; top: 0; background: var(--bg); z-index: 10; padding-bottom: 8px; }
-    .tab { flex: 1; padding: 8px; text-align: center; border-radius: 10px; background: var(--secondary-bg); color: var(--hint); font-weight: 500; cursor: pointer; font-size: 14px; }
-    .tab.active { background: var(--button); color: var(--button-text); }
+    header {
+      position: relative; padding: 18px 14px 16px;
+      background: linear-gradient(160deg, rgba(109,94,252,.20), rgba(155,109,255,.06) 60%, transparent);
+    }
+    .hrow { display: flex; align-items: center; gap: 12px; max-width: 620px; margin: 0 auto; }
+    .avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex: none;
+      border: 2px solid rgba(255,255,255,.25); box-shadow: var(--shadow); background: var(--surface); }
+    .hello { flex: 1; min-width: 0; }
+    .hello .h1 { font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
+    .hello .sub { color: var(--hint); font-size: 13px; margin-top: 2px; }
+    .badge-role { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+      color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); }
 
-    .filters { display: flex; gap: 8px; padding: 12px 16px 4px; }
-    .chip { padding: 5px 12px; border-radius: 14px; background: var(--secondary-bg); color: var(--hint); font-size: 13px; cursor: pointer; }
-    .chip.active { background: var(--link); color: #fff; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--hint); text-transform: uppercase;
+      letter-spacing: .6px; margin: 18px 2px 10px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
 
-    .list { padding: 8px 12px; }
-    .card { background: var(--secondary-bg); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
-    .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .card .name { font-weight: 600; flex: 1; }
-    .card .meta { color: var(--hint); font-size: 13px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; }
-    .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,.08); }
-    .badge.open { color: #64baf0; } .badge.in_progress { color: #f5c518; } .badge.done { color: #6ece6e; }
-    .due-overdue { color: #ff6b6b; } .due-today { color: #f5c518; }
-    .desc { color: var(--hint); font-size: 13px; margin-top: 6px; }
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+    .tile { border-radius: var(--radius); padding: 14px; color: #fff; box-shadow: var(--shadow); cursor: pointer; }
+    .tile .n { font-size: 26px; font-weight: 800; line-height: 1; }
+    .tile .l { font-size: 12.5px; opacity: .9; margin-top: 6px; }
+    .tile.work { background: linear-gradient(135deg, #6d5efc, #9b6dff); }
+    .tile.personal { background: linear-gradient(135deg, #ff7a9c, #ff9f6d); }
+
+    .agenda-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .agenda-item:last-child { border-bottom: 0; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--brand-2); }
+    .dot.over { background: var(--danger); } .dot.today { background: var(--warn); } .dot.ev { background: var(--brand-1); } .dot.bd { background: var(--accent); }
+    .agenda-item .t { flex: 1; min-width: 0; }
+    .agenda-item .t .m { font-size: 12.5px; color: var(--hint); margin-top: 2px; }
+
+    .seg { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 4px; gap: 4px; margin: 4px 0 12px; }
+    .seg div { flex: 1; text-align: center; padding: 9px; border-radius: 11px; font-weight: 600; font-size: 14px; color: var(--hint); cursor: pointer; transition: all .15s; }
+    .seg div.on { color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); box-shadow: var(--shadow); }
+    .chips { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .chip { padding: 6px 13px; border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border); color: var(--hint); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .chip.on { color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); border-color: transparent; }
+
+    .task { position: relative; padding-left: 16px; }
+    .task::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 4px; border-radius: 4px; background: var(--brand-2); }
+    .task.p1::before { background: var(--accent); }
+    .task.done { opacity: .6; }
+    .task .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+    .task .name { font-weight: 600; flex: 1; }
+    .task .name.done { text-decoration: line-through; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+    .pill { font-size: 11.5px; padding: 3px 9px; border-radius: 10px; background: var(--surface-2); color: var(--hint); border: 1px solid var(--border); }
+    .pill.due-over { color: var(--danger); border-color: rgba(255,107,107,.3); }
+    .pill.due-today { color: #6b5300; background: var(--warn); border-color: transparent; font-weight: 700; }
     .actions { display: flex; gap: 8px; margin-top: 12px; }
-    .btn { flex: 1; padding: 8px; border: none; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; background: rgba(255,255,255,.08); color: var(--text); }
-    .btn.primary { background: var(--button); color: var(--button-text); }
-    .btn.danger { background: rgba(255,80,80,.15); color: #ff6b6b; flex: 0 0 44px; }
+    .btn { flex: 1; padding: 9px; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn.primary { background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border: 0; }
+    .btn.danger { flex: 0 0 42px; color: var(--danger); }
 
-    .empty { text-align: center; color: var(--hint); padding: 40px 20px; }
-    .loading { text-align: center; color: var(--hint); padding: 40px; }
+    .empty { text-align: center; padding: 46px 20px; color: var(--hint); }
+    .empty img { width: 128px; height: 128px; object-fit: cover; border-radius: 24px; margin-bottom: 14px; box-shadow: var(--shadow); }
+    .empty .big { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .loading { text-align: center; padding: 40px; color: var(--hint); }
 
-    .fab { position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--button); color: var(--button-text); border: none; font-size: 28px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.3); z-index: 20; }
+    .fab { position: fixed; right: calc(50% - 296px); bottom: calc(88px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border: none; font-size: 30px; cursor: pointer;
+      box-shadow: 0 10px 24px rgba(109,94,252,.45); z-index: 40; display: none; align-items: center; justify-content: center; }
+    @media (max-width: 640px) { .fab { right: 18px; } }
 
-    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; z-index: 30; }
-    .modal-bg.show { display: flex; }
-    .modal { background: var(--bg); width: 100%; border-radius: 16px 16px 0 0; padding: 20px; }
-    .modal h3 { margin-bottom: 14px; }
-    .modal input, .modal select { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--secondary-bg); background: var(--secondary-bg); color: var(--text); font-size: 15px; margin-bottom: 10px; }
-    .modal .hint { color: var(--hint); font-size: 12px; margin: -6px 0 10px; }
+    .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+      background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px);
+      border-top: 1px solid var(--border); padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); }
+    .nav-inner { max-width: 620px; margin: 0 auto; display: flex; }
+    .nav a { flex: 1; text-align: center; color: var(--hint); font-size: 10.5px; font-weight: 600; cursor: pointer; padding: 2px; }
+    .nav a .ic { font-size: 21px; display: block; line-height: 1.2; }
+    .nav a.on { color: var(--brand-2); }
+
+    .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; z-index: 60; }
+    .sheet-bg.show { display: flex; }
+    .sheet { background: var(--bg); width: 100%; max-width: 620px; margin: 0 auto; border-radius: 22px 22px 0 0; padding: 18px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 30px rgba(0,0,0,.35); }
+    .sheet h3 { margin-bottom: 14px; font-size: 17px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 12.5px; color: var(--hint); margin-bottom: 5px; font-weight: 600; }
+    .field input, .field select, .field textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); font-size: 15px; font-family: inherit; }
+    .field textarea { resize: vertical; min-height: 54px; }
+    .seg.mini div { padding: 8px; font-size: 13px; }
   </style>
 </head>
 <body>
   <header>
-    <img id="avatar" alt="">
-    <div>
-      <div class="title">Ассистент</div>
-      <div class="subtitle" id="subtitle">Загрузка…</div>
+    <div class="hrow">
+      <img id="avatar" class="avatar" src="https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp" alt="Sara">
+      <div class="hello">
+        <div class="h1" id="greeting">Привет 👋</div>
+        <div class="sub" id="subtitle">Загрузка…</div>
+      </div>
+      <span class="badge-role" id="role"></span>
     </div>
   </header>
 
-  <div class="tabs">
-    <div class="tab active" data-tab="tasks">📋 Задачи</div>
-    <div class="tab" data-tab="clients">👥 Клиенты</div>
-    <div class="tab" data-tab="notes">📝 Заметки</div>
-  </div>
-
-  <div class="filters" id="filters">
-    <div class="chip active" data-status="active">Активные</div>
-    <div class="chip" data-status="done">Готовые</div>
-    <div class="chip" data-status="all">Все</div>
-  </div>
-
-  <div class="list" id="list"><div class="loading">Загрузка…</div></div>
+  <main class="wrap" id="view"><div class="loading">Загрузка…</div></main>
 
   <button class="fab" id="fab">+</button>
 
-  <div class="modal-bg" id="modal">
-    <div class="modal">
-      <h3>Новая задача</h3>
-      <input id="t-title" placeholder="Что нужно сделать?">
-      <input id="t-due" placeholder="Дедлайн: завтра, пятница, 15.03 14:00">
-      <div class="hint">Можно оставить пустым</div>
-      <select id="t-client"><option value="">Без клиента</option></select>
-      <div class="actions">
-        <button class="btn" id="m-cancel">Отмена</button>
-        <button class="btn primary" id="m-save">Создать</button>
-      </div>
-    </div>
-  </div>
+  <nav class="nav"><div class="nav-inner" id="nav">
+    <a data-tab="home" class="on"><span class="ic">🏠</span>Главная</a>
+    <a data-tab="tasks"><span class="ic">✅</span>Задачи</a>
+    <a data-tab="calendar"><span class="ic">📅</span>Календарь</a>
+    <a data-tab="birthdays"><span class="ic">🎂</span>Дни&nbsp;р.</a>
+    <a data-tab="clients"><span class="ic">👥</span>Клиенты</a>
+  </div></nav>
+
+  <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
 
   <script>
     const tg = window.Telegram.WebApp;
     tg.ready(); tg.expand();
+    try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
     const INIT = tg.initData || "";
-    let currentTab = "tasks";
-    let currentStatus = "active";
+    const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
+
+    let tab = "home";
+    let taskScope = "work";
+    let taskStatus = "active";
     let clientsCache = [];
 
-    const STATUS_LABEL = { open: "Открыта", in_progress: "В работе", done: "Готово" };
+    const $ = (id) => document.getElementById(id);
+    const view = $("view");
+    const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const haptic = (t = "light") => { try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
 
     async function api(path, opts = {}) {
       const res = await fetch("/api" + path, {
         ...opts,
         headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": INIT, ...(opts.headers || {}) },
       });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || res.status);
-      }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.status); }
       return res.json();
     }
 
     function fmtDue(iso) {
-      if (!iso) return "";
-      const d = new Date(iso), now = new Date();
-      const days = Math.floor((d - now) / 86400000);
-      const s = d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-      if (d < now) return `<span class="due-overdue">⚠️ ${s}</span>`;
-      if (d.toDateString() === now.toDateString()) return `<span class="due-today">🔥 сегодня ${d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span>`;
-      return s;
+      if (!iso) return { cls: "", txt: "" };
+      const dd = new Date(iso), now = new Date();
+      const days = Math.round((new Date(iso).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000);
+      const t = dd.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const dm = dd.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+      if (dd < now) return { cls: "due-over", txt: "⚠️ " + dm };
+      if (days === 0) return { cls: "due-today", txt: "🔥 сегодня " + t };
+      if (days === 1) return { cls: "", txt: "завтра " + t };
+      return { cls: "", txt: dm + " " + t };
+    }
+    function fmtEv(iso) {
+      return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+    function emptyBox(big, small) {
+      return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`;
+    }
+    function err(e) {
+      const m = String(e.message || e);
+      if (m === "no_access") return emptyBox("Нет доступа", "Получи доступ у владельца бота.");
+      return `<div class="empty"><div class="big">Ошибка</div><div>${esc(m)}</div></div>`;
     }
 
-    function esc(s) { return (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+    async function renderHome() {
+      view.innerHTML = '<div class="loading">Загрузка…</div>';
+      try {
+        const d = await api("/home");
+        let h = `<div class="tiles">
+          <div class="tile work" onclick="go('tasks','work')"><div class="n">${d.counts.work}</div><div class="l">💼 Рабочих задач</div></div>
+          <div class="tile personal" onclick="go('tasks','personal')"><div class="n">${d.counts.personal}</div><div class="l">🙋 Личных задач</div></div>
+        </div>`;
+        h += `<div class="section-title">На сегодня</div>`;
+        if (!d.tasks.length && !d.events.length) {
+          h += `<div class="card"><div style="color:var(--hint);text-align:center;padding:8px">На сегодня всё спокойно ✨</div></div>`;
+        } else {
+          h += `<div class="card">`;
+          d.tasks.forEach((t) => {
+            const due = fmtDue(t.due_at);
+            h += `<div class="agenda-item"><div class="dot ${t.overdue ? "over" : "today"}"></div><div class="t"><div>${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+          });
+          d.events.forEach((e) => {
+            h += `<div class="agenda-item"><div class="dot ev"></div><div class="t"><div>📅 ${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+          });
+          h += `</div>`;
+        }
+        if (d.birthdays.length) {
+          h += `<div class="section-title">Скоро дни рождения</div><div class="card">`;
+          d.birthdays.forEach((b) => {
+            const when = b.in_days === 0 ? "сегодня 🎉" : b.in_days === 1 ? "завтра" : "через " + b.in_days + " дн.";
+            h += `<div class="agenda-item"><div class="dot bd"></div><div class="t"><div>🎂 ${esc(b.name)}</div><div class="m">${when} · ${b.date}</div></div></div>`;
+          });
+          h += `</div>`;
+        }
+        view.innerHTML = h;
+      } catch (e) { view.innerHTML = err(e); }
+    }
 
     async function renderTasks() {
-      const list = document.getElementById("list");
-      list.innerHTML = '<div class="loading">Загрузка…</div>';
+      view.innerHTML =
+        `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">💼 Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">🙋 Личные</div></div>
+         <div class="chips">
+           <div class="chip ${taskStatus==='active'?'on':''}" onclick="setStatus('active')">Активные</div>
+           <div class="chip ${taskStatus==='done'?'on':''}" onclick="setStatus('done')">Готовые</div>
+           <div class="chip ${taskStatus==='all'?'on':''}" onclick="setStatus('all')">Все</div>
+         </div><div id="tasklist"><div class="loading">Загрузка…</div></div>`;
       try {
-        const { tasks } = await api("/tasks?status=" + currentStatus);
-        if (!tasks.length) { list.innerHTML = '<div class="empty">Задач нет 🎉<br>Нажми «+», чтобы добавить.</div>'; return; }
-        list.innerHTML = tasks.map(t => `
-          <div class="card">
-            <div class="top">
-              <div class="name">${esc(t.title)}</div>
-              <span class="badge ${t.status}">${STATUS_LABEL[t.status]}</span>
-            </div>
-            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+        const { tasks } = await api(`/tasks?scope=${taskScope}&status=${taskStatus}`);
+        const el = $("tasklist");
+        if (!tasks.length) { el.innerHTML = emptyBox("Задач нет", "Нажми «+», чтобы добавить."); return; }
+        el.innerHTML = tasks.map((t) => {
+          const due = fmtDue(t.due_at);
+          const done = t.status === "done";
+          return `<div class="card task ${t.priority?'p1':''} ${done?'done':''}">
+            <div class="top"><div class="name ${done?'done':''}">${esc(t.title)}</div></div>
             <div class="meta">
-              ${t.due_at ? `<span>${fmtDue(t.due_at)}</span>` : ""}
-              ${t.client ? `<span class="badge">👥 ${esc(t.client)}</span>` : ""}
+              ${due.txt ? `<span class="pill ${due.cls}">${due.txt}</span>` : ""}
+              ${t.priority ? `<span class="pill" style="color:var(--accent)">★ важно</span>` : ""}
+              ${t.client ? `<span class="pill">👥 ${esc(t.client)}</span>` : ""}
             </div>
             <div class="actions">
-              ${t.status !== "done" ? `<button class="btn" onclick="setStatus(${t.id}, 'in_progress')">🟡 В работу</button>
-                <button class="btn primary" onclick="setStatus(${t.id}, 'done')">✅ Готово</button>`
-                : `<button class="btn" onclick="setStatus(${t.id}, 'open')">↩️ Вернуть</button>`}
+              ${!done ? `<button class="btn" onclick="setTask(${t.id},'in_progress')">🟡 В работу</button><button class="btn primary" onclick="setTask(${t.id},'done')">✅ Готово</button>`
+                : `<button class="btn" onclick="setTask(${t.id},'open')">↩️ Вернуть</button>`}
               <button class="btn danger" onclick="delTask(${t.id})">🗑</button>
-            </div>
-          </div>`).join("");
-      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
+            </div></div>`;
+        }).join("");
+      } catch (e) { $("tasklist").innerHTML = err(e); }
+    }
+
+    async function renderCalendar() {
+      view.innerHTML = '<div class="section-title">Ближайшие встречи</div><div id="evlist"><div class="loading">Загрузка…</div></div>';
+      try {
+        const { events } = await api("/events");
+        const el = $("evlist");
+        if (!events.length) { el.innerHTML = emptyBox("Встреч нет", "Добавь встречу кнопкой «+»."); return; }
+        el.innerHTML = events.map((e) => `<div class="card">
+          <div class="top" style="display:flex;justify-content:space-between;gap:8px"><div class="name">📅 ${esc(e.title)}</div><button class="btn danger" onclick="delEvent(${e.id})">🗑</button></div>
+          <div class="meta"><span class="pill" style="color:var(--brand-2)">🕒 ${fmtEv(e.starts_at)}</span>${e.location?`<span class="pill">📍 ${esc(e.location)}</span>`:""}</div>
+          ${e.notes?`<div class="meta"><span style="color:var(--hint);font-size:13px">${esc(e.notes)}</span></div>`:""}
+        </div>`).join("");
+      } catch (e) { $("evlist").innerHTML = err(e); }
+    }
+
+    async function renderBirthdays() {
+      view.innerHTML = '<div class="section-title">Контакты и дни рождения</div><div id="clist"><div class="loading">Загрузка…</div></div>';
+      try {
+        const { contacts } = await api("/contacts");
+        const el = $("clist");
+        if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с днём рождения — напомню заранее."); return; }
+        el.innerHTML = contacts.map((c) => `<div class="card">
+          <div class="top" style="display:flex;justify-content:space-between;gap:8px"><div class="name">${esc(c.name)}</div><button class="btn danger" onclick="delContact(${c.id})">🗑</button></div>
+          <div class="meta">${c.birthday?`<span class="pill" style="color:var(--accent)">🎂 ${esc(c.birthday)}</span>`:""}${c.phone?`<span class="pill">📞 ${esc(c.phone)}</span>`:""}</div>
+        </div>`).join("");
+      } catch (e) { $("clist").innerHTML = err(e); }
     }
 
     async function renderClients() {
-      const list = document.getElementById("list");
-      list.innerHTML = '<div class="loading">Загрузка…</div>';
+      view.innerHTML = '<div class="section-title">Клиенты и проекты</div><div id="cllist"><div class="loading">Загрузка…</div></div>';
       const PLAT = { direct: "Директ", google: "Google Ads", tg: "TG Ads", vk: "VK", avito: "Авито", site: "Сайт" };
       try {
         const { clients } = await api("/clients");
         clientsCache = clients;
-        if (!clients.length) { list.innerHTML = '<div class="empty">Клиентов нет</div>'; return; }
-        list.innerHTML = clients.map(c => {
-          const plats = (c.platforms || "").split(",").filter(Boolean).map(p => PLAT[p] || p).join(", ");
-          return `<div class="card">
-            <div class="top"><div class="name">${c.status === "active" ? "🟢" : "⏸"} ${esc(c.name)}</div></div>
-            <div class="meta"><span>${plats || "—"}</span>${c.budget ? `<span class="badge">💰 ${esc(c.budget)}</span>` : ""}</div>
-          </div>`;
+        const el = $("cllist");
+        if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Добавь клиента в чате бота: /addclient"); return; }
+        el.innerHTML = clients.map((c) => {
+          const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
+          return `<div class="card"><div class="top" style="display:flex;justify-content:space-between"><div class="name">${c.status === "active" ? "🟢" : "⏸"} ${esc(c.name)}</div></div>
+            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">💰 ${esc(c.budget)}</span>` : ""}</div></div>`;
         }).join("");
-      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
+      } catch (e) { $("cllist").innerHTML = err(e); }
     }
 
-    async function renderNotes() {
-      const list = document.getElementById("list");
-      list.innerHTML = '<div class="loading">Загрузка…</div>';
-      try {
-        const { notes } = await api("/notes");
-        if (!notes.length) { list.innerHTML = '<div class="empty">Заметок нет.<br>В чате боту: сообщение с «!» в начале.</div>'; return; }
-        list.innerHTML = notes.map(n => `<div class="card"><div>${esc(n.text)}</div>${n.tags ? `<div class="meta"><span class="badge">🏷 ${esc(n.tags)}</span></div>` : ""}</div>`).join("");
-      } catch (e) { list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`; }
-    }
-
-    function render() {
-      document.getElementById("filters").style.display = currentTab === "tasks" ? "flex" : "none";
-      document.getElementById("fab").style.display = currentTab === "tasks" ? "block" : "none";
-      if (currentTab === "tasks") renderTasks();
-      else if (currentTab === "clients") renderClients();
-      else renderNotes();
-    }
-
-    window.setStatus = async (id, status) => { tg.HapticFeedback?.impactOccurred("light"); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
+    window.go = (t, scope) => { if (scope) taskScope = scope; switchTab(t); };
+    window.setScope = (s) => { taskScope = s; renderTasks(); };
+    window.setStatus = (s) => { taskStatus = s; renderTasks(); };
+    window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
     window.delTask = async (id) => { if (!confirm("Удалить задачу?")) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTasks(); };
+    window.delEvent = async (id) => { if (!confirm("Удалить встречу?")) return; await api(`/events/${id}`, { method: "DELETE" }); renderCalendar(); };
+    window.delContact = async (id) => { if (!confirm("Удалить контакт?")) return; await api(`/contacts/${id}`, { method: "DELETE" }); renderBirthdays(); };
 
-    document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      tab.classList.add("active"); currentTab = tab.dataset.tab; render();
-    });
-    document.querySelectorAll(".chip").forEach(chip => chip.onclick = () => {
-      document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
-      chip.classList.add("active"); currentStatus = chip.dataset.status; renderTasks();
-    });
+    const sheet = $("sheet"), sheetBody = $("sheet-body");
+    const openSheet = (html) => { sheetBody.innerHTML = html; sheet.classList.add("show"); };
+    window.closeSheet = () => sheet.classList.remove("show");
+    sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSheet(); });
 
-    // Модалка создания задачи
-    const modal = document.getElementById("modal");
-    document.getElementById("fab").onclick = async () => {
-      if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch {} }
-      const sel = document.getElementById("t-client");
-      sel.innerHTML = '<option value="">Без клиента</option>' + clientsCache.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-      document.getElementById("t-title").value = "";
-      document.getElementById("t-due").value = "";
-      modal.classList.add("show");
-    };
-    document.getElementById("m-cancel").onclick = () => modal.classList.remove("show");
-    document.getElementById("m-save").onclick = async () => {
-      const title = document.getElementById("t-title").value.trim();
-      if (!title) { tg.showAlert("Введи название задачи"); return; }
-      await api("/tasks", { method: "POST", body: JSON.stringify({
-        title, due: document.getElementById("t-due").value, client_id: document.getElementById("t-client").value || null,
-      }) });
-      modal.classList.remove("show"); renderTasks();
+    async function openAddTask() {
+      if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} }
+      const opts = ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)).join("");
+      openSheet(`<h3>Новая задача</h3>
+        <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">💼 Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">🙋 Личная</div></div></div>
+        <div class="field"><label>Что нужно сделать</label><input id="f-title" placeholder="Название задачи"></div>
+        <div class="field"><label>Дедлайн</label><input id="f-due" placeholder="завтра, пятница, 15.03 14:00"></div>
+        <div class="field"><label><input type="checkbox" id="f-prio" style="width:auto;margin-right:6px">Важная задача</label></div>
+        <div class="field" id="f-client-wrap"><label>Клиент</label><select id="f-client">${opts}</select></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTask()">Создать</button></div>`);
+      window.__ts = taskScope;
+      window.tsSet = (s) => { window.__ts = s; $("ts-work").classList.toggle("on", s === "work"); $("ts-personal").classList.toggle("on", s === "personal"); $("f-client-wrap").style.display = s === "personal" ? "none" : "block"; };
+      tsSet(window.__ts);
+    }
+    window.saveTask = async () => {
+      const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
+      await api("/tasks", { method: "POST", body: JSON.stringify({ title, due: $("f-due").value, scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
+      closeSheet(); taskScope = window.__ts; switchTab("tasks");
     };
 
-    // Старт
+    function openAddEvent() {
+      openSheet(`<h3>Новая встреча</h3>
+        <div class="field"><label>Название</label><input id="f-title" placeholder="Встреча с клиентом"></div>
+        <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
+        <div class="field"><label>Место (необязательно)</label><input id="f-loc" placeholder="Zoom / офис / адрес"></div>
+        <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveEvent()">Создать</button></div>`);
+    }
+    window.saveEvent = async () => {
+      const title = $("f-title").value.trim(); const at = $("f-at").value;
+      if (!title) return tg.showAlert("Введи название"); if (!at) return tg.showAlert("Выбери дату и время");
+      await api("/events", { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value }) });
+      closeSheet(); renderCalendar();
+    };
+
+    function openAddContact() {
+      openSheet(`<h3>Новый контакт</h3>
+        <div class="field"><label>Имя</label><input id="f-name" placeholder="Имя Фамилия"></div>
+        <div class="field"><label>День рождения</label><input id="f-bd" type="date"></div>
+        <div class="field"><label>Телефон / контакт</label><input id="f-phone" placeholder="+7… / @ник"></div>
+        <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Компания, как познакомились…"></textarea></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveContact()">Создать</button></div>`);
+    }
+    window.saveContact = async () => {
+      const name = $("f-name").value.trim(); if (!name) return tg.showAlert("Введи имя");
+      await api("/contacts", { method: "POST", body: JSON.stringify({ name, birthday: $("f-bd").value || null, phone: $("f-phone").value, notes: $("f-notes").value }) });
+      closeSheet(); renderBirthdays();
+    };
+
+    $("fab").onclick = () => {
+      haptic();
+      if (tab === "tasks") openAddTask();
+      else if (tab === "calendar") openAddEvent();
+      else if (tab === "birthdays") openAddContact();
+    };
+    function updateFab() { $("fab").style.display = ["tasks", "calendar", "birthdays"].includes(tab) ? "flex" : "none"; }
+
+    function switchTab(t) {
+      tab = t;
+      document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === t));
+      updateFab();
+      if (t === "home") renderHome();
+      else if (t === "tasks") renderTasks();
+      else if (t === "calendar") renderCalendar();
+      else if (t === "birthdays") renderBirthdays();
+      else if (t === "clients") renderClients();
+    }
+    document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab); });
+
     (async () => {
       try {
         const me = await api("/me");
-        document.getElementById("subtitle").textContent = me.role === "owner" ? "Владелец" : (me.role === "member" ? "Команда" : "Клиент");
+        $("role").textContent = me.role === "owner" ? "Владелец" : me.role === "member" ? "Команда" : "Клиент";
+        const name = tg.initDataUnsafe?.user?.first_name || "";
+        const hour = new Date().getHours();
+        const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
+        $("greeting").textContent = `${hi}${name ? ", " + esc(name) : ""} 👋`;
+        $("subtitle").textContent = "Я Сара, твой ассистент";
       } catch (e) {
-        document.getElementById("subtitle").textContent = "Нет доступа";
-        document.getElementById("list").innerHTML = `<div class="empty">Нет доступа.<br>Открой приложение из своего бота и получи доступ у владельца.</div>`;
+        $("subtitle").textContent = "Нет доступа";
+        $("role").style.display = "none";
+        view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
         return;
       }
-      const photo = tg.initDataUnsafe?.user?.photo_url;
-      if (photo) document.getElementById("avatar").src = photo;
-      render();
+      switchTab("home");
     })();
   </script>
 </body>

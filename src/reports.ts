@@ -1,6 +1,6 @@
 import { DB } from "./db";
 import { ROLE_OWNER, TASK_IN_PROGRESS, TASK_OPEN, Task } from "./types";
-import { formatDue, platformsToText } from "./utils";
+import { formatDue, formatEventTime, platformsToText } from "./utils";
 
 /** Утренняя сводка: просрочка, сегодня, ближайшие, без дедлайна. */
 export async function buildDigest(db: DB, userId: number, role: string, tzOffset: number): Promise<string> {
@@ -49,6 +49,20 @@ export async function buildDigest(db: DB, userId: number, role: string, tzOffset
   block("🔥 Сегодня:", today);
   block("📅 Ближайшие:", upcoming, 5);
   block("📌 Без дедлайна:", noDue, 5);
+
+  // Встречи на сегодня
+  const events = await db.listEvents(userId, new Date().toISOString());
+  const todaysEvents = events.filter((e) => {
+    const dueLocalDay = Math.floor((new Date(e.starts_at).getTime() + tzOffset * 3600_000) / 86400_000);
+    return dueLocalDay === todayLocalDay;
+  });
+  if (todaysEvents.length) {
+    lines.push("\n🗓 Встречи сегодня:");
+    for (const e of todaysEvents.slice(0, 8)) {
+      lines.push(`  ${formatEventTime(e.starts_at, tzOffset)} — ${e.title}${e.location ? ` (${e.location})` : ""}`);
+    }
+  }
+
   lines.push(`\nВсего активных задач: ${tasks.length}`);
   return lines.join("\n");
 }

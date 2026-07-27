@@ -4,7 +4,7 @@ import { createBot } from "./bot";
 import { DB } from "./db";
 import { buildDigest } from "./reports";
 import { Env, ROLE_MEMBER, ROLE_OWNER } from "./types";
-import { formatDue, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, tzOffsetOf } from "./utils";
 
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
@@ -70,7 +70,7 @@ export default {
     const tz = tzOffsetOf(env);
 
     if (event.cron === "*/5 * * * *") {
-      // Напоминания о наступивших дедлайнах
+      // Напоминания о наступивших дедлайнах задач
       const tasks = await db.tasksDueForReminder(new Date().toISOString());
       for (const t of tasks) {
         const recipient = t.assignee_id ?? t.creator_id;
@@ -82,10 +82,37 @@ export default {
           console.error("reminder failed", t.id, e);
         }
       }
+      // Напоминания о встречах
+      const events = await db.eventsDueForReminder(new Date().toISOString());
+      for (const ev of events) {
+        const text = `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`;
+        try {
+          await tgSend(env.BOT_TOKEN, ev.user_id, text);
+          await db.markEventReminded(ev.id);
+        } catch (e) {
+          console.error("event reminder failed", ev.id, e);
+        }
+      }
     } else if (event.cron === "0 * * * *") {
-      // Утренний дайджест — в заданный час по местному времени
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       if (localHour !== parseInt(env.DIGEST_HOUR ?? "9", 10)) return;
+
+      // Напоминания о днях рождения (раз в день, в час дайджеста)
+      const nowLocal = new Date(Date.now() + tz * 3600_000);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const mmdd = `${pad(nowLocal.getUTCMonth() + 1)}-${pad(nowLocal.getUTCDate())}`;
+      const year = nowLocal.getUTCFullYear();
+      const bdays = await db.birthdaysForReminder(mmdd, year);
+      for (const c of bdays) {
+        try {
+          await tgSend(env.BOT_TOKEN, c.user_id, `🎂 Сегодня день рождения: <b>${c.name}</b>!\nНе забудь поздравить 🎉${c.phone ? `\n📞 ${c.phone}` : ""}`);
+          await db.markBirthdayReminded(c.id, year);
+        } catch (e) {
+          console.error("birthday reminder failed", c.id, e);
+        }
+      }
+
+      // Утренний дайджест
       const recipients = [...(await db.listUsers(ROLE_OWNER)), ...(await db.listUsers(ROLE_MEMBER))];
       for (const u of recipients) {
         try {

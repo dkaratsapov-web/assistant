@@ -22,6 +22,9 @@ export const TASK_OPEN = "open";
 export const TASK_IN_PROGRESS = "in_progress";
 export const TASK_DONE = "done";
 
+export const SCOPE_PERSONAL = "personal";
+export const SCOPE_WORK = "work";
+
 export const TASK_STATUS_LABELS: Record<string, string> = {
   open: "🔵 Открыта",
   in_progress: "🟡 В работе",
@@ -60,6 +63,7 @@ export interface Task {
   id: number;
   title: string;
   description: string;
+  scope: string;
   client_id: number | null;
   creator_id: number;
   assignee_id: number | null;
@@ -76,5 +80,28 @@ export interface Note {
   user_id: number;
   text: string;
   tags: string;
+  created_at: string;
+}
+
+export interface Event {
+  id: number;
+  user_id: number;
+  title: string;
+  starts_at: string;
+  location: string;
+  notes: string;
+  remind_before_min: number;
+  reminded_at: string | null;
+  created_at: string;
+}
+
+export interface Contact {
+  id: number;
+  user_id: number;
+  name: string;
+  birthday: string | null;
+  phone: string;
+  notes: string;
+  reminded_year: number | null;
   created_at: string;
 }

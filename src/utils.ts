@@ -121,3 +121,19 @@ export function escapeHtml(s: string): string {
 export function tzOffsetOf(env: { TZ_OFFSET?: string }): number {
   return parseInt(env.TZ_OFFSET ?? "3", 10);
 }
+
+/** "YYYY-MM-DDTHH:MM" из datetime-local (локальное время) → ISO UTC. */
+export function localInputToUtc(value: string, tzOffset: number): string | null {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  const asUtcMs = Date.UTC(+y, +mo - 1, +d, +h, +mi, 0, 0);
+  return new Date(asUtcMs - tzOffset * 3600_000).toISOString();
+}
+
+/** Дата/время события человекочитаемо (для чата/дайджеста). */
+export function formatEventTime(iso: string, tzOffset: number): string {
+  const local = new Date(new Date(iso).getTime() + tzOffset * 3600_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(local.getUTCDate())}.${pad(local.getUTCMonth() + 1)} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`;
+}

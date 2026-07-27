@@ -1,5 +1,5 @@
 -- Схема базы данных Cloudflare D1 (SQLite).
--- Применяется командой: npm run db:init  (или через дашборд Cloudflare).
+-- Применяется: npm run db:init (или вставкой в консоль D1).
 
 CREATE TABLE IF NOT EXISTS users (
   user_id    INTEGER PRIMARY KEY,
@@ -24,11 +24,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   title       TEXT NOT NULL,
   description TEXT DEFAULT '',
+  scope       TEXT NOT NULL DEFAULT 'work',        -- personal | work
   client_id   INTEGER,
   creator_id  INTEGER NOT NULL,
   assignee_id INTEGER,
-  status      TEXT NOT NULL DEFAULT 'open',        -- open | in_progress | done
-  priority    INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'open',         -- open | in_progress | done
+  priority    INTEGER NOT NULL DEFAULT 0,           -- 0 обычный, 1 важный
   due_at      TEXT,
   created_at  TEXT NOT NULL,
   done_at     TEXT,
@@ -43,7 +44,32 @@ CREATE TABLE IF NOT EXISTS notes (
   created_at TEXT NOT NULL
 );
 
--- Состояние пошаговых диалогов бота (FSM) — вместо памяти процесса
+-- Встречи и события календаря
+CREATE TABLE IF NOT EXISTS events (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id           INTEGER NOT NULL,
+  title             TEXT NOT NULL,
+  starts_at         TEXT NOT NULL,                  -- ISO UTC
+  location          TEXT DEFAULT '',
+  notes             TEXT DEFAULT '',
+  remind_before_min INTEGER NOT NULL DEFAULT 30,    -- за сколько минут напомнить
+  reminded_at       TEXT,
+  created_at        TEXT NOT NULL
+);
+
+-- Контакты и дни рождения
+CREATE TABLE IF NOT EXISTS contacts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL,
+  name          TEXT NOT NULL,
+  birthday      TEXT,                               -- MM-DD (или YYYY-MM-DD)
+  phone         TEXT DEFAULT '',
+  notes         TEXT DEFAULT '',
+  reminded_year INTEGER,                            -- год последнего напоминания о ДР
+  created_at    TEXT NOT NULL
+);
+
+-- Состояние пошаговых диалогов бота (FSM)
 CREATE TABLE IF NOT EXISTS sessions (
   user_id    INTEGER PRIMARY KEY,
   data       TEXT NOT NULL DEFAULT '{}',
@@ -52,4 +78,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks(scope);
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at);
+CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);

@@ -1,8 +1,9 @@
 import {
   Client,
+  Contact,
+  Event,
   Note,
   ROLE_OWNER,
-  ROLE_PENDING,
   Task,
   TASK_DONE,
   TASK_IN_PROGRESS,
@@ -100,21 +101,25 @@ export class DB {
     title: string;
     creatorId: number;
     description?: string;
+    scope?: string;
     clientId?: number | null;
     assigneeId?: number | null;
+    priority?: number;
     dueAt?: string | null;
   }): Promise<number> {
     const res = await this.d1
       .prepare(
-        `INSERT INTO tasks (title, description, client_id, creator_id, assignee_id, priority, due_at, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, 'open', ?)`
+        `INSERT INTO tasks (title, description, scope, client_id, creator_id, assignee_id, priority, due_at, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
       )
       .bind(
         opts.title,
         opts.description ?? "",
+        opts.scope ?? "work",
         opts.clientId ?? null,
         opts.creatorId,
         opts.assigneeId ?? null,
+        opts.priority ?? 0,
         opts.dueAt ?? null,
         nowIso()
       )
@@ -130,6 +135,7 @@ export class DB {
     statuses?: string[];
     assigneeId?: number | null;
     clientId?: number | null;
+    scope?: string | null;
   } = {}): Promise<Task[]> {
     const statuses = opts.statuses ?? [TASK_OPEN, TASK_IN_PROGRESS];
     let q = "SELECT * FROM tasks WHERE 1=1";
@@ -145,6 +151,10 @@ export class DB {
     if (opts.clientId != null) {
       q += " AND client_id = ?";
       binds.push(opts.clientId);
+    }
+    if (opts.scope) {
+      q += " AND scope = ?";
+      binds.push(opts.scope);
     }
     q += " ORDER BY (due_at IS NULL), due_at, priority DESC, created_at";
     const { results } = await this.d1.prepare(q).bind(...binds).all<Task>();
@@ -206,6 +216,109 @@ export class DB {
 
   async deleteNote(id: number, userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  // ---------- События / встречи ----------
+
+  async addEvent(opts: {
+    userId: number;
+    title: string;
+    startsAt: string;
+    location?: string;
+    notes?: string;
+    remindBeforeMin?: number;
+  }): Promise<number> {
+    const res = await this.d1
+      .prepare(
+        `INSERT INTO events (user_id, title, starts_at, location, notes, remind_before_min, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        opts.userId,
+        opts.title,
+        opts.startsAt,
+        opts.location ?? "",
+        opts.notes ?? "",
+        opts.remindBeforeMin ?? 30,
+        nowIso()
+      )
+      .run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listEvents(userId: number, fromIso: string): Promise<Event[]> {
+    const { results } = await this.d1
+      .prepare("SELECT * FROM events WHERE user_id = ? AND starts_at >= ? ORDER BY starts_at LIMIT 100")
+      .bind(userId, fromIso)
+      .all<Event>();
+    return results ?? [];
+  }
+
+  async deleteEvent(id: number, userId: number): Promise<void> {
+    await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  async eventsDueForReminder(nowIso: string): Promise<Event[]> {
+    // Напоминаем, когда до начала осталось <= remind_before_min и событие ещё не прошло
+    const { results } = await this.d1
+      .prepare(
+        `SELECT * FROM events
+         WHERE reminded_at IS NULL AND starts_at > ?
+           AND datetime(starts_at, '-' || remind_before_min || ' minutes') <= ?
+         ORDER BY starts_at`
+      )
+      .bind(nowIso, nowIso)
+      .all<Event>();
+    return results ?? [];
+  }
+
+  async markEventReminded(id: number): Promise<void> {
+    await this.d1.prepare("UPDATE events SET reminded_at = ? WHERE id = ?").bind(nowIso(), id).run();
+  }
+
+  // ---------- Контакты / дни рождения ----------
+
+  async addContact(opts: {
+    userId: number;
+    name: string;
+    birthday?: string | null;
+    phone?: string;
+    notes?: string;
+  }): Promise<number> {
+    const res = await this.d1
+      .prepare("INSERT INTO contacts (user_id, name, birthday, phone, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(opts.userId, opts.name, opts.birthday ?? null, opts.phone ?? "", opts.notes ?? "", nowIso())
+      .run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listContacts(userId: number): Promise<Contact[]> {
+    const { results } = await this.d1
+      .prepare("SELECT * FROM contacts WHERE user_id = ? ORDER BY name")
+      .bind(userId)
+      .all<Contact>();
+    return results ?? [];
+  }
+
+  async deleteContact(id: number, userId: number): Promise<void> {
+    await this.d1.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  /** Дни рождения на заданную дату MM-DD, по которым в этом году ещё не напоминали. */
+  async birthdaysForReminder(monthDay: string, year: number): Promise<Contact[]> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT * FROM contacts
+         WHERE birthday IS NOT NULL AND substr(birthday, -5) = ?
+           AND (reminded_year IS NULL OR reminded_year <> ?)`
+      )
+      .bind(monthDay, year)
+      .all<Contact>();
+    return results ?? [];
+  }
+
+  async markBirthdayReminded(id: number, year: number): Promise<void> {
+    await this.d1.prepare("UPDATE contacts SET reminded_year = ? WHERE id = ?").bind(year, id).run();
   }
 
   // ---------- FSM-состояние диалогов ----------
