@@ -2,9 +2,13 @@ import { webhookCallback } from "grammy";
 import { handleApi } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
+import { MaxClient, MaxUpdate } from "./max/client";
+import { handleMaxUpdate } from "./max/bot";
 import { buildDigest } from "./reports";
 import { Env, ROLE_MEMBER, ROLE_OWNER } from "./types";
 import { formatDue, formatEventTime, tzOffsetOf } from "./utils";
+
+const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
@@ -47,6 +51,42 @@ async function handleInit(request: Request, env: Env, origin: string): Promise<R
   return new Response(`OK ✅ Webhook и меню настроены.\nБот готов, а Mini App доступен по адресу: ${origin}`);
 }
 
+/** Настройка канала MAX: подписывает webhook на обновления. */
+async function handleMaxInit(request: Request, env: Env, origin: string): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
+    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+  }
+  if (!env.MAX_BOT_TOKEN) return new Response("MAX_BOT_TOKEN не задан", { status: 400 });
+  if (!env.MAX_WEBHOOK_SECRET) return new Response("MAX_WEBHOOK_SECRET не задан", { status: 400 });
+  const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+  try {
+    const me = await client.getMe();
+    await client.subscribe(`${origin}/max/webhook`, env.MAX_WEBHOOK_SECRET, MAX_UPDATE_TYPES);
+    return new Response(`OK ✅ MAX webhook подписан на ${origin}/max/webhook\nБот: ${me.name ?? me.user_id}`);
+  } catch (e) {
+    return new Response(`MAX init error: ${(e as Error).message}`, { status: 502 });
+  }
+}
+
+/** Приём обновлений MAX по webhook. */
+async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx: ExecutionContext): Promise<Response> {
+  // Проверка секрета webhook (заголовок X-Max-Bot-Api-Secret)
+  const got = request.headers.get("X-Max-Bot-Api-Secret");
+  if (env.MAX_WEBHOOK_SECRET && got !== env.MAX_WEBHOOK_SECRET) {
+    return new Response("forbidden", { status: 403 });
+  }
+  let update: MaxUpdate;
+  try {
+    update = (await request.json()) as MaxUpdate;
+  } catch {
+    return new Response("bad request", { status: 400 });
+  }
+  // Обрабатываем в фоне, MAX ждёт 200 в течение 30 секунд
+  ctx.waitUntil(handleMaxUpdate(update, env, origin).catch((e) => console.error("max update failed", e)));
+  return new Response("ok");
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -58,6 +98,8 @@ export default {
       return handle(request);
     }
     if (url.pathname === "/init") return handleInit(request, env, origin);
+    if (url.pathname === "/max/webhook" && request.method === "POST") return handleMaxWebhook(request, env, origin, ctx);
+    if (url.pathname === "/max/init") return handleMaxInit(request, env, origin);
     if (url.pathname === "/health") return new Response("ok");
     if (url.pathname.startsWith("/api/")) return handleApi(request, env);
 

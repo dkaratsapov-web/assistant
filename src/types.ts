@@ -13,6 +13,11 @@ export interface Env {
   YANDEX_MODEL?: string;      // напр. "yandexgpt/latest" или "yandexgpt-lite/latest"
   TZ_OFFSET?: string;
   DIGEST_HOUR?: string;
+  // Канал MAX (мессенджер MAX)
+  MAX_BOT_TOKEN?: string;      // секрет: токен бота из @BotFather в MAX
+  MAX_WEBHOOK_SECRET?: string; // секрет: проверка заголовка X-Max-Bot-Api-Secret
+  MAX_OWNER_ID?: string;       // user_id владельца в MAX (приватный режим)
+  MAX_API_URL?: string;        // базовый хост, по умолчанию https://platform-api.max.ru
 }
 
 export const ROLE_OWNER = "owner";
