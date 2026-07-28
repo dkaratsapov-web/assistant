@@ -48,7 +48,7 @@ schema.sql            таблицы базы D1
    передеплоивать при каждом `git push`.
 4. **Задай секреты** (Worker → Settings → Variables and Secrets):
    `BOT_TOKEN`, `OWNER_ID`, `WEBHOOK_SECRET` (любая длинная случайная строка),
-   и по желанию `ANTHROPIC_API_KEY`.
+   и для ИИ — `YANDEX_API_KEY` (секрет) + `YANDEX_FOLDER_ID` (каталог Yandex Cloud).
 5. **Активируй бота:** открой в браузере `https://<твой-воркер>.workers.dev/init?secret=<WEBHOOK_SECRET>`
    один раз — зарегистрируется webhook, команды и кнопка Mini App.
 
@@ -73,9 +73,13 @@ npm run dev                      # wrangler dev
 
 | Переменная | По умолчанию | Что это |
 |---|---|---|
-| `ANTHROPIC_MODEL` | `claude-opus-4-8` | Модель ИИ (можно `claude-sonnet-5`) |
+| `YANDEX_MODEL` | `yandexgpt/latest` | Модель ИИ (`yandexgpt/latest` — Pro, `yandexgpt-lite/latest` — дешевле) |
+| `YANDEX_FOLDER_ID` | — | Идентификатор каталога Yandex Cloud (можно задать секретом) |
 | `TZ_OFFSET` | `3` | Смещение часового пояса от UTC (Москва = 3) |
 | `DIGEST_HOUR` | `9` | Час утреннего дайджеста |
+
+ИИ работает на **YandexGPT** (Yandex Cloud Foundation Models). Нужны `YANDEX_API_KEY`
+(секрет — API-ключ сервисного аккаунта с ролью `ai.languageModels.user`) и `YANDEX_FOLDER_ID`.
 
 ---
 

@@ -1,4 +1,4 @@
-/** ИИ-помощник: запрос к Claude API (Anthropic Messages API) через fetch. */
+/** ИИ-помощник: запрос к YandexGPT (Yandex Cloud Foundation Models API) через fetch. */
 
 const SYSTEM_PROMPT = `Ты — ИИ-ассистент маркетолога-практика с многолетним стажем. \
 Специализация владельца: контекстная реклама (Яндекс Директ, Google Ads), \
@@ -15,39 +15,58 @@ const SYSTEM_PROMPT = `Ты — ИИ-ассистент маркетолога-�
 - Без воды и общих фраз. Сразу полезное.
 - Формат — обычный текст (Telegram), без Markdown-таблиц. Списки — через тире или цифры.`;
 
-interface AnthropicResponse {
-  content?: { type: string; text?: string }[];
+interface YandexResponse {
+  result?: {
+    alternatives?: { message?: { role?: string; text?: string }; status?: string }[];
+  };
+  // формат ошибки Yandex Cloud
   error?: { message?: string };
+  message?: string;
+  code?: number;
 }
 
-export async function askAI(apiKey: string, model: string, prompt: string): Promise<string> {
+/**
+ * Запрос к YandexGPT.
+ * @param apiKey   API-ключ сервисного аккаунта (роль ai.languageModels.user). Секрет.
+ * @param folderId Идентификатор каталога Yandex Cloud.
+ * @param prompt   Текст запроса пользователя.
+ * @param model    Имя модели без каталога, напр. "yandexgpt/latest" или "yandexgpt-lite/latest".
+ */
+export async function askAI(
+  apiKey: string,
+  folderId: string,
+  prompt: string,
+  model = "yandexgpt/latest"
+): Promise<string> {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        Authorization: `Api-Key ${apiKey}`,
+        "x-folder-id": folderId,
       },
       body: JSON.stringify({
-        model,
-        max_tokens: 2000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: prompt }],
+        modelUri: `gpt://${folderId}/${model}`,
+        completionOptions: { stream: false, temperature: 0.6, maxTokens: "2000" },
+        messages: [
+          { role: "system", text: SYSTEM_PROMPT },
+          { role: "user", text: prompt },
+        ],
       }),
     });
 
-    const data = (await res.json()) as AnthropicResponse;
+    const data = (await res.json()) as YandexResponse;
     if (!res.ok) {
-      return `⚠️ Ошибка ИИ (${res.status}): ${data.error?.message ?? "неизвестная"}`;
+      const msg = data.error?.message ?? data.message ?? "неизвестная";
+      return `⚠️ Ошибка ИИ (${res.status}): ${msg}`;
     }
-    const text = (data.content ?? [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
+    const text = (data.result?.alternatives ?? [])
+      .map((a) => a.message?.text ?? "")
       .join("\n")
       .trim();
     return text || "ИИ вернул пустой ответ, попробуй переформулировать.";
   } catch (e) {
-    return `⚠️ Не удалось связаться с Claude: ${(e as Error).message}`;
+    return `⚠️ Не удалось связаться с YandexGPT: ${(e as Error).message}`;
   }
 }

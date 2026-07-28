@@ -6,9 +6,11 @@ export interface Env {
   BOT_TOKEN: string;
   OWNER_ID: string;
   WEBHOOK_SECRET: string;
-  ANTHROPIC_API_KEY?: string;
+  // ИИ: YandexGPT (Yandex Cloud Foundation Models)
+  YANDEX_API_KEY?: string;    // секрет: API-ключ сервисного аккаунта
   // Переменные (wrangler.toml [vars])
-  ANTHROPIC_MODEL?: string;
+  YANDEX_FOLDER_ID?: string;  // идентификатор каталога Yandex Cloud
+  YANDEX_MODEL?: string;      // напр. "yandexgpt/latest" или "yandexgpt-lite/latest"
   TZ_OFFSET?: string;
   DIGEST_HOUR?: string;
 }

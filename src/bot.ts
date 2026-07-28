@@ -568,8 +568,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       }
       case BTN_HELP: return ctx.reply(HELP_TEXT, HTML);
       case BTN_AI: {
-        if (!env.ANTHROPIC_API_KEY) {
-          await ctx.reply("ИИ-помощник не настроен. Добавь ключ ANTHROPIC_API_KEY, чтобы включить.");
+        if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
+          await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
           return;
         }
         await db.setState(ctx.from!.id, { step: "ai_mode" });
@@ -607,12 +607,12 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   async function replyAI(ctx: MyContext, prompt: string) {
-    if (!env.ANTHROPIC_API_KEY) {
-      await ctx.reply("ИИ-помощник не настроен. Добавь ключ ANTHROPIC_API_KEY, чтобы включить.");
+    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
+      await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
       return;
     }
     const thinking = await ctx.reply("💭 Думаю…");
-    const answer = await askAI(env.ANTHROPIC_API_KEY, env.ANTHROPIC_MODEL ?? "claude-opus-4-8", prompt);
+    const answer = await askAI(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, prompt, env.YANDEX_MODEL ?? "yandexgpt/latest");
     try {
       await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id);
     } catch {}
