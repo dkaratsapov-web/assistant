@@ -90,6 +90,12 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   const reply = (t: string, kb?: MaxButton[][]) =>
     client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, t, kb);
 
+  // /whoami — доступно всем: помогает узнать свой user_id для MAX_OWNER_ID
+  if ((text ?? "").trim().toLowerCase() === "/whoami") {
+    if (callbackId) await client.answerCallback(callbackId).catch(() => {});
+    return void (await reply(`Твой MAX user_id: ${senderId}`).catch(() => {}));
+  }
+
   // Доступ: пока только владелец (общие данные с Telegram под OWNER_ID)
   const ownerMax = parseInt(env.MAX_OWNER_ID ?? "0", 10);
   if (!ownerMax || senderId !== ownerMax) {
