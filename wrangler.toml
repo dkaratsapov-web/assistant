@@ -1,4 +1,4 @@
-name = "assistant-bot"
+name = "assistant"
 main = "src/index.ts"
 compatibility_date = "2024-11-27"
 compatibility_flags = ["nodejs_compat"]
