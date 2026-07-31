@@ -10,7 +10,7 @@ import {
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
-import { formatDue, formatEventTime, localInputToUtc, parseDue, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, localInputToUtc, nowContext, parseDue, resolveWhen, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
 
@@ -69,7 +69,7 @@ async function performIntent(
   if (intent.action === "task") {
     const title = (intent.title ?? "").trim();
     if (!title) return null;
-    const dueAt = intent.due ? parseDue(intent.due, tz) : null;
+    const dueAt = intent.due ? resolveWhen(intent.due, tz, 10) : null;
     const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt });
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
@@ -80,7 +80,7 @@ async function performIntent(
   if (intent.action === "event") {
     const title = (intent.title ?? "").trim();
     if (!title) return null;
-    const startsAt = intent.at ? parseDue(intent.at, tz) : null;
+    const startsAt = intent.at ? resolveWhen(intent.at, tz, 12) : null;
     if (!startsAt) return `📅 Встречу «${title}» пока не добавила — не поняла дату и время. Уточни, например: «завтра в 15:00».`;
     const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "" });
     const loc = intent.location ? `\n📍 ${intent.location}` : "";
@@ -217,7 +217,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     // 1) Определяем: это команда (создать задачу/встречу/контакт) или обычный вопрос?
     let reply: string;
-    const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, model);
+    const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, nowContext(tz), model);
     const action = await performIntent(intent, db, uid, tz);
     if (action) {
       reply = action;

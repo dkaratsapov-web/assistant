@@ -16,7 +16,7 @@ import {
   TASK_STATUS_LABELS,
   User,
 } from "./types";
-import { escapeHtml, extractTags, formatDue, parseDue, platformsToText, tzOffsetOf } from "./utils";
+import { escapeHtml, extractTags, formatDue, nowContext, parseDue, platformsToText, resolveWhen, tzOffsetOf } from "./utils";
 
 export type MyContext = Context & {
   db: DB;
@@ -557,7 +557,11 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       const audio = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
       transcript = await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio);
     } catch (e) {
-      await finish(`⚠️ Не удалось распознать: ${(e as Error).message}`);
+      const msg = (e as Error).message || "";
+      const hint = /403|permission|forbidden|unauthorized|denied/i.test(msg)
+        ? "\n\nПохоже, у сервисного аккаунта нет прав на распознавание речи. Добавь ему роль <b>ai.speechkit-stt.user</b> в Yandex Cloud."
+        : "";
+      await finish(`⚠️ Не удалось распознать голос: ${escapeHtml(msg)}${hint}`, HTML);
       return;
     }
     if (!transcript) {
@@ -573,9 +577,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     }
 
     // Иначе — превращаем в задачу
-    const parsed = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, transcript, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    const parsed = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, transcript, nowContext(tz), env.YANDEX_MODEL ?? "yandexgpt/latest");
     const title = parsed?.title || transcript;
-    const dueAt = parseDue(parsed?.due || transcript, tz);
+    const dueAt = resolveWhen(parsed?.due || transcript, tz, 10);
     const scope = parsed?.scope === "personal" ? "personal" : "work";
     const id = await db.addTask({ title, creatorId: ctx.from!.id, assigneeId: ctx.from!.id, scope, dueAt });
     const dueLine = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
