@@ -2,6 +2,7 @@ import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate } from "./telemost";
+import { transcribeVoice } from "./speech";
 import {
   Env,
   ROLE_OWNER,
@@ -79,7 +80,20 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
-    return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db) });
+    return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // POST /api/voice — распознать речь (PCM 16кГц из вебапа) → текст
+  if (path === "/api/voice" && request.method === "POST") {
+    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return json({ error: "stt_not_configured" }, 400);
+    const audio = await request.arrayBuffer();
+    if (!audio || audio.byteLength < 800) return json({ error: "empty_audio" }, 400);
+    try {
+      const text = await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio, { format: "lpcm", sampleRateHertz: 16000 });
+      return json({ text });
+    } catch (e) {
+      return json({ error: "stt_failed", message: (e as Error).message }, 502);
+    }
   }
 
   // GET /api/tasks

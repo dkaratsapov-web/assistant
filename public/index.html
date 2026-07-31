@@ -159,6 +159,7 @@
     .field input, .field select, .field textarea { width: 100%; padding: 13px; border-radius: var(--radius-sm); border: 1px solid var(--border);
       background: var(--surface-2); color: var(--text); font-size: 15px; outline: none; transition: border-color .15s ease; }
     .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--border-strong); }
+    .field select option { color: #111; background: #fff; }  /* читаемо в нативном меню при любой теме */
     .field textarea { resize: vertical; min-height: 56px; }
     .check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--fg); }
@@ -217,11 +218,14 @@
   <script>
     const tg = window.Telegram.WebApp;
     tg.ready(); tg.expand();
+    // На мобильном Telegram перехватывает вертикальный свайп и мешает вводу в поля — отключаем
+    try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
     const INIT = tg.initData || "";
     const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
 
     const $ = (id) => document.getElementById(id);
     const view = $("view");
+    const setHTML = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
     const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const haptic = (t = "light") => { try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
     $("avatar").src = SARA;
@@ -353,6 +357,7 @@
         const { tasks } = await api(`/tasks?scope=${taskScope}&status=${taskStatus}`);
         tasksCache = tasks;
         const el = $("tasklist");
+        if (!el) return;
         if (!tasks.length) { el.innerHTML = emptyBox("Задач нет", "Нажми «+», чтобы добавить."); return; }
         const ED = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg>';
         const DEL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>';
@@ -374,7 +379,7 @@
               <button class="btn ghost" onclick="delTask(${t.id})" aria-label="Удалить">${DEL}</button>
             </div></div>`;
         }).join("");
-      } catch (e) { $("tasklist").innerHTML = err(e); }
+      } catch (e) { setHTML("tasklist", err(e)); }
     }
 
     let calView = "list";       // list | month
@@ -397,7 +402,7 @@
           ...tk.tasks.filter((t) => t.due_at).map((t) => ({ kind: "task", id: t.id, title: t.title, at: t.due_at, scope: t.scope })),
         ].sort((a, b) => new Date(a.at) - new Date(b.at));
         calView === "month" ? calRenderMonth() : calRenderList();
-      } catch (e) { $("calbody").innerHTML = err(e); }
+      } catch (e) { setHTML("calbody", err(e)); }
     }
     window.calSetView = (v) => { calView = v; calSelDay = null; renderCalendar(); };
     window.calPrev = () => { calMonthOffset--; calSelDay = null; calRenderMonth(); };
@@ -415,6 +420,7 @@
 
     function calRenderList() {
       const el = $("calbody");
+      if (!el) return;
       if (!calItems.length) { el.innerHTML = emptyBox("Пусто", "Нет встреч и задач со сроком. Добавь кнопкой «+»."); return; }
       const groups = {};
       calItems.forEach((it) => { const k = dayKey(new Date(it.at)); (groups[k] = groups[k] || []).push(it); });
@@ -473,6 +479,7 @@
         const { contacts } = await api("/contacts");
         contactsCache = contacts;
         const el = $("clist");
+        if (!el) return;
         if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с ДР — напомню заранее."); return; }
         el.innerHTML = contacts.map((c) => {
           const tags = (c.tags || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -481,7 +488,7 @@
           <div class="meta">${c.birthday?`<span class="pill strong">🎂 ${esc(fmtBd(c.birthday))}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}${tags.map((t)=>`<span class="pill">#${esc(t)}</span>`).join("")}</div>
           <div class="actions"><button class="btn" onclick="editContact(${c.id})">Изменить</button><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
         </div>`; }).join("");
-      } catch (e) { $("clist").innerHTML = err(e); }
+      } catch (e) { setHTML("clist", err(e)); }
     }
 
     async function renderClients() {
@@ -491,6 +498,7 @@
         const { clients } = await api("/clients");
         clientsCache = clients;
         const el = $("cllist");
+        if (!el) return;
         if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Нажми «+» или скажи Саре: «добавь клиента …»."); return; }
         el.innerHTML = clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
@@ -502,7 +510,7 @@
               <button class="btn ghost" onclick="delClient(${c.id})">✕</button>
             </div></div>`;
         }).join("");
-      } catch (e) { $("cllist").innerHTML = err(e); }
+      } catch (e) { setHTML("cllist", err(e)); }
     }
 
     /* ---------- ИИ-чат ---------- */
@@ -526,21 +534,66 @@
         `<div class="ai-wrap" id="ai-scroll"></div>
          <div class="chatbar"><div class="chatbar-inner">
            <input id="ai-input" placeholder="Сообщение Саре…" autocomplete="off" enterkeyhint="send">
+           ${me.voice ? `<button id="ai-mic" aria-label="Голос" style="background:transparent;border:0;color:var(--muted);cursor:pointer;display:flex;align-items:center;padding:6px"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg></button>` : ""}
            <button id="ai-send" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
          </div></div>`;
       if (!aiLoaded) { try { aiHistory = (await api("/ai/history")).messages || []; } catch (e) { aiHistory = []; } aiLoaded = true; }
+      if (tab !== "ai") return; // вкладку сменили, пока грузилась история
       aiRenderMessages();
-      const input = $("ai-input");
-      $("ai-send").onclick = () => aiSend(input.value);
+      const input = $("ai-input"), send = $("ai-send");
+      if (!input || !send) return;
+      send.onclick = () => aiSend(input.value);
+      const mic = $("ai-mic"); if (mic) mic.onclick = toggleMic;
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aiSend(input.value); } });
       aiScrollBottom();
-      setTimeout(() => input.focus(), 150);
+      setTimeout(() => { const i = $("ai-input"); if (i) i.focus(); }, 150);
     }
     window.aiClear = async () => {
       if (!confirm("Очистить переписку с Сарой?")) return;
       haptic(); try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
       aiHistory = []; aiRenderMessages();
     };
+    /* ---------- Голосовой ввод (запись PCM 16кГц → SpeechKit) ---------- */
+    let micRec = null;
+    function downsampleTo16k(data, from) {
+      if (from <= 16000) return data;
+      const ratio = from / 16000, outLen = Math.floor(data.length / ratio), out = new Float32Array(outLen);
+      for (let i = 0; i < outLen; i++) out[i] = data[Math.floor(i * ratio)];
+      return out;
+    }
+    window.toggleMic = async () => {
+      const mic = $("ai-mic");
+      if (micRec) { if (mic) mic.style.color = "var(--muted)"; const bytes = await micRec.stop(); micRec = null; await sendVoice(bytes); return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ac = new AC(); const src = ac.createMediaStreamSource(stream);
+        const proc = ac.createScriptProcessor(4096, 1, 1); const buf = [];
+        proc.onaudioprocess = (e) => buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        src.connect(proc); proc.connect(ac.destination);
+        micRec = { stop: async () => {
+          proc.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop());
+          const rate = ac.sampleRate; await ac.close();
+          let len = buf.reduce((s, a) => s + a.length, 0); const flat = new Float32Array(len); let o = 0;
+          for (const a of buf) { flat.set(a, o); o += a.length; }
+          const ds = downsampleTo16k(flat, rate); const i16 = new Int16Array(ds.length);
+          for (let i = 0; i < ds.length; i++) { const s = Math.max(-1, Math.min(1, ds[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+          return new Uint8Array(i16.buffer);
+        } };
+        if (mic) mic.style.color = "#e5484d"; haptic();
+      } catch (e) { tg.showAlert("Микрофон недоступен. Разреши доступ в настройках или используй голос в чате бота."); }
+    };
+    async function sendVoice(bytes) {
+      if (!bytes || bytes.byteLength < 1600) return;
+      const input = $("ai-input"); if (input) input.placeholder = "Распознаю…";
+      try {
+        const res = await fetch("/api/voice", { method: "POST", headers: { "X-Telegram-Init-Data": INIT }, body: bytes });
+        const d = await res.json().catch(() => ({}));
+        if (input) input.placeholder = "Сообщение Саре…";
+        if (res.ok && d.text) aiSend(d.text);
+        else tg.showAlert(d.message || "Не расслышала, попробуй ещё раз ближе к микрофону.");
+      } catch (e) { if (input) input.placeholder = "Сообщение Саре…"; tg.showAlert("Ошибка распознавания."); }
+    }
     window.aiSend = async (text) => {
       text = (text || "").trim();
       if (!text || tab !== "ai") return;

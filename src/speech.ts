@@ -12,16 +12,19 @@ interface SttResponse {
   error_message?: string;
 }
 
-/** Распознаёт русскую речь из аудио (OGG/Opus). Возвращает текст или бросает ошибку. */
+/** Распознаёт русскую речь из аудио. По умолчанию OGG/Opus (голос Telegram); для вебапа — lpcm 16кГц. */
 export async function transcribeVoice(
   apiKey: string,
   folderId: string,
   audio: ArrayBuffer,
-  lang = "ru-RU"
+  opts: { lang?: string; format?: "oggopus" | "lpcm"; sampleRateHertz?: number } = {}
 ): Promise<string> {
-  const url =
+  const lang = opts.lang ?? "ru-RU";
+  const format = opts.format ?? "oggopus";
+  let url =
     `https://stt.api.cloud.yandex.net/speech/v1/stt:recognize` +
-    `?lang=${encodeURIComponent(lang)}&format=oggopus&folderId=${encodeURIComponent(folderId)}`;
+    `?lang=${encodeURIComponent(lang)}&format=${format}&folderId=${encodeURIComponent(folderId)}`;
+  if (format === "lpcm") url += `&sampleRateHertz=${opts.sampleRateHertz ?? 16000}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Api-Key ${apiKey}` },
