@@ -5,6 +5,7 @@ import {
   FoodEntry,
   NotifSettings,
   Note,
+  SupplementRow,
   ROLE_OWNER,
   Task,
   TASK_DONE,
@@ -539,6 +540,100 @@ export class DB {
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind(key, value)
       .run();
+  }
+
+  // ---------- БАДы / фарма (курсы приёма) ----------
+  private suppReady = false;
+  private async ensureSupp(): Promise<void> {
+    if (this.suppReady) return;
+    await this.d1
+      .prepare(
+        "CREATE TABLE IF NOT EXISTS supplement (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, dose TEXT DEFAULT '', times TEXT DEFAULT '[]', start_date TEXT DEFAULT '', days INTEGER DEFAULT 0, notes TEXT DEFAULT '', active INTEGER DEFAULT 1, created_at TEXT NOT NULL)"
+      )
+      .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS supplement_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, sup_id INTEGER NOT NULL, date TEXT NOT NULL, slot TEXT NOT NULL, created_at TEXT NOT NULL)")
+      .run();
+    this.suppReady = true;
+  }
+
+  async addSupplement(userId: number, s: { name: string; dose?: string; times?: string[]; startDate?: string; days?: number; notes?: string }): Promise<number> {
+    await this.ensureSupp();
+    const res = await this.d1
+      .prepare("INSERT INTO supplement (user_id, name, dose, times, start_date, days, notes, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)")
+      .bind(userId, s.name, s.dose ?? "", JSON.stringify(s.times ?? []), s.startDate ?? "", s.days ?? 0, s.notes ?? "", nowIso())
+      .run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listSupplements(userId: number, activeOnly = true): Promise<SupplementRow[]> {
+    await this.ensureSupp();
+    const sql = activeOnly
+      ? "SELECT * FROM supplement WHERE user_id = ? AND active = 1 ORDER BY name"
+      : "SELECT * FROM supplement WHERE user_id = ? ORDER BY active DESC, name";
+    const { results } = await this.d1.prepare(sql).bind(userId).all<SupplementRow>();
+    return results ?? [];
+  }
+
+  /** Все активные курсы всех пользователей — для планировщика напоминаний. */
+  async allActiveSupplements(): Promise<SupplementRow[]> {
+    await this.ensureSupp();
+    const { results } = await this.d1.prepare("SELECT * FROM supplement WHERE active = 1").all<SupplementRow>();
+    return results ?? [];
+  }
+
+  async updateSupplement(id: number, userId: number, fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number }): Promise<void> {
+    await this.ensureSupp();
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
+    if (fields.dose !== undefined) { sets.push("dose = ?"); binds.push(fields.dose); }
+    if (fields.times !== undefined) { sets.push("times = ?"); binds.push(JSON.stringify(fields.times)); }
+    if (fields.days !== undefined) { sets.push("days = ?"); binds.push(fields.days); }
+    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
+    if (fields.active !== undefined) { sets.push("active = ?"); binds.push(fields.active); }
+    if (!sets.length) return;
+    binds.push(id, userId);
+    await this.d1.prepare(`UPDATE supplement SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+  }
+
+  async deleteSupplement(id: number, userId: number): Promise<void> {
+    await this.ensureSupp();
+    await this.d1.prepare("DELETE FROM supplement WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    await this.d1.prepare("DELETE FROM supplement_log WHERE sup_id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  /** Переключить отметку приёма (принял/отменил). Возвращает true, если теперь принято. */
+  async toggleSupLog(userId: number, supId: number, date: string, slot: string): Promise<boolean> {
+    await this.ensureSupp();
+    const existing = await this.d1
+      .prepare("SELECT id FROM supplement_log WHERE user_id = ? AND sup_id = ? AND date = ? AND slot = ?")
+      .bind(userId, supId, date, slot)
+      .first<{ id: number }>();
+    if (existing) {
+      await this.d1.prepare("DELETE FROM supplement_log WHERE id = ?").bind(existing.id).run();
+      return false;
+    }
+    await this.d1.prepare("INSERT INTO supplement_log (user_id, sup_id, date, slot, created_at) VALUES (?, ?, ?, ?, ?)").bind(userId, supId, date, slot, nowIso()).run();
+    return true;
+  }
+
+  async supLogs(userId: number, dateFrom: string, dateTo: string): Promise<{ sup_id: number; date: string; slot: string }[]> {
+    await this.ensureSupp();
+    const { results } = await this.d1
+      .prepare("SELECT sup_id, date, slot FROM supplement_log WHERE user_id = ? AND date >= ? AND date <= ?")
+      .bind(userId, dateFrom, dateTo)
+      .all<{ sup_id: number; date: string; slot: string }>();
+    return results ?? [];
+  }
+
+  async supTaken(userId: number, supId: number, date: string, slot: string): Promise<boolean> {
+    await this.ensureSupp();
+    const r = await this.d1
+      .prepare("SELECT id FROM supplement_log WHERE user_id = ? AND sup_id = ? AND date = ? AND slot = ?")
+      .bind(userId, supId, date, slot)
+      .first();
+    return !!r;
   }
 
   // ---------- Настройки уведомлений (на пользователя) ----------

@@ -85,6 +85,86 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
   }
 
+  // ---------- БАДы / фарма ----------
+  if (path.startsWith("/api/supplements")) {
+    const tzs = tzOffsetOf(env);
+    const dStr = (off: number) => new Date(Date.parse(startOfLocalDayOffsetIso(tzs, off)) + tzs * 3600_000).toISOString().slice(0, 10);
+    const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+    const activeOn = (c: { start_date: string; days: number }, d: string) => {
+      if (c.start_date && d < c.start_date) return false;
+      if (c.days && c.start_date && d >= addDays(c.start_date, c.days)) return false;
+      return true;
+    };
+
+    // GET /api/supplements — курсы + чек-лист на сегодня + адхеренс за 7 дней
+    if (path === "/api/supplements" && request.method === "GET") {
+      const today = dStr(0);
+      const list = await db.listSupplements(uid, true);
+      const logs = await db.supLogs(uid, dStr(-6), today);
+      const has = (sup: number, date: string, slot: string) => logs.some((l) => l.sup_id === sup && l.date === date && l.slot === slot);
+      const items: { supId: number; name: string; dose: string; slot: string; taken: boolean }[] = [];
+      for (const c of list) {
+        if (!activeOn(c, today)) continue;
+        for (const slot of JSON.parse(c.times || "[]") as string[]) items.push({ supId: c.id, name: c.name, dose: c.dose, slot, taken: has(c.id, today, slot) });
+      }
+      items.sort((a, b) => a.slot.localeCompare(b.slot));
+      const adherence: { date: string; taken: number; total: number }[] = [];
+      for (let o = -6; o <= 0; o++) {
+        const d = dStr(o);
+        let total = 0, taken = 0;
+        for (const c of list) {
+          if (!activeOn(c, d)) continue;
+          const slots = JSON.parse(c.times || "[]") as string[];
+          total += slots.length;
+          taken += slots.filter((s) => has(c.id, d, s)).length;
+        }
+        adherence.push({ date: d, taken, total });
+      }
+      return json({ supplements: list.map((c) => ({ id: c.id, name: c.name, dose: c.dose, times: JSON.parse(c.times || "[]"), days: c.days, start_date: c.start_date, notes: c.notes })), today: { date: today, items }, adherence });
+    }
+
+    // POST /api/supplements — добавить курс
+    if (path === "/api/supplements" && request.method === "POST") {
+      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; notes?: string };
+      const name = (b.name ?? "").trim();
+      if (!name) return json({ error: "empty_name" }, 400);
+      const times = (Array.isArray(b.times) ? b.times : []).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, "0"));
+      const id = await db.addSupplement(uid, { name, dose: (b.dose ?? "").trim(), times, startDate: dStr(0), days: Math.max(0, Math.round(+(b.days ?? 0) || 0)), notes: (b.notes ?? "").trim() });
+      return json({ ok: true, id });
+    }
+
+    // POST /api/supplements/check — отметить/снять приём
+    if (path === "/api/supplements/check" && request.method === "POST") {
+      const b = (await request.json()) as { supId?: number; slot?: string; date?: string };
+      if (!b.supId || !b.slot) return json({ error: "bad_args" }, 400);
+      const date = b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : dStr(0);
+      const taken = await db.toggleSupLog(uid, b.supId, date, b.slot);
+      return json({ ok: true, taken });
+    }
+
+    // POST /api/supplements/{id} — изменить / пауза
+    const supEdit = path.match(/^\/api\/supplements\/(\d+)$/);
+    if (supEdit && request.method === "POST") {
+      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number };
+      const fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number } = {};
+      if (b.name !== undefined) fields.name = b.name.trim();
+      if (b.dose !== undefined) fields.dose = b.dose;
+      if (b.times !== undefined) fields.times = (Array.isArray(b.times) ? b.times : []).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, "0"));
+      if (b.days !== undefined) fields.days = Math.max(0, Math.round(+b.days || 0));
+      if (b.notes !== undefined) fields.notes = b.notes;
+      if (b.active !== undefined) fields.active = b.active ? 1 : 0;
+      await db.updateSupplement(parseInt(supEdit[1], 10), uid, fields);
+      return json({ ok: true });
+    }
+
+    // DELETE /api/supplements/{id}
+    const supDel = path.match(/^\/api\/supplements\/(\d+)$/);
+    if (supDel && request.method === "DELETE") {
+      await db.deleteSupplement(parseInt(supDel[1], 10), uid);
+      return json({ ok: true });
+    }
+  }
+
   // ---------- Настройки уведомлений ----------
   if (path === "/api/notifications" && request.method === "GET") {
     return json(await db.getNotif(uid));

@@ -110,6 +110,19 @@ export interface Event {
   created_at: string;
 }
 
+export interface SupplementRow {
+  id: number;
+  user_id: number;
+  name: string;
+  dose: string;
+  times: string; // JSON массив "HH:MM"
+  start_date: string;
+  days: number; // 0 = бессрочно
+  notes: string;
+  active: number;
+  created_at: string;
+}
+
 export interface NotifSettings {
   morning: { on: boolean; hour: number };
   tasks: { on: boolean };

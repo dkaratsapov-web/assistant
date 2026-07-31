@@ -55,6 +55,31 @@ async function runWaterReminders(env: Env, db: DB, tz: number): Promise<void> {
   }
 }
 
+/** Напоминания о приёме БАДов/фармы по времени курса. */
+async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<void> {
+  const now = new Date(Date.now() + tz * 3600_000);
+  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const today = new Date(Date.parse(startOfLocalDayIso(tz)) + tz * 3600_000).toISOString().slice(0, 10);
+  const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+  const courses = await db.allActiveSupplements();
+  for (const c of courses) {
+    try {
+      if (c.start_date && today < c.start_date) continue;
+      if (c.days && c.start_date && today >= addDays(c.start_date, c.days)) continue;
+      const slots = JSON.parse(c.times || "[]") as string[];
+      for (const slot of slots) {
+        const [hh, mm] = slot.split(":").map(Number);
+        const diff = nowMin - (hh * 60 + mm);
+        if (diff < 0 || diff >= 5) continue; // попадаем в 5-минутное окно один раз
+        if (await db.supTaken(c.user_id, c.id, today, slot)) continue;
+        await tgSend(env.BOT_TOKEN, c.user_id, `💊 Время принять: <b>${c.name}</b>${c.dose ? ` (${c.dose})` : ""}\nОтметь: Здоровье → 💊 БАДы.`);
+      }
+    } catch (e) {
+      console.error("supp reminder failed", c.id, e);
+    }
+  }
+}
+
 /** Одноразовая настройка: регистрирует webhook, команды и кнопку Mini App. */
 async function handleInit(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
@@ -201,6 +226,8 @@ export default {
       }
       // Напоминания пить воду
       await runWaterReminders(env, db, tz);
+      // Напоминания о приёме БАДов/фармы
+      await runSupplementReminders(env, db, tz);
     } else if (event.cron === "0 * * * *") {
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       const nowLocal = new Date(Date.now() + tz * 3600_000);
