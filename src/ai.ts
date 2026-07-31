@@ -18,15 +18,12 @@ const SYSTEM_PROMPT = `Ты — Сара, персональный ИИ-асси
 - Варианты объявлений давай пронумерованными.
 - Без воды. Формат — обычный текст, без Markdown-таблиц. Списки — через тире или цифры.`;
 
-interface YandexResponse {
-  result?: {
-    alternatives?: { message?: { role?: string; text?: string }; status?: string }[];
-  };
-  // формат ошибки Yandex Cloud
+interface AnthropicResponse {
+  content?: { type: string; text?: string }[];
   error?: { message?: string };
-  message?: string;
-  code?: number;
 }
+
+export const DEFAULT_MODEL = "claude-sonnet-5";
 
 /** Роль сообщения в диалоге. */
 export interface ChatMessage {
@@ -34,60 +31,54 @@ export interface ChatMessage {
   text: string;
 }
 
-/** Низкоуровневый вызов YandexGPT: messages передаются как есть (включая system). */
+/** Низкоуровневый вызов Claude (Anthropic Messages API). system-сообщения выносятся отдельно. */
 async function complete(
   apiKey: string,
-  folderId: string,
   messages: ChatMessage[],
   model: string,
   temperature: number
 ): Promise<string> {
   try {
-    const res = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
+    const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
+    const msgs = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role, content: m.text }));
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        Authorization: `Api-Key ${apiKey}`,
-        "x-folder-id": folderId,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        modelUri: `gpt://${folderId}/${model}`,
-        completionOptions: { stream: false, temperature, maxTokens: "2000" },
-        messages,
-      }),
+      body: JSON.stringify({ model, max_tokens: 2000, temperature, system, messages: msgs }),
     });
 
-    const data = (await res.json()) as YandexResponse;
+    const data = (await res.json()) as AnthropicResponse;
     if (!res.ok) {
-      const msg = data.error?.message ?? data.message ?? "неизвестная";
-      return `⚠️ Ошибка ИИ (${res.status}): ${msg}`;
+      return `⚠️ Ошибка ИИ (${res.status}): ${data.error?.message ?? "неизвестная"}`;
     }
-    const text = (data.result?.alternatives ?? [])
-      .map((a) => a.message?.text ?? "")
+    const text = (data.content ?? [])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
       .join("\n")
       .trim();
     return text || "ИИ вернул пустой ответ, попробуй переформулировать.";
   } catch (e) {
-    return `⚠️ Не удалось связаться с YandexGPT: ${(e as Error).message}`;
+    return `⚠️ Не удалось связаться с ИИ: ${(e as Error).message}`;
   }
 }
 
 /**
- * Многоходовой диалог с YandexGPT (с историей переписки). System-промпт ассистента
+ * Многоходовой диалог с Claude (с историей переписки). System-промпт ассистента
  * добавляется автоматически.
  */
-export function askAIChat(
-  apiKey: string,
-  folderId: string,
-  messages: ChatMessage[],
-  model = "yandexgpt/latest"
-): Promise<string> {
-  return complete(apiKey, folderId, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model, 0.6);
+export function askAIChat(apiKey: string, messages: ChatMessage[], model = DEFAULT_MODEL): Promise<string> {
+  return complete(apiKey, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model, 0.6);
 }
 
-/** Однократный запрос к YandexGPT (обёртка над askAIChat). */
-export function askAI(apiKey: string, folderId: string, prompt: string, model = "yandexgpt/latest"): Promise<string> {
-  return askAIChat(apiKey, folderId, [{ role: "user", text: prompt }], model);
+/** Однократный запрос к Claude (обёртка над askAIChat). */
+export function askAI(apiKey: string, prompt: string, model = DEFAULT_MODEL): Promise<string> {
+  return askAIChat(apiKey, [{ role: "user", text: prompt }], model);
 }
 
 /** Извлечённая из текста задача. */
@@ -149,14 +140,12 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 /** Определяет намерение (действие или обычный вопрос). Возвращает null при ошибке разбора. */
 export async function routeAssistant(
   apiKey: string,
-  folderId: string,
   text: string,
   nowStr: string,
-  model = "yandexgpt/latest"
+  model = DEFAULT_MODEL
 ): Promise<AssistantIntent | null> {
   const raw = await complete(
     apiKey,
-    folderId,
     [
       { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },
@@ -179,14 +168,12 @@ export async function routeAssistant(
 /** Пытается извлечь задачу из произвольного текста (напр. распознанного голоса). */
 export async function parseTaskFromText(
   apiKey: string,
-  folderId: string,
   text: string,
   nowStr: string,
-  model = "yandexgpt/latest"
+  model = DEFAULT_MODEL
 ): Promise<ParsedTask | null> {
   const raw = await complete(
     apiKey,
-    folderId,
     [
       { role: "system", text: `${TASK_PARSE_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },

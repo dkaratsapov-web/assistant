@@ -6,11 +6,12 @@ export interface Env {
   BOT_TOKEN: string;
   OWNER_ID: string;
   WEBHOOK_SECRET: string;
-  // ИИ: YandexGPT (Yandex Cloud Foundation Models)
+  // ИИ-«мозги»: Claude (Anthropic)
+  ANTHROPIC_API_KEY?: string; // секрет
+  ANTHROPIC_MODEL?: string;   // напр. "claude-sonnet-5"
+  // Распознавание речи: Yandex SpeechKit
   YANDEX_API_KEY?: string;    // секрет: API-ключ сервисного аккаунта
-  // Переменные (wrangler.toml [vars])
   YANDEX_FOLDER_ID?: string;  // идентификатор каталога Yandex Cloud
-  YANDEX_MODEL?: string;      // напр. "yandexgpt/latest" или "yandexgpt-lite/latest"
   TZ_OFFSET?: string;
   DIGEST_HOUR?: string;
   // Канал MAX (мессенджер MAX)

@@ -1,5 +1,5 @@
 import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
-import { askAI } from "./ai";
+import { askAI, DEFAULT_MODEL } from "./ai";
 import { tryPerformCommand } from "./intent";
 import { transcribeVoice } from "./speech";
 import { DB } from "./db";
@@ -616,8 +616,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       }
       case BTN_HELP: return ctx.reply(HELP_TEXT, HTML);
       case BTN_AI: {
-        if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
-          await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
+        if (!env.ANTHROPIC_API_KEY) {
+          await ctx.reply("ИИ-помощник не настроен. Добавь ANTHROPIC_API_KEY, чтобы включить.");
           return;
         }
         await db.setState(ctx.from!.id, { step: "ai_mode" });
@@ -655,12 +655,12 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   async function replyAI(ctx: MyContext, prompt: string) {
-    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
-      await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
+    if (!env.ANTHROPIC_API_KEY) {
+      await ctx.reply("ИИ-помощник не настроен. Добавь ANTHROPIC_API_KEY, чтобы включить.");
       return;
     }
     const thinking = await ctx.reply("💭 Думаю…");
-    const answer = await askAI(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, prompt, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    const answer = await askAI(env.ANTHROPIC_API_KEY, prompt, env.ANTHROPIC_MODEL ?? DEFAULT_MODEL);
     try {
       await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id);
     } catch {}

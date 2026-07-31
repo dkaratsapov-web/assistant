@@ -3,7 +3,7 @@
  * и создаёт запись в БД. Используется и в Mini App (/api/ai), и в боте (текст/голос),
  * чтобы поведение было одинаковым.
  */
-import { AssistantIntent, parseTaskFromText, routeAssistant } from "./ai";
+import { AssistantIntent, DEFAULT_MODEL, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK } from "./types";
 import { formatDue, formatEventTime, nowContext, resolveWhen, tzOffsetOf } from "./utils";
@@ -94,17 +94,17 @@ export async function tryPerformCommand(
   text: string,
   forceTask = false
 ): Promise<string | null> {
-  if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return null;
+  if (!env.ANTHROPIC_API_KEY) return null;
   const tz = tzOffsetOf(env);
-  const model = env.YANDEX_MODEL ?? "yandexgpt/latest";
+  const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
   const now = nowContext(tz);
 
-  const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, text, now, model);
+  const intent = await routeAssistant(env.ANTHROPIC_API_KEY, text, now, model);
   let action = await performIntent(intent, db, uid, tz);
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {
-    const p = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, text, now, model);
+    const p = await parseTaskFromText(env.ANTHROPIC_API_KEY, text, now, model);
     const title = (p?.title || text).trim();
     if (title) {
       const dueAt = p?.due ? resolveWhen(p.due, tz, 10) : resolveWhen(text, tz, 10);

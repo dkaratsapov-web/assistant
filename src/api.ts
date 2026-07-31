@@ -1,4 +1,4 @@
-import { askAIChat, ChatMessage } from "./ai";
+import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import {
@@ -169,9 +169,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
-  // POST /api/ai — диалог с ИИ (YandexGPT); история хранится на сервере
+  // POST /api/ai — диалог с ИИ (Claude); история хранится на сервере
   if (path === "/api/ai" && request.method === "POST") {
-    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return json({ error: "ai_not_configured" }, 400);
+    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
     const body = (await request.json()) as { messages?: { role?: string; content?: string }[]; prompt?: string };
     let userText = typeof body.prompt === "string" ? body.prompt.trim() : "";
     if (!userText && Array.isArray(body.messages)) {
@@ -180,7 +180,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (!userText) return json({ error: "empty" }, 400);
 
-    const model = env.YANDEX_MODEL ?? "yandexgpt/latest";
+    const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
 
     // 1) Команда (создать задачу/встречу/контакт) или обычный вопрос?
     let reply: string;
@@ -196,7 +196,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
         { role: "user", text: userText },
       ];
-      reply = await askAIChat(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, msgs, model);
+      reply = await askAIChat(env.ANTHROPIC_API_KEY, msgs, model);
     }
     // Сохраняем в кеш (даже если это сообщение об ошибке — чтобы диалог был честным)
     await db.addAiMessage(uid, "user", userText);

@@ -18,8 +18,9 @@ database_id = "da843004-b80f-4534-8945-61bfb6f5a7c3"
 crons = ["*/5 * * * *", "0 * * * *"]
 
 [vars]
-# Несекретные настройки. OWNER_ID, BOT_TOKEN и YANDEX_API_KEY задаются как секреты (см. README).
-YANDEX_MODEL = "yandexgpt/latest"   # модель ИИ: yandexgpt/latest (Pro) или yandexgpt-lite/latest
-# YANDEX_FOLDER_ID = "..."          # идентификатор каталога Yandex Cloud — задай тут или секретом
+# Несекретные настройки. Секретами задаются: BOT_TOKEN, OWNER_ID, WEBHOOK_SECRET,
+# ANTHROPIC_API_KEY (ИИ), YANDEX_API_KEY + YANDEX_FOLDER_ID (голос). См. README.
+ANTHROPIC_MODEL = "claude-sonnet-5"  # модель ИИ Claude
+# YANDEX_FOLDER_ID = "..."           # каталог Yandex Cloud для SpeechKit (можно секретом)
 TZ_OFFSET = "3"       # смещение часового пояса от UTC (Москва = 3)
 DIGEST_HOUR = "9"     # час утреннего дайджеста по местному времени

@@ -1,7 +1,7 @@
 # 🤝 Telegram-ассистент маркетолога (Cloudflare)
 
 Личный Telegram-бот **+ Mini App** для контроля задач, дедлайнов, клиентов и заметок —
-с ИИ-помощником на базе YandexGPT. Работает целиком на **Cloudflare** (без своего сервера):
+с ИИ-помощником на базе Claude. Работает целиком на **Cloudflare** (без своего сервера):
 Workers + D1 + Cron + Static Assets. Хостинг практически бесплатный, деплой — из GitHub.
 
 Заточен под работу с контекстной рекламой (Яндекс Директ, Google Ads), таргетом
@@ -15,7 +15,7 @@ Workers + D1 + Cron + Static Assets. Хостинг практически бе�
 - **⏰ Напоминания + ☀️ дайджест** — по расписанию через Cron Triggers.
 - **👥 Клиенты** — карточки с площадками, бюджетом, задачами.
 - **📝 Заметки** — быстрое сохранение через `!`, теги, поиск.
-- **🤖 ИИ-помощник (YandexGPT)** — объявления, заголовки, офферы, разбор лендингов.
+- **🤖 ИИ-помощник (Claude)** — объявления, заголовки, офферы, разбор лендингов, а также голосовой ввод (распознавание — Yandex SpeechKit).
 - **🔐 Роли и доступ** — владелец / команда / клиент, подтверждение по кнопке.
 - **💬 Канал MAX** — тот же бот в мессенджере MAX (общие задачи и данные с Telegram).
 
@@ -28,7 +28,9 @@ Cloudflare Worker (src/) ── webhook ──▶ Telegram
    ├── src/api.ts     API для Mini App + проверка подписи Telegram
    ├── src/db.ts      доступ к базе D1
    ├── src/reports.ts дайджест
-   ├── src/ai.ts      YandexGPT API
+   ├── src/ai.ts      Claude (Anthropic) API
+   ├── src/speech.ts  распознавание речи (Yandex SpeechKit)
+   ├── src/intent.ts  распознавание команд (задачи/встречи/клиенты)
    ├── src/max/       канал MAX (client.ts — Bot API, bot.ts — обработчик)
    └── src/utils.ts   парсинг дат и форматирование
 public/index.html     интерфейс Mini App
@@ -50,7 +52,7 @@ schema.sql            таблицы базы D1
    передеплоивать при каждом `git push`.
 4. **Задай секреты** (Worker → Settings → Variables and Secrets):
    `BOT_TOKEN`, `OWNER_ID`, `WEBHOOK_SECRET` (любая длинная случайная строка),
-   и для ИИ — `YANDEX_API_KEY` (секрет) + `YANDEX_FOLDER_ID` (каталог Yandex Cloud).
+   для ИИ — `ANTHROPIC_API_KEY` (секрет, Claude); для голоса — `YANDEX_API_KEY` (секрет) + `YANDEX_FOLDER_ID` (каталог Yandex Cloud, роль `ai.speechkit-stt.user`).
 5. **Активируй бота:** открой в браузере `https://<твой-воркер>.workers.dev/init?secret=<WEBHOOK_SECRET>`
    один раз — зарегистрируется webhook, команды и кнопка Mini App.
 
@@ -75,13 +77,14 @@ npm run dev                      # wrangler dev
 
 | Переменная | По умолчанию | Что это |
 |---|---|---|
-| `YANDEX_MODEL` | `yandexgpt/latest` | Модель ИИ (`yandexgpt/latest` — Pro, `yandexgpt-lite/latest` — дешевле) |
-| `YANDEX_FOLDER_ID` | — | Идентификатор каталога Yandex Cloud (можно задать секретом) |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Модель ИИ Claude |
+| `YANDEX_FOLDER_ID` | — | Каталог Yandex Cloud для распознавания голоса (можно секретом) |
 | `TZ_OFFSET` | `3` | Смещение часового пояса от UTC (Москва = 3) |
 | `DIGEST_HOUR` | `9` | Час утреннего дайджеста |
 
-ИИ работает на **YandexGPT** (Yandex Cloud Foundation Models). Нужны `YANDEX_API_KEY`
-(секрет — API-ключ сервисного аккаунта с ролью `ai.languageModels.user`) и `YANDEX_FOLDER_ID`.
+**Мозги** — Claude (Anthropic): нужен секрет `ANTHROPIC_API_KEY`.
+**Голос** — Yandex SpeechKit: нужны `YANDEX_API_KEY` (секрет) и `YANDEX_FOLDER_ID`,
+сервисному аккаунту — роль `ai.speechkit-stt.user`.
 
 ---
 

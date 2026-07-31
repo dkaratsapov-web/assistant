@@ -7,7 +7,7 @@
  * задач и календарь одинаковы в обоих мессенджерах. Мультиарендность и роли для
  * MAX добавим на этапе подписок.
  */
-import { askAI } from "../ai";
+import { askAI, DEFAULT_MODEL } from "../ai";
 import { DB } from "../db";
 import { buildDigest } from "../reports";
 import {
@@ -217,11 +217,11 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   }
 
   async function replyAI(prompt: string) {
-    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
-      return void (await reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
+    if (!env.ANTHROPIC_API_KEY) {
+      return void (await reply("ИИ не настроен: добавь ANTHROPIC_API_KEY."));
     }
     await reply("💭 Думаю…");
-    const answer = await askAI(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, prompt, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    const answer = await askAI(env.ANTHROPIC_API_KEY, prompt, env.ANTHROPIC_MODEL ?? DEFAULT_MODEL);
     // MAX ограничивает длину сообщения — режем на части
     for (let i = 0; i < answer.length; i += 3800) await reply(answer.slice(i, i + 3800));
   }
