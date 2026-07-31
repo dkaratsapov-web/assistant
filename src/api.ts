@@ -11,7 +11,7 @@ import {
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
-import { localInputToUtc, parseDue, tzOffsetOf } from "./utils";
+import { localInputToUtc, parseDue, startOfLocalDayIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
 
@@ -226,7 +226,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .slice(0, 8)
       .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, overdue: new Date(t.due_at!).getTime() < nowMs }));
 
-    const events = (await db.listEvents(uid, new Date().toISOString())).slice(0, 5).map((e) => ({
+    const events = (await db.listEvents(uid, startOfLocalDayIso(tz))).slice(0, 5).map((e) => ({
       id: e.id, title: e.title, starts_at: e.starts_at, location: e.location,
     }));
 
@@ -270,7 +270,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/events
   if (path === "/api/events" && request.method === "GET") {
-    const events = await db.listEvents(uid, new Date().toISOString());
+    const events = await db.listEvents(uid, startOfLocalDayIso(tz));
     return json({ events: events.map((e) => ({ id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, notes: e.notes })) });
   }
 

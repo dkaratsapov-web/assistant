@@ -223,6 +223,13 @@ export function localInputToUtc(value: string, tzOffset: number): string | null 
   return new Date(asUtcMs - tzOffset * 3600_000).toISOString();
 }
 
+/** ISO-строка начала сегодняшнего локального дня (00:00 по TZ) в UTC. */
+export function startOfLocalDayIso(tzOffset: number): string {
+  const tzMs = tzOffset * 3600_000;
+  const localDayStart = Math.floor((Date.now() + tzMs) / 86400_000) * 86400_000 - tzMs;
+  return new Date(localDayStart).toISOString();
+}
+
 /** Дата/время события человекочитаемо (для чата/дайджеста). */
 export function formatEventTime(iso: string, tzOffset: number): string {
   const local = new Date(new Date(iso).getTime() + tzOffset * 3600_000);
