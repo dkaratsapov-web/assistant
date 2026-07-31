@@ -112,6 +112,7 @@ export interface Contact {
   birthday: string | null;
   phone: string;
   notes: string;
+  tags: string;
   reminded_year: number | null;
   created_at: string;
 }

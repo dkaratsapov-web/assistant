@@ -248,6 +248,7 @@
     let clientsCache = [];
     let tasksCache = [];
     let eventsCache = [];
+    let contactsCache = [];
     let sheetOpen = false;
     const navStack = ["home"];
 
@@ -276,6 +277,8 @@
     const p2 = (n) => String(n).padStart(2, "0");
     function isoToLocalInput(iso) { const d = new Date(iso); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; }
     function isoToDueText(iso) { if (!iso) return ""; const d = new Date(iso); return `${p2(d.getDate())}.${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; }
+    const MON_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+    function fmtBd(bd) { if (!bd) return ""; const p = bd.split("-"); const mo = p.length === 3 ? +p[1] : +p[0]; const d = p.length === 3 ? +p[2] : +p[1]; if (!mo || !d) return bd; return `${d} ${MON_RU[mo-1]}`; }
     function emptyBox(big, small) { return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`; }
     function err(e) {
       const m = String(e.message || e);
@@ -329,7 +332,7 @@
           h += `<div class="section-title">Скоро дни рождения</div><div class="card">`;
           d.birthdays.forEach((b) => {
             const when = b.in_days === 0 ? "сегодня" : b.in_days === 1 ? "завтра" : "через " + b.in_days + " дн.";
-            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(b.name)}</div><div class="m">${when} · ${b.date}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(b.name)}</div><div class="m">${when} · ${fmtBd(b.date)}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -467,12 +470,16 @@
       view.innerHTML = '<div class="section-title">Контакты и дни рождения</div><div id="clist"><div class="loading">Загрузка…</div></div>';
       try {
         const { contacts } = await api("/contacts");
+        contactsCache = contacts;
         const el = $("clist");
         if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с ДР — напомню заранее."); return; }
-        el.innerHTML = contacts.map((c) => `<div class="card item">
-          <div class="top"><div class="name">${esc(c.name)}</div><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
-          <div class="meta">${c.birthday?`<span class="pill strong">${esc(c.birthday)}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}</div>
-        </div>`).join("");
+        el.innerHTML = contacts.map((c) => {
+          const tags = (c.tags || "").split(",").map((s) => s.trim()).filter(Boolean);
+          return `<div class="card item">
+          <div class="top"><div class="name">${esc(c.name)}</div></div>
+          <div class="meta">${c.birthday?`<span class="pill strong">🎂 ${esc(fmtBd(c.birthday))}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}${tags.map((t)=>`<span class="pill">#${esc(t)}</span>`).join("")}</div>
+          <div class="actions"><button class="btn" onclick="editContact(${c.id})">Изменить</button><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
+        </div>`; }).join("");
       } catch (e) { $("clist").innerHTML = err(e); }
     }
 
@@ -612,17 +619,25 @@
       closeSheet(); renderCalendar();
     };
 
-    function openAddContact() {
-      openSheet(`<h3>Новый контакт</h3>
-        <div class="field"><label>Имя</label><input id="f-name" placeholder="Имя Фамилия"></div>
-        <div class="field"><label>День рождения</label><input id="f-bd" type="date"></div>
-        <div class="field"><label>Телефон / контакт</label><input id="f-phone" placeholder="+7… / @ник"></div>
-        <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Компания, как познакомились…"></textarea></div>
-        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveContact()">Создать</button></div>`);
+    function contactSheet(title, c, saveCall) {
+      openSheet(`<h3>${title}</h3>
+        <div class="field"><label>Имя</label><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Имя Фамилия"></div>
+        <div class="field"><label>День рождения</label><input id="f-bd" type="date" value="${c && c.birthday && c.birthday.length === 10 ? esc(c.birthday) : ''}"></div>
+        <div class="field"><label>Телефон / контакт</label><input id="f-phone" value="${c ? esc(c.phone||'') : ''}" placeholder="+7… / @ник"></div>
+        <div class="field"><label>Теги (через запятую)</label><input id="f-tags" value="${c ? esc(c.tags||'') : ''}" placeholder="клиент, друг, партнёр, VIP"></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="${saveCall}">Сохранить</button></div>`);
     }
+    function contactBody() { return { name: $("f-name").value.trim(), birthday: $("f-bd").value || null, phone: $("f-phone").value, tags: $("f-tags").value }; }
+    function openAddContact() { contactSheet("Новый контакт", null, "saveContact()"); }
     window.saveContact = async () => {
-      const name = $("f-name").value.trim(); if (!name) return tg.showAlert("Введи имя");
-      await api("/contacts", { method: "POST", body: JSON.stringify({ name, birthday: $("f-bd").value || null, phone: $("f-phone").value, notes: $("f-notes").value }) });
+      const b = contactBody(); if (!b.name) return tg.showAlert("Введи имя");
+      await api("/contacts", { method: "POST", body: JSON.stringify(b) });
+      closeSheet(); renderBirthdays();
+    };
+    window.editContact = (id) => { const c = contactsCache.find((x) => x.id === id); if (c) contactSheet("Изменить контакт", c, `saveContactEdit(${id})`); };
+    window.saveContactEdit = async (id) => {
+      const b = contactBody(); if (!b.name) return tg.showAlert("Введи имя");
+      await api(`/contacts/${id}`, { method: "POST", body: JSON.stringify(b) });
       closeSheet(); renderBirthdays();
     };
 

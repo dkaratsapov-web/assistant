@@ -132,6 +132,7 @@ export class DB {
       "ALTER TABLE tasks ADD COLUMN done_at TEXT",
       "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN pay_due TEXT DEFAULT ''",
+      "ALTER TABLE contacts ADD COLUMN tags TEXT DEFAULT ''",
     ];
     for (const sql of alters) {
       try {
@@ -385,15 +386,37 @@ export class DB {
     birthday?: string | null;
     phone?: string;
     notes?: string;
+    tags?: string;
   }): Promise<number> {
+    await this.ensureSchema();
     const res = await this.d1
-      .prepare("INSERT INTO contacts (user_id, name, birthday, phone, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(opts.userId, opts.name, opts.birthday ?? null, opts.phone ?? "", opts.notes ?? "", nowIso())
+      .prepare("INSERT INTO contacts (user_id, name, birthday, phone, notes, tags, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(opts.userId, opts.name, opts.birthday ?? null, opts.phone ?? "", opts.notes ?? "", opts.tags ?? "", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
 
+  /** Частичное обновление контакта. */
+  async updateContact(
+    id: number,
+    userId: number,
+    fields: { name?: string; birthday?: string | null; phone?: string; tags?: string; notes?: string }
+  ): Promise<void> {
+    await this.ensureSchema();
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
+    if (fields.birthday !== undefined) { sets.push("birthday = ?"); binds.push(fields.birthday); }
+    if (fields.phone !== undefined) { sets.push("phone = ?"); binds.push(fields.phone); }
+    if (fields.tags !== undefined) { sets.push("tags = ?"); binds.push(fields.tags); }
+    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
+    if (!sets.length) return;
+    binds.push(id, userId);
+    await this.d1.prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+  }
+
   async listContacts(userId: number): Promise<Contact[]> {
+    await this.ensureSchema();
     const { results } = await this.d1
       .prepare("SELECT * FROM contacts WHERE user_id = ? ORDER BY name")
       .bind(userId)

@@ -367,18 +367,39 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/contacts (дни рождения)
   if (path === "/api/contacts" && request.method === "GET") {
     const contacts = await db.listContacts(uid);
-    return json({ contacts: contacts.map((c) => ({ id: c.id, name: c.name, birthday: c.birthday, phone: c.phone, notes: c.notes })) });
+    return json({ contacts: contacts.map((c) => ({ id: c.id, name: c.name, birthday: c.birthday, phone: c.phone, notes: c.notes, tags: c.tags })) });
   }
 
   // POST /api/contacts
   if (path === "/api/contacts" && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; birthday?: string; phone?: string; notes?: string };
+    const body = (await request.json()) as { name?: string; birthday?: string; phone?: string; notes?: string; tags?: string };
     const name = (body.name ?? "").trim();
     if (!name) return json({ error: "empty_name" }, 400);
     let birthday = (body.birthday ?? "").trim() || null; // ожидаем MM-DD или YYYY-MM-DD
     if (birthday && !/^\d{2}-\d{2}$/.test(birthday) && !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) birthday = null;
-    const id = await db.addContact({ userId: uid, name, birthday, phone: body.phone ?? "", notes: body.notes ?? "" });
+    const id = await db.addContact({ userId: uid, name, birthday, phone: body.phone ?? "", notes: body.notes ?? "", tags: (body.tags ?? "").trim() });
     return json({ ok: true, id });
+  }
+
+  // POST /api/contacts/{id} — редактировать контакт
+  const ctEdit = path.match(/^\/api\/contacts\/(\d+)$/);
+  if (ctEdit && request.method === "POST") {
+    const body = (await request.json()) as { name?: string; birthday?: string; phone?: string; tags?: string };
+    const fields: { name?: string; birthday?: string | null; phone?: string; tags?: string } = {};
+    if (body.name !== undefined) {
+      const n = body.name.trim();
+      if (!n) return json({ error: "empty_name" }, 400);
+      fields.name = n;
+    }
+    if (body.birthday !== undefined) {
+      let bd = body.birthday.trim() || null;
+      if (bd && !/^\d{2}-\d{2}$/.test(bd) && !/^\d{4}-\d{2}-\d{2}$/.test(bd)) bd = null;
+      fields.birthday = bd;
+    }
+    if (body.phone !== undefined) fields.phone = body.phone;
+    if (body.tags !== undefined) fields.tags = body.tags.trim();
+    await db.updateContact(parseInt(ctEdit[1], 10), uid, fields);
+    return json({ ok: true });
   }
 
   // DELETE /api/contacts/{id}
