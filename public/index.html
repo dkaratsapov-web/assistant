@@ -554,10 +554,11 @@
         setHTML("rep-body", h);
       } catch (e) {
         const m = e.message || e;
-        const msg = m === "yandex_not_connected" ? "Подключи Яндекс — кнопка «Подключить Телемост» в Календаре (тот же вход даёт и Метрику)."
-          : m === "no_counter" ? "У клиента не указан счётчик Метрики — добавь его в карточке («Изменить»)."
+        const needConnect = m === "yandex_not_connected" || /403|token|scope|доступ|forbidden|unauthorized|not connected|подключ/i.test(String(m));
+        const msg = m === "no_counter" ? "У клиента не указан счётчик Метрики — добавь его в карточке («Изменить»)."
+          : needConnect ? "Нет доступа к Метрике. Обнови вход в Яндекс (нужно право metrika:read)."
           : "Ошибка: " + esc(m);
-        setHTML("rep-body", `<div class="card"><div style="color:var(--muted);padding:8px;text-align:center">${msg}</div></div>`);
+        setHTML("rep-body", `<div class="card"><div style="color:var(--muted);padding:8px 8px 12px;text-align:center">${msg}</div>${needConnect ? `<button class="btn primary" style="width:100%" onclick="telemostConnect()">🔗 Подключить / обновить Яндекс</button>` : ""}</div>`);
       }
     }
 
