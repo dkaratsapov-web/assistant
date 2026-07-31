@@ -1,6 +1,7 @@
 import { handleApi } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
+import { telemostAuthUrl, telemostExchangeCode } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
 import { buildDigest } from "./reports";
@@ -86,6 +87,33 @@ async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx:
   return new Response("ok");
 }
 
+/** Одноразовое подключение Телемоста: редирект на OAuth Яндекса. */
+function handleTelemostAuth(request: Request, env: Env, origin: string): Response {
+  const url = new URL(request.url);
+  if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
+    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+  }
+  if (!env.TELEMOST_CLIENT_ID) return new Response("TELEMOST_CLIENT_ID не задан", { status: 400 });
+  const redirect = `${origin}/telemost/callback`;
+  return Response.redirect(telemostAuthUrl(env.TELEMOST_CLIENT_ID, redirect), 302);
+}
+
+/** Колбэк OAuth Телемоста: меняем code на токены и сохраняем. */
+async function handleTelemostCallback(request: Request, env: Env, origin: string): Promise<Response> {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  if (!code) return new Response(`Ошибка авторизации: ${url.searchParams.get("error") ?? "нет кода"}`, { status: 400 });
+  const db = new DB(env.DB);
+  try {
+    await telemostExchangeCode(env, db, code, `${origin}/telemost/callback`);
+    return new Response("✅ Телемост подключён! Можно закрыть страницу и создавать встречи со ссылкой.", {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  } catch (e) {
+    return new Response(`Ошибка подключения Телемоста: ${(e as Error).message}`, { status: 502 });
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -109,6 +137,8 @@ export default {
     if (url.pathname === "/init") return handleInit(request, env, origin);
     if (url.pathname === "/max/webhook" && request.method === "POST") return handleMaxWebhook(request, env, origin, ctx);
     if (url.pathname === "/max/init") return handleMaxInit(request, env, origin);
+    if (url.pathname === "/telemost/auth") return handleTelemostAuth(request, env, origin);
+    if (url.pathname === "/telemost/callback") return handleTelemostCallback(request, env, origin);
     if (url.pathname === "/health") return new Response("ok");
     if (url.pathname.startsWith("/api/")) return handleApi(request, env);
 

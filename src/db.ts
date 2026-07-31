@@ -512,4 +512,26 @@ export class DB {
     await this.ensureAiTable();
     await this.d1.prepare("DELETE FROM ai_messages WHERE user_id = ?").bind(userId).run();
   }
+
+  // ---------- Настройки (ключ-значение): интеграции, токены и т.п. ----------
+  private setReady = false;
+  private async ensureSettings(): Promise<void> {
+    if (this.setReady) return;
+    await this.d1.prepare("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)").run();
+    this.setReady = true;
+  }
+
+  async getSetting(key: string): Promise<string | null> {
+    await this.ensureSettings();
+    const r = await this.d1.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
+    return r ? r.value : null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    await this.ensureSettings();
+    await this.d1
+      .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind(key, value)
+      .run();
+  }
 }

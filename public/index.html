@@ -46,7 +46,7 @@
       font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text);
       font-size: 15px; line-height: 1.5; letter-spacing: -.01em;
-      padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom));
+      padding-bottom: calc(var(--nav-h) + 32px + env(safe-area-inset-bottom));
       overflow-x: hidden; transition: background .25s ease, color .25s ease;
       -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     }
@@ -249,6 +249,7 @@
     let tasksCache = [];
     let eventsCache = [];
     let contactsCache = [];
+    let me = {};
     let sheetOpen = false;
     const navStack = ["home"];
 
@@ -605,17 +606,22 @@
     };
 
     function openAddEvent() {
+      const tm = me.telemost ? `<div class="field"><label class="check"><input type="checkbox" id="f-tm">🎥 Создать ссылку Телемост</label></div>` : "";
       openSheet(`<h3>Новая встреча</h3>
         <div class="field"><label>Название</label><input id="f-title" placeholder="Встреча с клиентом"></div>
         <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
-        <div class="field"><label>Место</label><input id="f-loc" placeholder="Zoom / офис / адрес"></div>
+        <div class="field"><label>Место</label><input id="f-loc" placeholder="офис / адрес / ссылка"></div>
+        ${tm}
         <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveEvent()">Создать</button></div>`);
     }
     window.saveEvent = async () => {
       const title = $("f-title").value.trim(); const at = $("f-at").value;
       if (!title) return tg.showAlert("Введи название"); if (!at) return tg.showAlert("Выбери дату и время");
-      await api("/events", { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value }) });
+      const telemost = !!(document.getElementById("f-tm") && document.getElementById("f-tm").checked);
+      try {
+        await api("/events", { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value, telemost }) });
+      } catch (e) { return tg.showAlert("Не удалось создать: " + (e.message || e)); }
       closeSheet(); renderCalendar();
     };
 
@@ -745,7 +751,7 @@
 
     (async () => {
       try {
-        const me = await api("/me");
+        me = await api("/me");
         const name = tg.initDataUnsafe?.user?.first_name || "";
         const hour = new Date().getHours();
         const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";

@@ -19,6 +19,9 @@ export interface Env {
   MAX_WEBHOOK_SECRET?: string; // секрет: проверка заголовка X-Max-Bot-Api-Secret
   MAX_OWNER_ID?: string;       // user_id владельца в MAX (приватный режим)
   MAX_API_URL?: string;        // базовый хост, по умолчанию https://platform-api.max.ru
+  // Интеграция Яндекс Телемост (видеовстречи)
+  TELEMOST_CLIENT_ID?: string;     // секрет: Client ID OAuth-приложения
+  TELEMOST_CLIENT_SECRET?: string; // секрет: Client Secret
 }
 
 export const ROLE_OWNER = "owner";

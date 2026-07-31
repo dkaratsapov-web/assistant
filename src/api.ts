@@ -1,6 +1,7 @@
 import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
+import { telemostConnected, telemostCreate } from "./telemost";
 import {
   Env,
   ROLE_OWNER,
@@ -78,7 +79,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
-    return json({ user_id: uid, role: user.role });
+    return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db) });
   }
 
   // GET /api/tasks
@@ -327,13 +328,24 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // POST /api/events
   if (path === "/api/events" && request.method === "POST") {
-    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string };
+    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; telemost?: boolean };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
     const startsAt = body.at ? localInputToUtc(body.at, tz) : null;
     if (!startsAt) return json({ error: "bad_date" }, 400);
-    const id = await db.addEvent({ userId: uid, title, startsAt, location: body.location ?? "", notes: body.notes ?? "" });
-    return json({ ok: true, id });
+    let location = body.location ?? "";
+    let link: string | null = null;
+    if (body.telemost) {
+      try {
+        link = await telemostCreate(env, db);
+        if (!location) location = link;
+      } catch (e) {
+        return json({ error: "telemost_failed", message: (e as Error).message }, 502);
+      }
+    }
+    const notes = link ? `${body.notes ? body.notes + "\n" : ""}🎥 Телемост: ${link}` : body.notes ?? "";
+    const id = await db.addEvent({ userId: uid, title, startsAt, location, notes });
+    return json({ ok: true, id, link });
   }
 
   // POST /api/events/{id} — редактирование встречи
