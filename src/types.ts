@@ -127,6 +127,7 @@ export interface FoodEntry {
   protein: number;
   fat: number;
   carbs: number;
+  meal: string; // breakfast | lunch | dinner | snack | ""
 }
 
 export interface Contact {

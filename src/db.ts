@@ -588,6 +588,11 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS health_note (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL)")
       .run();
+    try {
+      await this.d1.prepare("ALTER TABLE food_log ADD COLUMN meal TEXT DEFAULT ''").run();
+    } catch {
+      // колонка уже есть
+    }
     this.healthReady = true;
   }
 
@@ -633,11 +638,11 @@ export class DB {
     await this.d1.prepare("DELETE FROM health_note WHERE id = ? AND user_id = ?").bind(id, userId).run();
   }
 
-  async addFood(userId: number, f: { title: string; kcal: number; protein: number; fat: number; carbs: number }): Promise<number> {
+  async addFood(userId: number, f: { title: string; kcal: number; protein: number; fat: number; carbs: number; meal?: string }): Promise<number> {
     await this.ensureHealth();
     const res = await this.d1
-      .prepare("INSERT INTO food_log (user_id, ts, title, kcal, protein, fat, carbs) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(userId, nowIso(), f.title, f.kcal, f.protein, f.fat, f.carbs)
+      .prepare("INSERT INTO food_log (user_id, ts, title, kcal, protein, fat, carbs, meal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(userId, nowIso(), f.title, f.kcal, f.protein, f.fat, f.carbs, f.meal ?? "")
       .run();
     return res.meta.last_row_id as number;
   }
@@ -659,6 +664,15 @@ export class DB {
   async addWater(userId: number, ml: number): Promise<void> {
     await this.ensureHealth();
     await this.d1.prepare("INSERT INTO water_log (user_id, ts, ml) VALUES (?, ?, ?)").bind(userId, nowIso(), ml).run();
+  }
+
+  async listWater(userId: number, startIso: string, endIso: string): Promise<{ ts: string; ml: number }[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT ts, ml FROM water_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+      .bind(userId, startIso, endIso)
+      .all<{ ts: string; ml: number }>();
+    return results ?? [];
   }
 
   async waterTotal(userId: number, startIso: string, endIso: string): Promise<number> {

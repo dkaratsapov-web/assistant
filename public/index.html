@@ -375,16 +375,21 @@
       } catch (e) { const el = $("health-card"); if (el) el.innerHTML = ""; }
     }
     window.waterQuick = async (ml) => { haptic(); try { await api("/health/water", { method: "POST", body: JSON.stringify({ ml }) }); } catch (e) {} if (tab === "home") renderHealthCard(); };
+    const mealDefault = () => { const hh = new Date().getHours(); return hh >= 5 && hh < 11 ? "breakfast" : hh >= 11 && hh < 16 ? "lunch" : hh >= 16 && hh < 22 ? "dinner" : "snack"; };
     window.openFoodAdd = () => {
+      const md = mealDefault();
+      const opt = (v, l) => `<option value="${v}" ${v === md ? "selected" : ""}>${l}</option>`;
       openSheet(`<h3>Что съели?</h3>
         <div class="field"><label>Опиши блюдо — калории и БЖУ оценит ИИ</label><input id="f-food" placeholder="напр. тарелка борща с хлебом" autocomplete="off"></div>
+        <div class="field"><label>Приём пищи</label><select id="f-meal">${opt("breakfast","🌅 Завтрак")}${opt("lunch","☀️ Обед")}${opt("dinner","🌙 Ужин")}${opt("snack","🍎 Перекус")}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" id="food-save" onclick="saveFood()">Добавить</button></div>`);
       setTimeout(() => { const i = $("f-food"); if (i) i.focus(); }, 150);
     };
     window.saveFood = async () => {
       const title = ($("f-food").value || "").trim(); if (!title) return tg.showAlert("Опиши, что съел");
+      const meal = $("f-meal") ? $("f-meal").value : undefined;
       const btn = $("food-save"); if (btn) { btn.disabled = true; btn.textContent = "Оцениваю…"; }
-      try { await api("/health/food", { method: "POST", body: JSON.stringify({ title }) }); }
+      try { await api("/health/food", { method: "POST", body: JSON.stringify({ title, meal }) }); }
       catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Добавить"; } return tg.showAlert("Не удалось оценить: " + (e.message || e)); }
       closeSheet();
       if (tab === "home") renderHealthCard();
@@ -408,15 +413,36 @@
             <div style="font-weight:800;letter-spacing:-.02em">${label}</div>
             <button class="icon-btn" onclick="healthNav(1)" ${today ? "disabled style=opacity:.3" : ""}>›</button></div>`;
         // КБЖУ
+        const remain = kc.goal - kc.consumed;
         h += `<div class="card">
             <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">Б ${kc.protein} · Ж ${kc.fat} · У ${kc.carbs}</span></div>${bar(kc.goal?kc.consumed/kc.goal*100:0)}
+            <div style="font-size:12px;color:var(--muted);margin-top:5px">${remain >= 0 ? `Осталось ${remain} ккал` : `Перебор ${-remain} ккал`}</div>
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><b>💧 ${(w.ml/1000).toFixed(1)} / ${(w.goal/1000).toFixed(1)} л</b></div>${bar(w.goal?w.ml/w.goal*100:0)}</div>`;
         if (today) h += `<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(renderHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(renderHealth)">＋ 0.5 л</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
-        // Еда
+        // Питание по приёмам
         h += `<div class="section-title">Питание</div>`;
-        h += d.entries.length
-          ? `<div class="card">` + d.entries.map((e) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px"><div style="min-width:0"><div>${esc(e.title)}</div><div style="font-size:12px;color:var(--muted)">${e.kcal} ккал · Б${e.protein} Ж${e.fat} У${e.carbs}</div></div><button class="btn ghost" onclick="delFood(${e.id})">✕</button></div>`).join("") + `</div>`
-          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
+        const MEALS = [["breakfast", "🌅 Завтрак"], ["lunch", "☀️ Обед"], ["dinner", "🌙 Ужин"], ["snack", "🍎 Перекус"], ["", "🍽 Другое"]];
+        const byMeal = {};
+        d.entries.forEach((e) => { const m = e.meal || ""; (byMeal[m] = byMeal[m] || []).push(e); });
+        const foodRow = (e) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px"><div style="min-width:0"><div>${esc(e.title)}</div><div style="font-size:12px;color:var(--muted)">${e.kcal} ккал · Б${e.protein} Ж${e.fat} У${e.carbs}</div></div><button class="btn ghost" onclick="delFood(${e.id})">✕</button></div>`;
+        let anyMeal = false;
+        MEALS.forEach(([key, label]) => {
+          const items = byMeal[key]; if (!items || !items.length) return;
+          anyMeal = true;
+          const sub = items.reduce((s, e) => s + e.kcal, 0);
+          h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 2px 4px"><b style="font-size:13px">${label}</b><span style="color:var(--muted);font-size:12px">${sub} ккал</span></div><div class="card">${items.map(foodRow).join("")}</div>`;
+        });
+        if (!anyMeal) h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
+        // Сводка за неделю
+        const wkS = d.week;
+        if (wkS) {
+          const cell = (v, l) => `<div style="flex:1;text-align:center;padding:8px 2px"><div style="font-size:18px;font-weight:800">${v}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${l}</div></div>`;
+          const wd = wkS.weightDelta;
+          h += `<div class="section-title">За неделю (среднее)</div><div class="card" style="display:flex;padding:6px">
+            ${cell(wkS.avgKcal, "ккал/день")}
+            <div style="border-left:1px solid var(--border)"></div>${cell((wkS.avgWater/1000).toFixed(1) + " л", "вода/день")}
+            <div style="border-left:1px solid var(--border)"></div>${cell(wd == null ? "—" : (wd > 0 ? "+" : "") + wd + " кг", "вес")}</div>`;
+        }
         // Рекомендация ИИ (только сегодня)
         if (today) h += `<div id="advice-box"></div><button class="btn" style="width:100%;margin-top:8px" onclick="getAdvice()">✨ Рекомендация от Сары</button>`;
         // Вес

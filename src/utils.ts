@@ -247,6 +247,24 @@ export function parseWaterMl(text: string): number {
   return 250;
 }
 
+/** Тип приёма пищи из текста, иначе null. */
+export function mealFromText(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/завтрак/.test(t)) return "breakfast";
+  if (/обед/.test(t)) return "lunch";
+  if (/ужин/.test(t)) return "dinner";
+  if (/перекус|снек|полдник/.test(t)) return "snack";
+  return null;
+}
+
+/** Тип приёма пищи по часу (локальному). */
+export function mealByHour(hour: number): string {
+  if (hour >= 5 && hour < 11) return "breakfast";
+  if (hour >= 11 && hour < 16) return "lunch";
+  if (hour >= 16 && hour < 22) return "dinner";
+  return "snack";
+}
+
 /** Если текст — про питьё воды, возвращает объём в мл, иначе null. */
 export function matchWaterMl(text: string): number | null {
   const t = text.toLowerCase();

@@ -14,7 +14,7 @@ import {
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
-import { localInputToUtc, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
 
@@ -135,12 +135,28 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const waterGoal = parseInt((await db.getSetting(`hwater:${uid}`)) ?? "", 10) || 2000;
     const notes = await db.listHealthNotes(uid, start, end);
     const weights = await db.listWeights(uid, 14);
+
+    // Недельная сводка (последние 7 локальных дней)
+    const wkStart = startOfLocalDayOffsetIso(tzh, -6);
+    const wkFood = await db.listFood(uid, wkStart, end);
+    const wkWater = await db.listWater(uid, wkStart, end);
+    const dayOf = (ts: string) => Math.floor((new Date(ts).getTime() + tzh * 3600_000) / 86400_000);
+    const kcalByDay: Record<number, number> = {};
+    wkFood.forEach((e) => { kcalByDay[dayOf(e.ts)] = (kcalByDay[dayOf(e.ts)] || 0) + e.kcal; });
+    const waterByDay: Record<number, number> = {};
+    wkWater.forEach((e) => { waterByDay[dayOf(e.ts)] = (waterByDay[dayOf(e.ts)] || 0) + e.ml; });
+    const avgKcal = Math.round(Object.values(kcalByDay).reduce((s, v) => s + v, 0) / 7);
+    const avgWater = Math.round(Object.values(waterByDay).reduce((s, v) => s + v, 0) / 7);
+    const daysOnWater = Object.values(waterByDay).filter((v) => v >= waterGoal).length;
+    const weightDelta = weights.length > 1 ? Math.round((weights[0].kg - weights[weights.length - 1].kg) * 10) / 10 : null;
+
     return json({
       kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs },
       water: { ml: water, goal: waterGoal },
       entries,
       notes,
       weight: { latest: weights[0]?.kg ?? null, history: weights },
+      week: { avgKcal, avgWater, daysOnWater, weightDelta },
     });
   }
 
@@ -194,10 +210,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/health/food" && request.method === "POST") {
-    const body = (await request.json()) as { title?: string; kcal?: number; protein?: number; fat?: number; carbs?: number };
+    const body = (await request.json()) as { title?: string; kcal?: number; protein?: number; fat?: number; carbs?: number; meal?: string };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty" }, 400);
-    let n = { title, kcal: 0, protein: 0, fat: 0, carbs: 0 };
+    let n: { title: string; kcal: number; protein: number; fat: number; carbs: number } = { title, kcal: 0, protein: 0, fat: 0, carbs: 0 };
     if (body.kcal != null) {
       n = { title, kcal: Math.max(0, Math.round(+body.kcal || 0)), protein: Math.max(0, Math.round(+(body.protein ?? 0))), fat: Math.max(0, Math.round(+(body.fat ?? 0))), carbs: Math.max(0, Math.round(+(body.carbs ?? 0))) };
     } else {
@@ -206,8 +222,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (!est) return json({ error: "estimate_failed" }, 502);
       n = est;
     }
-    const id = await db.addFood(uid, n);
-    return json({ ok: true, id, entry: { id, ...n } });
+    const validMeals = ["breakfast", "lunch", "dinner", "snack"];
+    const localHour = new Date(Date.now() + tzOffsetOf(env) * 3600_000).getUTCHours();
+    const meal = validMeals.includes(body.meal ?? "") ? (body.meal as string) : (mealFromText(title) || mealByHour(localHour));
+    const id = await db.addFood(uid, { ...n, meal });
+    return json({ ok: true, id, entry: { id, ...n, meal } });
   }
 
   const foodDel = path.match(/^\/api\/health\/food\/(\d+)$/);

@@ -6,7 +6,9 @@
 import { AssistantIntent, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+
+const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
 const FOOD_RE = /(съел\w*|поел\w*|скушал\w*|позавтракал\w*|пообедал\w*|поужинал\w*|перекусил\w*|на завтрак|на обед|на ужин|съесть)/i;
 
@@ -230,8 +232,10 @@ export async function tryPerformCommand(
     if (!env.ANTHROPIC_API_KEY) return null;
     const n = await estimateNutrition(env.ANTHROPIC_API_KEY, text);
     if (n) {
-      await db.addFood(uid, n);
-      return `🍽 Записала: ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`;
+      const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
+      const meal = mealFromText(text) || mealByHour(localHour);
+      await db.addFood(uid, { ...n, meal });
+      return `🍽 Записала (${MEAL_RU[meal]}): ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`;
     }
   }
 
