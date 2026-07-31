@@ -1,4 +1,4 @@
-import { askAIChat, ChatMessage } from "./ai";
+import { AssistantIntent, askAIChat, ChatMessage, routeAssistant } from "./ai";
 import { DB } from "./db";
 import {
   Env,
@@ -10,7 +10,7 @@ import {
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
-import { formatDue, localInputToUtc, parseDue, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, localInputToUtc, parseDue, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
 
@@ -56,6 +56,57 @@ export async function validateInitData(
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+
+/** Выполняет распознанное намерение (задача/встреча/контакт). Возвращает подтверждение или null. */
+async function performIntent(
+  intent: AssistantIntent | null,
+  db: DB,
+  uid: number,
+  tz: number
+): Promise<string | null> {
+  if (!intent || intent.action === "none") return null;
+
+  if (intent.action === "task") {
+    const title = (intent.title ?? "").trim();
+    if (!title) return null;
+    const dueAt = intent.due ? parseDue(intent.due, tz) : null;
+    const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
+    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt });
+    const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
+    const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
+    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}`;
+  }
+
+  if (intent.action === "event") {
+    const title = (intent.title ?? "").trim();
+    if (!title) return null;
+    const startsAt = intent.at ? parseDue(intent.at, tz) : null;
+    if (!startsAt) return `📅 Встречу «${title}» пока не добавила — не поняла дату и время. Уточни, например: «завтра в 15:00».`;
+    const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "" });
+    const loc = intent.location ? `\n📍 ${intent.location}` : "";
+    return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}`;
+  }
+
+  if (intent.action === "contact") {
+    const name = (intent.name ?? intent.title ?? "").trim();
+    if (!name) return null;
+    let birthday: string | null = (intent.birthday ?? "").trim() || null;
+    if (birthday && !/^\d{2}-\d{2}$/.test(birthday) && !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) {
+      const iso = parseDue(birthday, tz);
+      if (iso) {
+        const d = new Date(new Date(iso).getTime() + tz * 3600_000);
+        birthday = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      } else {
+        birthday = null;
+      }
+    }
+    const id = await db.addContact({ userId: uid, name, birthday, phone: "", notes: "" });
+    const bd = birthday ? `\n🎂 ${birthday}` : "";
+    return `👤 Контакт добавлен (#${id})\n${name}${bd}`;
+  }
+
+  return null;
+}
 
 /** Обрабатывает /api/* с проверкой доступа. */
 export async function handleApi(request: Request, env: Env): Promise<Response> {
@@ -162,14 +213,25 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (!userText) return json({ error: "empty" }, 400);
 
-    const history = await db.listAiMessages(uid, 20);
-    const msgs: ChatMessage[] = [
-      ...history
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
-      { role: "user", text: userText },
-    ];
-    const reply = await askAIChat(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, msgs, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    const model = env.YANDEX_MODEL ?? "yandexgpt/latest";
+
+    // 1) Определяем: это команда (создать задачу/встречу/контакт) или обычный вопрос?
+    let reply: string;
+    const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, model);
+    const action = await performIntent(intent, db, uid, tz);
+    if (action) {
+      reply = action;
+    } else {
+      // 2) Обычный диалог с историей
+      const history = await db.listAiMessages(uid, 20);
+      const msgs: ChatMessage[] = [
+        ...history
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
+        { role: "user", text: userText },
+      ];
+      reply = await askAIChat(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, msgs, model);
+    }
     // Сохраняем в кеш (даже если это сообщение об ошибке — чтобы диалог был честным)
     await db.addAiMessage(uid, "user", userText);
     await db.addAiMessage(uid, "assistant", reply);
