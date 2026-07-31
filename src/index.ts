@@ -1,4 +1,3 @@
-import { webhookCallback } from "grammy";
 import { handleApi } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
@@ -93,9 +92,19 @@ export default {
     const origin = url.origin;
 
     if (url.pathname === "/webhook" && request.method === "POST") {
+      // Быстро подтверждаем приём (200), тяжёлую обработку — в фон, чтобы Telegram не слал повторы
+      if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
+        return new Response("forbidden", { status: 403 });
+      }
+      let update: unknown;
+      try {
+        update = await request.json();
+      } catch {
+        return new Response("bad request", { status: 400 });
+      }
       const bot = createBot(env, origin);
-      const handle = webhookCallback(bot, "cloudflare-mod", { secretToken: env.WEBHOOK_SECRET });
-      return handle(request);
+      ctx.waitUntil(bot.handleUpdate(update as Parameters<typeof bot.handleUpdate>[0]));
+      return new Response("ok");
     }
     if (url.pathname === "/init") return handleInit(request, env, origin);
     if (url.pathname === "/max/webhook" && request.method === "POST") return handleMaxWebhook(request, env, origin, ctx);
