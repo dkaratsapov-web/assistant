@@ -332,8 +332,20 @@
     }
 
     let aiHistory = [];
+    let aiLoaded = false;
     const AI_SUGG = ["3 заголовка для Директа", "Идеи для Reels", "Оффер для лендинга", "Минус-слова"];
     function aiScrollBottom() { requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); }
+    function aiGreeting() {
+      return `<div class="msg ai">Привет! Я Сара 🤖\nПомогу с рекламой: тексты объявлений, заголовки, офферы, идеи для кампаний, разбор лендингов. Спрашивай что угодно.</div>
+        <div class="chips" id="ai-sugg">${AI_SUGG.map((s) => `<div class="chip" onclick="aiSend(this.textContent)">${s}</div>`).join("")}</div>`;
+    }
+    function aiRenderMessages() {
+      const scroll = $("ai-scroll"); if (!scroll) return;
+      const clearBtn = aiHistory.length ? `<div style="text-align:right;margin-bottom:2px"><span class="chip" onclick="aiClear()">🗑 Очистить</span></div>` : "";
+      scroll.innerHTML = clearBtn + (aiHistory.length
+        ? aiHistory.map((m) => `<div class="msg ${m.role === "user" ? "user" : "ai"}">${esc(m.content)}</div>`).join("")
+        : aiGreeting());
+    }
     async function renderAI() {
       view.innerHTML =
         `<div class="ai-wrap" id="ai-scroll"></div>
@@ -341,35 +353,41 @@
            <input id="ai-input" placeholder="Спроси про рекламу, тексты, идеи…" autocomplete="off" enterkeyhint="send">
            <button id="ai-send">➤</button>
          </div></div>`;
-      const scroll = $("ai-scroll");
-      if (!aiHistory.length) {
-        scroll.innerHTML =
-          `<div class="msg ai">Привет! Я Сара 🤖\nПомогу с рекламой: тексты объявлений, заголовки, офферы, идеи для кампаний, разбор лендингов. Спрашивай что угодно.</div>
-           <div class="chips" id="ai-sugg">${AI_SUGG.map((s) => `<div class="chip" onclick="aiSend(this.textContent)">${s}</div>`).join("")}</div>`;
-      } else {
-        scroll.innerHTML = aiHistory.map((m) => `<div class="msg ${m.role === "user" ? "user" : "ai"}">${esc(m.content)}</div>`).join("");
+      // История из кеша на сервере (грузим один раз за сессию)
+      if (!aiLoaded) {
+        try { aiHistory = (await api("/ai/history")).messages || []; } catch (e) { aiHistory = []; }
+        aiLoaded = true;
       }
+      aiRenderMessages();
       const input = $("ai-input");
       $("ai-send").onclick = () => aiSend(input.value);
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aiSend(input.value); } });
       aiScrollBottom();
       setTimeout(() => input.focus(), 150);
     }
+    window.aiClear = async () => {
+      if (!confirm("Очистить переписку с Сарой?")) return;
+      haptic();
+      try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
+      aiHistory = [];
+      aiRenderMessages();
+    };
     window.aiSend = async (text) => {
       text = (text || "").trim();
       if (!text || tab !== "ai") return;
       haptic();
-      const sugg = $("ai-sugg"); if (sugg) sugg.remove();
       const input = $("ai-input"), sendBtn = $("ai-send"), scroll = $("ai-scroll");
       if (input) input.value = "";
       if (sendBtn) sendBtn.disabled = true;
+      // если был только приветственный экран — заменяем его на «шапку» с очисткой
+      if (!aiHistory.length) scroll.innerHTML = `<div style="text-align:right;margin-bottom:2px"><span class="chip" onclick="aiClear()">🗑 Очистить</span></div>`;
       aiHistory.push({ role: "user", content: text });
       scroll.insertAdjacentHTML("beforeend", `<div class="msg user">${esc(text)}</div>`);
       const think = document.createElement("div");
       think.className = "msg ai think"; think.textContent = "Сара печатает…";
       scroll.appendChild(think); aiScrollBottom();
       try {
-        const { reply } = await api("/ai", { method: "POST", body: JSON.stringify({ messages: aiHistory.slice(-20) }) });
+        const { reply } = await api("/ai", { method: "POST", body: JSON.stringify({ prompt: text }) });
         think.remove();
         aiHistory.push({ role: "assistant", content: reply });
         scroll.insertAdjacentHTML("beforeend", `<div class="msg ai">${esc(reply)}</div>`);

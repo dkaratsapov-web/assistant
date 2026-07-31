@@ -346,4 +346,46 @@ export class DB {
   async clearState(userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
   }
+
+  // ---------- История диалога с ИИ (кеш переписки) ----------
+  private aiReady = false;
+  private async ensureAiTable(): Promise<void> {
+    if (this.aiReady) return;
+    await this.d1
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS ai_messages (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           user_id INTEGER NOT NULL,
+           role TEXT NOT NULL,
+           content TEXT NOT NULL,
+           created_at TEXT NOT NULL
+         )`
+      )
+      .run();
+    await this.d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_messages(user_id, id)").run();
+    this.aiReady = true;
+  }
+
+  async addAiMessage(userId: number, role: "user" | "assistant", content: string): Promise<void> {
+    await this.ensureAiTable();
+    await this.d1
+      .prepare("INSERT INTO ai_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)")
+      .bind(userId, role, content, nowIso())
+      .run();
+  }
+
+  /** Последние сообщения диалога в хронологическом порядке (старые → новые). */
+  async listAiMessages(userId: number, limit = 50): Promise<{ role: string; content: string }[]> {
+    await this.ensureAiTable();
+    const res = await this.d1
+      .prepare("SELECT role, content FROM ai_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?")
+      .bind(userId, limit)
+      .all<{ role: string; content: string }>();
+    return (res.results ?? []).reverse();
+  }
+
+  async clearAiMessages(userId: number): Promise<void> {
+    await this.ensureAiTable();
+    await this.d1.prepare("DELETE FROM ai_messages WHERE user_id = ?").bind(userId).run();
+  }
 }

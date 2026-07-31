@@ -139,21 +139,40 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget })) });
   }
 
-  // POST /api/ai — диалог с ИИ (YandexGPT) с историей
+  // GET /api/ai/history — кеш переписки с Сарой
+  if (path === "/api/ai/history" && request.method === "GET") {
+    const messages = await db.listAiMessages(uid, 60);
+    return json({ messages });
+  }
+
+  // DELETE /api/ai/history — очистить переписку
+  if (path === "/api/ai/history" && request.method === "DELETE") {
+    await db.clearAiMessages(uid);
+    return json({ ok: true });
+  }
+
+  // POST /api/ai — диалог с ИИ (YandexGPT); история хранится на сервере
   if (path === "/api/ai" && request.method === "POST") {
     if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return json({ error: "ai_not_configured" }, 400);
     const body = (await request.json()) as { messages?: { role?: string; content?: string }[]; prompt?: string };
-    let msgs: ChatMessage[] = [];
-    if (Array.isArray(body.messages)) {
-      msgs = body.messages
-        .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
-        .slice(-20)
-        .map((m) => ({ role: m.role as "user" | "assistant", text: m.content as string }));
-    } else if (typeof body.prompt === "string" && body.prompt.trim()) {
-      msgs = [{ role: "user", text: body.prompt.trim() }];
+    let userText = typeof body.prompt === "string" ? body.prompt.trim() : "";
+    if (!userText && Array.isArray(body.messages)) {
+      const last = [...body.messages].reverse().find((m) => m?.role === "user" && typeof m.content === "string");
+      userText = (last?.content ?? "").trim();
     }
-    if (!msgs.length) return json({ error: "empty" }, 400);
+    if (!userText) return json({ error: "empty" }, 400);
+
+    const history = await db.listAiMessages(uid, 20);
+    const msgs: ChatMessage[] = [
+      ...history
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
+      { role: "user", text: userText },
+    ];
     const reply = await askAIChat(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, msgs, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    // Сохраняем в кеш (даже если это сообщение об ошибке — чтобы диалог был честным)
+    await db.addAiMessage(uid, "user", userText);
+    await db.addAiMessage(uid, "assistant", reply);
     return json({ reply });
   }
 

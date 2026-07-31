@@ -83,3 +83,13 @@ CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
 CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at);
 CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+
+-- Кеш переписки с ИИ-ассистентом (создаётся также автоматически при первом обращении)
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  role       TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_messages(user_id, id);
