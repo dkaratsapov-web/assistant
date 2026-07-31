@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS clients (
   budget     TEXT DEFAULT '',
   contact    TEXT DEFAULT '',
   notes      TEXT DEFAULT '',
+  pay_amount TEXT DEFAULT '',   -- сумма оплаты за ведение
+  pay_due    TEXT DEFAULT '',   -- дедлайн оплаты (напр. «5 число» или дата)
   created_at TEXT NOT NULL
 );
 

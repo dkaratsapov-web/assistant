@@ -90,8 +90,16 @@ export async function performIntent(
   if (intent.action === "client_add") {
     const name = (intent.name ?? intent.title ?? "").trim();
     if (!name) return null;
-    const id = await db.addClient(name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim());
-    const extra = [intent.platforms, intent.budget ? `бюджет ${intent.budget}` : ""].filter(Boolean).join(" · ");
+    const id = await db.addClient(name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
+      payAmount: (intent.fee ?? "").trim(),
+      payDue: (intent.pay_due ?? "").trim(),
+    });
+    const extra = [
+      intent.platforms,
+      intent.budget ? `бюджет ${intent.budget}` : "",
+      intent.fee ? `ведение ${intent.fee}` : "",
+      intent.pay_due ? `оплата ${intent.pay_due}` : "",
+    ].filter(Boolean).join(" · ");
     return `🤝 Клиент добавлен (#${id})\n${name}${extra ? `\n${extra}` : ""}`;
   }
 
@@ -109,13 +117,21 @@ export async function performIntent(
     if (!name) return null;
     const client = await db.findClientByName(name);
     if (!client) return `Не нашла клиента «${name}».`;
-    const fields: { name?: string; platforms?: string; budget?: string } = {};
+    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
     if (intent.new_name && intent.new_name.trim()) fields.name = intent.new_name.trim();
     if (intent.platforms && intent.platforms.trim()) fields.platforms = intent.platforms.trim();
     if (intent.budget && intent.budget.trim()) fields.budget = intent.budget.trim();
-    if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи новое название, площадки или бюджет.`;
+    if (intent.fee && intent.fee.trim()) fields.payAmount = intent.fee.trim();
+    if (intent.pay_due && intent.pay_due.trim()) fields.payDue = intent.pay_due.trim();
+    if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи название, площадки, бюджет, сумму ведения или дедлайн оплаты.`;
     await db.updateClient(client.id, fields);
-    const changes = [fields.name && `название → ${fields.name}`, fields.platforms && `площадки → ${fields.platforms}`, fields.budget && `бюджет → ${fields.budget}`].filter(Boolean).join(", ");
+    const changes = [
+      fields.name && `название → ${fields.name}`,
+      fields.platforms && `площадки → ${fields.platforms}`,
+      fields.budget && `бюджет → ${fields.budget}`,
+      fields.payAmount && `ведение → ${fields.payAmount}`,
+      fields.payDue && `оплата → ${fields.payDue}`,
+    ].filter(Boolean).join(", ");
     return `✏️ Клиент обновлён: ${client.name}\n${changes}`;
   }
 

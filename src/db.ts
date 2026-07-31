@@ -67,13 +67,14 @@ export class DB {
 
   // ---------- Клиенты ----------
 
-  async addClient(name: string, platforms = "", budget = "", contact = ""): Promise<number> {
+  async addClient(name: string, platforms = "", budget = "", opts: { contact?: string; payAmount?: string; payDue?: string } = {}): Promise<number> {
+    await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO clients (name, platforms, status, budget, contact, notes, created_at)
-         VALUES (?, ?, 'active', ?, ?, '', ?)`
+        `INSERT INTO clients (name, platforms, status, budget, contact, notes, pay_amount, pay_due, created_at)
+         VALUES (?, ?, 'active', ?, ?, '', ?, ?, ?)`
       )
-      .bind(name, platforms, budget, contact, nowIso())
+      .bind(name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
@@ -83,6 +84,7 @@ export class DB {
   }
 
   async listClients(): Promise<Client[]> {
+    await this.ensureSchema();
     const { results } = await this.d1.prepare("SELECT * FROM clients ORDER BY name").all<Client>();
     return results ?? [];
   }
@@ -105,12 +107,18 @@ export class DB {
   }
 
   /** Частичное обновление клиента. */
-  async updateClient(id: number, fields: { name?: string; platforms?: string; budget?: string }): Promise<void> {
+  async updateClient(
+    id: number,
+    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string }
+  ): Promise<void> {
+    await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
     if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
     if (fields.platforms !== undefined) { sets.push("platforms = ?"); binds.push(fields.platforms); }
     if (fields.budget !== undefined) { sets.push("budget = ?"); binds.push(fields.budget); }
+    if (fields.payAmount !== undefined) { sets.push("pay_amount = ?"); binds.push(fields.payAmount); }
+    if (fields.payDue !== undefined) { sets.push("pay_due = ?"); binds.push(fields.payDue); }
     if (!sets.length) return;
     binds.push(id);
     await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
@@ -120,10 +128,17 @@ export class DB {
   private schemaReady = false;
   private async ensureSchema(): Promise<void> {
     if (this.schemaReady) return;
-    try {
-      await this.d1.prepare("ALTER TABLE tasks ADD COLUMN done_at TEXT").run();
-    } catch {
-      // колонка уже есть — игнорируем
+    const alters = [
+      "ALTER TABLE tasks ADD COLUMN done_at TEXT",
+      "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN pay_due TEXT DEFAULT ''",
+    ];
+    for (const sql of alters) {
+      try {
+        await this.d1.prepare(sql).run();
+      } catch {
+        // колонка уже есть — игнорируем
+      }
     }
     this.schemaReady = true;
   }

@@ -64,6 +64,8 @@ export interface Client {
   budget: string;
   contact: string;
   notes: string;
+  pay_amount: string;
+  pay_due: string;
   created_at: string;
 }
 

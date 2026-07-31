@@ -154,15 +154,18 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/clients
   if (path === "/api/clients" && request.method === "GET") {
     const clients = await db.listClients();
-    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget })) });
+    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due })) });
   }
 
   // POST /api/clients — добавить клиента
   if (path === "/api/clients" && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string };
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string };
     const name = (body.name ?? "").trim();
     if (!name) return json({ error: "empty_name" }, 400);
-    const id = await db.addClient(name, (body.platforms ?? "").trim(), (body.budget ?? "").trim());
+    const id = await db.addClient(name, (body.platforms ?? "").trim(), (body.budget ?? "").trim(), {
+      payAmount: (body.pay_amount ?? "").trim(),
+      payDue: (body.pay_due ?? "").trim(),
+    });
     return json({ ok: true, id });
   }
 
@@ -178,8 +181,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/clients/{id} — редактировать клиента
   const clEdit = path.match(/^\/api\/clients\/(\d+)$/);
   if (clEdit && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string };
-    const fields: { name?: string; platforms?: string; budget?: string } = {};
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string };
+    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
     if (body.name !== undefined) {
       const n = body.name.trim();
       if (!n) return json({ error: "empty_name" }, 400);
@@ -187,6 +190,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (body.platforms !== undefined) fields.platforms = body.platforms;
     if (body.budget !== undefined) fields.budget = body.budget;
+    if (body.pay_amount !== undefined) fields.payAmount = body.pay_amount;
+    if (body.pay_due !== undefined) fields.payDue = body.pay_due;
     await db.updateClient(parseInt(clEdit[1], 10), fields);
     return json({ ok: true });
   }

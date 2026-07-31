@@ -711,7 +711,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     if (step === "addclient_contact") {
       const draft = state.draft as { name: string; platforms: string[]; budget: string };
       const contact = ["-", "нет"].includes(low.trim()) ? "" : text.trim();
-      const id = await db.addClient(draft.name, [...draft.platforms].sort().join(","), draft.budget ?? "", contact);
+      const id = await db.addClient(draft.name, [...draft.platforms].sort().join(","), draft.budget ?? "", { contact });
       await db.clearState(ctx.from!.id);
       const c = (await db.getClient(id))!;
       await ctx.reply("✅ Клиент добавлен:\n\n" + clientCard(c), HTML);
