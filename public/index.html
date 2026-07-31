@@ -373,20 +373,94 @@
       } catch (e) { $("tasklist").innerHTML = err(e); }
     }
 
+    let calView = "list";       // list | month
+    let calMonthOffset = 0;     // 0 = текущий месяц
+    let calItems = [];          // объединённые встречи + задачи
+    let calSelDay = null;       // выбранный день (YYYY-MM-DD) в режиме месяца
+    const dayKey = (d) => `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
+    const MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+    const WD = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+
     async function renderCalendar() {
-      view.innerHTML = '<div class="section-title">Ближайшие встречи</div><div id="evlist"><div class="loading">Загрузка…</div></div>';
+      view.innerHTML =
+        `<div class="seg"><div class="${calView==='list'?'on':''}" onclick="calSetView('list')">Список</div><div class="${calView==='month'?'on':''}" onclick="calSetView('month')">Месяц</div></div>
+         <div id="calbody"><div class="loading">Загрузка…</div></div>`;
       try {
-        const { events } = await api("/events");
-        eventsCache = events;
-        const el = $("evlist");
-        if (!events.length) { el.innerHTML = emptyBox("Встреч нет", "Добавь встречу кнопкой «+» или через Сару."); return; }
-        el.innerHTML = events.map((e) => `<div class="card item">
-          <div class="top"><div class="name">${esc(e.title)}</div></div>
-          <div class="meta"><span class="pill strong">${fmtEv(e.starts_at)}</span>${e.location?`<span class="pill">${esc(e.location)}</span>`:""}</div>
-          ${e.notes?`<div class="meta"><span style="color:var(--muted);font-size:13px">${esc(e.notes)}</span></div>`:""}
-          <div class="actions"><button class="btn" onclick="editEvent(${e.id})">Изменить</button><button class="btn ghost" onclick="delEvent(${e.id})">✕</button></div>
-        </div>`).join("");
-      } catch (e) { $("evlist").innerHTML = err(e); }
+        const [ev, tk] = await Promise.all([api("/events"), api("/tasks?status=active")]);
+        eventsCache = ev.events;
+        calItems = [
+          ...ev.events.map((e) => ({ kind: "event", id: e.id, title: e.title, at: e.starts_at, location: e.location })),
+          ...tk.tasks.filter((t) => t.due_at).map((t) => ({ kind: "task", id: t.id, title: t.title, at: t.due_at, scope: t.scope })),
+        ].sort((a, b) => new Date(a.at) - new Date(b.at));
+        calView === "month" ? calRenderMonth() : calRenderList();
+      } catch (e) { $("calbody").innerHTML = err(e); }
+    }
+    window.calSetView = (v) => { calView = v; calSelDay = null; renderCalendar(); };
+    window.calPrev = () => { calMonthOffset--; calSelDay = null; calRenderMonth(); };
+    window.calNext = () => { calMonthOffset++; calSelDay = null; calRenderMonth(); };
+
+    function calItemRow(it) {
+      const t = new Date(it.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const over = it.kind === "task" && new Date(it.at) < new Date();
+      const tag = it.kind === "event" ? "встреча" : (it.scope === "personal" ? "личная" : "рабочая");
+      const edit = it.kind === "event" ? `editEvent(${it.id})` : `editTask(${it.id})`;
+      return `<div class="card item"><div class="top"><div class="name">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</div></div>
+        <div class="meta"><span class="pill ${over?'strong':''}">${t}</span><span class="pill">${tag}</span></div>
+        <div class="actions"><button class="btn" onclick="${edit}">Изменить</button></div></div>`;
+    }
+
+    function calRenderList() {
+      const el = $("calbody");
+      if (!calItems.length) { el.innerHTML = emptyBox("Пусто", "Нет встреч и задач со сроком. Добавь кнопкой «+»."); return; }
+      const groups = {};
+      calItems.forEach((it) => { const k = dayKey(new Date(it.at)); (groups[k] = groups[k] || []).push(it); });
+      const today = dayKey(new Date()); const tmr = dayKey(new Date(Date.now() + 86400000));
+      let h = "";
+      Object.keys(groups).sort().forEach((k) => {
+        const d = new Date(k + "T00:00");
+        const label = k === today ? "Сегодня" : k === tmr ? "Завтра" : d.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "long" });
+        h += `<div class="section-title">${label}</div>` + groups[k].map(calItemRow).join("");
+      });
+      el.innerHTML = h;
+    }
+
+    function calRenderMonth() {
+      const el = $("calbody"); if (!el) return;
+      const base = new Date(); base.setDate(1); base.setMonth(base.getMonth() + calMonthOffset);
+      const year = base.getFullYear(), month = base.getMonth();
+      const counts = {};
+      calItems.forEach((it) => { const k = dayKey(new Date(it.at)); counts[k] = (counts[k] || 0) + 1; });
+      const first = new Date(year, month, 1);
+      let lead = (first.getDay() + 6) % 7; // Пн=0
+      const days = new Date(year, month + 1, 0).getDate();
+      const today = dayKey(new Date());
+      let cells = "";
+      for (let i = 0; i < lead; i++) cells += `<div></div>`;
+      for (let d = 1; d <= days; d++) {
+        const k = `${year}-${p2(month+1)}-${p2(d)}`;
+        const has = counts[k] || 0;
+        const isToday = k === today, sel = k === calSelDay;
+        cells += `<div onclick="calSelectDay('${k}')" style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;
+          ${sel ? 'background:var(--fg);color:var(--fg-contrast);' : isToday ? 'border:1px solid var(--border-strong);' : ''}">
+          ${d}<span style="height:5px;width:5px;border-radius:50%;margin-top:3px;background:${has ? (sel ? 'var(--fg-contrast)' : 'var(--fg)') : 'transparent'}"></span></div>`;
+      }
+      let h = `<div style="display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px">
+          <button class="icon-btn" onclick="calPrev()">‹</button>
+          <div style="font-weight:800;letter-spacing:-.02em">${MONTHS[month]} ${year}</div>
+          <button class="icon-btn" onclick="calNext()">›</button></div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;color:var(--muted);font-size:11px;font-weight:700;margin-bottom:6px">${WD.map((w)=>`<div>${w}</div>`).join("")}</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
+        <div id="calday" style="margin-top:14px"></div>`;
+      el.innerHTML = h;
+      if (calSelDay) calRenderDay();
+    }
+    window.calSelectDay = (k) => { calSelDay = calSelDay === k ? null : k; calRenderMonth(); };
+    function calRenderDay() {
+      const box = $("calday"); if (!box) return;
+      const items = calItems.filter((it) => dayKey(new Date(it.at)) === calSelDay);
+      const d = new Date(calSelDay + "T00:00");
+      const label = d.toLocaleDateString("ru-RU", { weekday: "long", day: "2-digit", month: "long" });
+      box.innerHTML = `<div class="section-title">${label}</div>` + (items.length ? items.map(calItemRow).join("") : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не запланировано</div></div>`);
     }
 
     async function renderBirthdays() {
