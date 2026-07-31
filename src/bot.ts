@@ -1,5 +1,6 @@
 import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
-import { askAI } from "./ai";
+import { askAI, parseTaskFromText } from "./ai";
+import { transcribeVoice } from "./speech";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
 import {
@@ -534,6 +535,57 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   });
 
   // --- Свободный текст: шаги FSM, заметки, кнопки меню, ИИ ---
+  // Голосовые сообщения: распознаём речь и создаём задачу (или отвечаем в режиме ИИ)
+  bot.on("message:voice", async (ctx) => {
+    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
+      await ctx.reply("Голосовой ввод не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID.");
+      return;
+    }
+    const status = await ctx.reply("🎧 Слушаю голосовое…");
+    const finish = async (text: string, extra: any = {}) => {
+      try {
+        return await ctx.api.editMessageText(ctx.chat!.id, status.message_id, text, extra);
+      } catch {
+        return await ctx.reply(text, extra);
+      }
+    };
+
+    let transcript = "";
+    try {
+      const file = await ctx.getFile();
+      if (!file.file_path) throw new Error("нет файла");
+      const audio = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
+      transcript = await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio);
+    } catch (e) {
+      await finish(`⚠️ Не удалось распознать: ${(e as Error).message}`);
+      return;
+    }
+    if (!transcript) {
+      await finish("🤷 Не расслышал. Попробуй записать ещё раз, ближе к микрофону (до 30 секунд).");
+      return;
+    }
+
+    // В режиме ИИ голос = вопрос к ассистенту
+    const state = await db.getState(ctx.from!.id);
+    if (state.step === "ai_mode") {
+      await finish(`🎤 «${escapeHtml(transcript)}»`, HTML);
+      return replyAI(ctx, transcript);
+    }
+
+    // Иначе — превращаем в задачу
+    const parsed = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, transcript, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    const title = parsed?.title || transcript;
+    const dueAt = parseDue(parsed?.due || transcript, tz);
+    const scope = parsed?.scope === "personal" ? "personal" : "work";
+    const id = await db.addTask({ title, creatorId: ctx.from!.id, assigneeId: ctx.from!.id, scope, dueAt });
+    const dueLine = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
+    const scopeLine = scope === "personal" ? "🙋 Личная" : "💼 Рабочая";
+    await finish(
+      `🎤 Распознал: «${escapeHtml(transcript)}»\n\n✅ Задача #${id}\n<b>${escapeHtml(title)}</b>\n${scopeLine}${dueLine}`,
+      { ...HTML, reply_markup: taskActions(id, TASK_OPEN) }
+    );
+  });
+
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const state = await db.getState(ctx.from!.id);

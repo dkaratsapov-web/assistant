@@ -27,22 +27,17 @@ interface YandexResponse {
 
 /** Роль сообщения в диалоге. */
 export interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
 }
 
-/**
- * Многоходовой диалог с YandexGPT (с историей переписки).
- * @param apiKey   API-ключ сервисного аккаунта (роль ai.languageModels.user). Секрет.
- * @param folderId Идентификатор каталога Yandex Cloud.
- * @param messages История диалога (без system — он добавляется автоматически).
- * @param model    Имя модели, напр. "yandexgpt/latest" или "yandexgpt-lite/latest".
- */
-export async function askAIChat(
+/** Низкоуровневый вызов YandexGPT: messages передаются как есть (включая system). */
+async function complete(
   apiKey: string,
   folderId: string,
   messages: ChatMessage[],
-  model = "yandexgpt/latest"
+  model: string,
+  temperature: number
 ): Promise<string> {
   try {
     const res = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
@@ -54,8 +49,8 @@ export async function askAIChat(
       },
       body: JSON.stringify({
         modelUri: `gpt://${folderId}/${model}`,
-        completionOptions: { stream: false, temperature: 0.6, maxTokens: "2000" },
-        messages: [{ role: "system", text: SYSTEM_PROMPT }, ...messages],
+        completionOptions: { stream: false, temperature, maxTokens: "2000" },
+        messages,
       }),
     });
 
@@ -74,7 +69,69 @@ export async function askAIChat(
   }
 }
 
+/**
+ * Многоходовой диалог с YandexGPT (с историей переписки). System-промпт ассистента
+ * добавляется автоматически.
+ */
+export function askAIChat(
+  apiKey: string,
+  folderId: string,
+  messages: ChatMessage[],
+  model = "yandexgpt/latest"
+): Promise<string> {
+  return complete(apiKey, folderId, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model, 0.6);
+}
+
 /** Однократный запрос к YandexGPT (обёртка над askAIChat). */
 export function askAI(apiKey: string, folderId: string, prompt: string, model = "yandexgpt/latest"): Promise<string> {
   return askAIChat(apiKey, folderId, [{ role: "user", text: prompt }], model);
+}
+
+/** Извлечённая из текста задача. */
+export interface ParsedTask {
+  title: string;
+  due: string; // срок словами ("завтра 15:00") или пусто
+  scope: "work" | "personal";
+}
+
+const TASK_PARSE_SYSTEM = `Ты — парсер задач. На вход даётся распознанный из голоса текст.
+Верни СТРОГО один JSON-объект без пояснений и без markdown:
+{"title": "...", "due": "...", "scope": "work|personal"}
+Правила:
+- title: краткая суть задачи в повелительном наклонении, без упоминания срока.
+- due: срок словами как в тексте (например "завтра", "в пятницу 15:00", "25.12 10:00"). Если срока нет — пустая строка "".
+- scope: "personal" для личного (семья, здоровье, быт, покупки), иначе "work".`;
+
+/** Пытается извлечь задачу из произвольного текста (напр. распознанного голоса). */
+export async function parseTaskFromText(
+  apiKey: string,
+  folderId: string,
+  text: string,
+  model = "yandexgpt/latest"
+): Promise<ParsedTask | null> {
+  const raw = await complete(
+    apiKey,
+    folderId,
+    [
+      { role: "system", text: TASK_PARSE_SYSTEM },
+      { role: "user", text },
+    ],
+    model,
+    0.2
+  );
+  // Вырезаем JSON из ответа (на случай code-fence или лишнего текста)
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const obj = JSON.parse(match[0]) as Partial<ParsedTask>;
+    const title = (obj.title ?? "").toString().trim();
+    if (!title) return null;
+    return {
+      title,
+      due: (obj.due ?? "").toString().trim(),
+      scope: obj.scope === "personal" ? "personal" : "work",
+    };
+  } catch {
+    return null;
+  }
 }
