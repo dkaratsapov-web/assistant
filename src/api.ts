@@ -5,6 +5,7 @@ import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCod
 import { transcribeVoice } from "./speech";
 import {
   Env,
+  NotifSettings,
   ROLE_OWNER,
   ROLE_PENDING,
   SCOPE_PERSONAL,
@@ -81,6 +82,33 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
     return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // ---------- Настройки уведомлений ----------
+  if (path === "/api/notifications" && request.method === "GET") {
+    return json(await db.getNotif(uid));
+  }
+  if (path === "/api/notifications" && request.method === "POST") {
+    const b = (await request.json()) as Partial<NotifSettings>;
+    const cur = await db.getNotif(uid);
+    const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+    };
+    const next: NotifSettings = {
+      morning: { on: !!(b.morning?.on ?? cur.morning.on), hour: clamp(b.morning?.hour, 0, 23, cur.morning.hour) },
+      tasks: { on: !!(b.tasks?.on ?? cur.tasks.on) },
+      events: { on: !!(b.events?.on ?? cur.events.on), lead: clamp(b.events?.lead, 0, 1440, cur.events.lead) },
+      birthdays: { on: !!(b.birthdays?.on ?? cur.birthdays.on) },
+      water: {
+        on: !!(b.water?.on ?? cur.water.on),
+        everyHours: clamp(b.water?.everyHours, 1, 12, cur.water.everyHours),
+        from: clamp(b.water?.from, 0, 23, cur.water.from),
+        to: clamp(b.water?.to, 0, 23, cur.water.to),
+      },
+    };
+    await db.setNotif(uid, next);
+    return json({ ok: true, settings: next });
   }
 
   // ---------- Здоровье: питание и вода ----------

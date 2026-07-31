@@ -3,6 +3,7 @@ import {
   Contact,
   Event,
   FoodEntry,
+  NotifSettings,
   Note,
   ROLE_OWNER,
   Task,
@@ -538,6 +539,35 @@ export class DB {
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind(key, value)
       .run();
+  }
+
+  // ---------- Настройки уведомлений (на пользователя) ----------
+  async getNotif(userId: number): Promise<NotifSettings> {
+    const raw = await this.getSetting(`notif:${userId}`);
+    const def: NotifSettings = {
+      morning: { on: true, hour: 9 },
+      tasks: { on: true },
+      events: { on: true, lead: 30 },
+      birthdays: { on: true },
+      water: { on: false, everyHours: 2, from: 9, to: 21 },
+    };
+    if (!raw) return def;
+    try {
+      const p = JSON.parse(raw);
+      return {
+        morning: { ...def.morning, ...(p.morning || {}) },
+        tasks: { ...def.tasks, ...(p.tasks || {}) },
+        events: { ...def.events, ...(p.events || {}) },
+        birthdays: { ...def.birthdays, ...(p.birthdays || {}) },
+        water: { ...def.water, ...(p.water || {}) },
+      };
+    } catch {
+      return def;
+    }
+  }
+
+  async setNotif(userId: number, s: NotifSettings): Promise<void> {
+    await this.setSetting(`notif:${userId}`, JSON.stringify(s));
   }
 
   // ---------- Здоровье: питание и вода ----------

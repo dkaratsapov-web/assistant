@@ -110,6 +110,14 @@ export interface Event {
   created_at: string;
 }
 
+export interface NotifSettings {
+  morning: { on: boolean; hour: number };
+  tasks: { on: boolean };
+  events: { on: boolean; lead: number }; // lead — минут до встречи
+  birthdays: { on: boolean };
+  water: { on: boolean; everyHours: number; from: number; to: number };
+}
+
 export interface FoodEntry {
   id: number;
   user_id: number;

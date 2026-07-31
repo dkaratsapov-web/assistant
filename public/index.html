@@ -194,6 +194,7 @@
         <div class="h1" id="greeting">Sara</div>
         <div class="sub" id="subtitle">Загрузка…</div>
       </div>
+      <button class="icon-btn" id="notif-btn" aria-label="Уведомления" onclick="openNotif()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
       <button class="icon-btn" id="theme-btn" aria-label="Тема"></button>
     </div>
   </header>
@@ -629,6 +630,35 @@
         setHTML("rep-body", `<div class="card"><div style="color:var(--muted);padding:8px 8px 12px;text-align:center">${msg}</div>${needConnect ? `<button class="btn primary" style="width:100%" onclick="telemostConnect()">🔗 Подключить / обновить Яндекс</button>` : ""}</div>`);
       }
     }
+
+    /* ---------- Уведомления ---------- */
+    window.openNotif = async () => {
+      openSheet(`<h3>Уведомления</h3><div id="notif-body"><div class="loading">Загрузка…</div></div>`);
+      try {
+        const n = await api("/notifications");
+        const row = (label, id, checked) => `<label class="check" style="justify-content:space-between;width:100%"><span>${label}</span><input type="checkbox" id="${id}" ${checked ? "checked" : ""}></label>`;
+        let h = `<div class="card" style="padding:12px">${row("☀️ Утренний брифинг", "n-morning", n.morning.on)}<div class="field" style="margin:8px 0 0"><label>Час брифинга (0–23)</label><input id="n-morning-h" type="number" inputmode="numeric" min="0" max="23" value="${n.morning.hour}"></div></div>`;
+        h += `<div class="card" style="padding:12px;margin-top:8px">${row("✅ Дедлайны задач", "n-tasks", n.tasks.on)}</div>`;
+        h += `<div class="card" style="padding:12px;margin-top:8px">${row("📅 Встречи", "n-events", n.events.on)}<div class="field" style="margin:8px 0 0"><label>За сколько минут напоминать</label><input id="n-events-lead" type="number" inputmode="numeric" value="${n.events.lead}"></div></div>`;
+        h += `<div class="card" style="padding:12px;margin-top:8px">${row("🎂 Дни рождения", "n-bd", n.birthdays.on)}</div>`;
+        h += `<div class="card" style="padding:12px;margin-top:8px">${row("💧 Напоминать пить воду", "n-water", n.water.on)}<div style="display:flex;gap:8px;margin-top:8px"><div class="field" style="flex:1"><label>Каждые, ч</label><input id="n-water-every" type="number" inputmode="numeric" value="${n.water.everyHours}"></div><div class="field" style="flex:1"><label>С часа</label><input id="n-water-from" type="number" inputmode="numeric" value="${n.water.from}"></div><div class="field" style="flex:1"><label>До часа</label><input id="n-water-to" type="number" inputmode="numeric" value="${n.water.to}"></div></div></div>`;
+        h += `<div class="actions" style="margin-top:12px"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveNotif()">Сохранить</button></div>`;
+        setHTML("notif-body", h);
+      } catch (e) { setHTML("notif-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
+    };
+    window.saveNotif = async () => {
+      const on = (id) => ($(id) ? $(id).checked : false);
+      const num = (id) => ($(id) ? +$(id).value : 0);
+      const body = {
+        morning: { on: on("n-morning"), hour: num("n-morning-h") },
+        tasks: { on: on("n-tasks") },
+        events: { on: on("n-events"), lead: num("n-events-lead") },
+        birthdays: { on: on("n-bd") },
+        water: { on: on("n-water"), everyHours: num("n-water-every"), from: num("n-water-from"), to: num("n-water-to") },
+      };
+      try { await api("/notifications", { method: "POST", body: JSON.stringify(body) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
+      closeSheet(); tg.showAlert("Настройки уведомлений сохранены");
+    };
 
     /* ---------- ИИ-чат ---------- */
     let aiHistory = [];

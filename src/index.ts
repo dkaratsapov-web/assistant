@@ -6,7 +6,7 @@ import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
 import { buildDigest } from "./reports";
 import { Env, ROLE_MEMBER, ROLE_OWNER } from "./types";
-import { formatDue, formatEventTime, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
@@ -30,6 +30,29 @@ async function tgSend(token: string, chatId: number, text: string): Promise<void
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
   });
+}
+
+/** Напоминания пить воду: с учётом окна, интервала и дневной цели пользователя. */
+async function runWaterReminders(env: Env, db: DB, tz: number): Promise<void> {
+  const nowMs = Date.now();
+  const localHour = new Date(nowMs + tz * 3600_000).getUTCHours();
+  const users = [...(await db.listUsers(ROLE_OWNER)), ...(await db.listUsers(ROLE_MEMBER))];
+  for (const u of users) {
+    try {
+      const { water } = await db.getNotif(u.user_id);
+      if (!water.on) continue;
+      if (localHour < water.from || localHour >= water.to) continue; // вне активного окна
+      const last = parseInt((await db.getSetting(`water_last:${u.user_id}`)) ?? "0", 10) || 0;
+      if (nowMs - last < water.everyHours * 3600_000) continue; // ещё рано
+      const goal = parseInt((await db.getSetting(`hwater:${u.user_id}`)) ?? "", 10) || 2000;
+      const total = await db.waterTotal(u.user_id, startOfLocalDayIso(tz), startOfLocalDayOffsetIso(tz, 1));
+      if (total >= goal) continue; // цель достигнута — не беспокоим
+      await tgSend(env.BOT_TOKEN, u.user_id, `💧 Пора попить воды.\nСегодня: ${(total / 1000).toFixed(1)} / ${(goal / 1000).toFixed(1)} л`);
+      await db.setSetting(`water_last:${u.user_id}`, String(nowMs));
+    } catch (e) {
+      console.error("water reminder failed", u.user_id, e);
+    }
+  }
 }
 
 /** Одноразовая настройка: регистрирует webhook, команды и кнопку Mini App. */
@@ -151,41 +174,46 @@ export default {
     const tz = tzOffsetOf(env);
 
     if (event.cron === "*/5 * * * *") {
-      // Напоминания о наступивших дедлайнах задач
+      // Напоминания о наступивших дедлайнах задач (если включено у получателя)
       const tasks = await db.tasksDueForReminder(new Date().toISOString());
       for (const t of tasks) {
         const recipient = t.assignee_id ?? t.creator_id;
-        const text = `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`;
         try {
-          await tgSend(env.BOT_TOKEN, recipient, text);
+          const notif = await db.getNotif(recipient);
+          if (!notif.tasks.on) { await db.markReminded(t.id); continue; }
+          await tgSend(env.BOT_TOKEN, recipient, `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
           await db.markReminded(t.id);
         } catch (e) {
           console.error("reminder failed", t.id, e);
         }
       }
-      // Напоминания о встречах
+      // Напоминания о встречах (если включено)
       const events = await db.eventsDueForReminder(new Date().toISOString());
       for (const ev of events) {
-        const text = `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`;
         try {
-          await tgSend(env.BOT_TOKEN, ev.user_id, text);
+          const notif = await db.getNotif(ev.user_id);
+          if (!notif.events.on) { await db.markEventReminded(ev.id); continue; }
+          await tgSend(env.BOT_TOKEN, ev.user_id, `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`);
           await db.markEventReminded(ev.id);
         } catch (e) {
           console.error("event reminder failed", ev.id, e);
         }
       }
+      // Напоминания пить воду
+      await runWaterReminders(env, db, tz);
     } else if (event.cron === "0 * * * *") {
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
-      if (localHour !== parseInt(env.DIGEST_HOUR ?? "9", 10)) return;
-
-      // Напоминания о днях рождения (раз в день, в час дайджеста)
       const nowLocal = new Date(Date.now() + tz * 3600_000);
       const pad = (n: number) => String(n).padStart(2, "0");
       const mmdd = `${pad(nowLocal.getUTCMonth() + 1)}-${pad(nowLocal.getUTCDate())}`;
       const year = nowLocal.getUTCFullYear();
+
+      // Дни рождения — в утренний час пользователя, если включено
       const bdays = await db.birthdaysForReminder(mmdd, year);
       for (const c of bdays) {
         try {
+          const notif = await db.getNotif(c.user_id);
+          if (!notif.birthdays.on || notif.morning.hour !== localHour) continue;
           await tgSend(env.BOT_TOKEN, c.user_id, `🎂 Сегодня день рождения: <b>${c.name}</b>!\nНе забудь поздравить 🎉${c.phone ? `\n📞 ${c.phone}` : ""}`);
           await db.markBirthdayReminded(c.id, year);
         } catch (e) {
@@ -193,10 +221,12 @@ export default {
         }
       }
 
-      // Утренний дайджест
+      // Утренний брифинг — в час, выбранный пользователем
       const recipients = [...(await db.listUsers(ROLE_OWNER)), ...(await db.listUsers(ROLE_MEMBER))];
       for (const u of recipients) {
         try {
+          const notif = await db.getNotif(u.user_id);
+          if (!notif.morning.on || notif.morning.hour !== localHour) continue;
           const text = await buildDigest(db, u.user_id, u.role, tz);
           await tgSend(env.BOT_TOKEN, u.user_id, "☀️ Доброе утро!\n\n" + text);
         } catch (e) {
