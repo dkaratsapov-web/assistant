@@ -209,7 +209,7 @@
     <a data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.8V21h14V9.8"/></svg>Главная</a>
     <a data-tab="tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Задачи</a>
     <a data-tab="calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg>Календарь</a>
-    <a data-tab="birthdays"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16v-7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7Z"/><path d="M4 15c2 1.5 3 1.5 4 0s3-1.5 4 0 3 1.5 4 0 3-1.5 4 0M12 7.5V5m0 0a1.2 1.2 0 1 0-1.2-1.2c0 .9 1.2 1.2 1.2 1.2Z"/></svg>Дни&nbsp;р.</a>
+    <a data-tab="health"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21l8.8-8.3a5 5 0 0 0 0-7.1Z"/></svg>Здоровье</a>
     <a data-tab="clients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M16 5.2a3 3 0 0 1 0 5.6M17.5 20c-.3-1.7-1-3-2-3.9"/></svg>Клиенты</a>
     <a data-tab="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15.5l-1.8-4.7L5.5 9l4.7-1.3L12 3Z"/><path d="M18.5 14.5l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z"/></svg>Sara</a>
   </div></nav>
@@ -335,13 +335,16 @@
           });
           h += `</div>`;
         }
+        h += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center"><span>Дни рождения</span><span onclick="openContacts()" style="color:var(--muted);font-size:12px;font-weight:600;cursor:pointer">Контакты →</span></div>`;
         if (d.birthdays.length) {
-          h += `<div class="section-title">Скоро дни рождения</div><div class="card">`;
+          h += `<div class="card">`;
           d.birthdays.forEach((b) => {
             const when = b.in_days === 0 ? "сегодня" : b.in_days === 1 ? "завтра" : "через " + b.in_days + " дн.";
-            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(b.name)}</div><div class="m">${when} · ${fmtBd(b.date)}</div></div></div>`;
+            h += `<div class="agenda-item" onclick="openContacts()"><div class="dot"></div><div class="t"><div class="ttl">${esc(b.name)}</div><div class="m">${when} · ${fmtBd(b.date)}</div></div></div>`;
           });
           h += `</div>`;
+        } else {
+          h += `<div class="card" onclick="openContacts()"><div style="color:var(--muted);text-align:center;padding:6px">Нет ближайших ДР. Нажми, чтобы добавить контакт.</div></div>`;
         }
         view.innerHTML = h;
         renderHealthCard();
@@ -358,7 +361,7 @@
         const bar = (pct) => `<div style="height:8px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.min(100, pct)}%;background:var(--fg)"></div></div>`;
         const kpct = kc.goal ? Math.round(kc.consumed / kc.goal * 100) : 0;
         const wpct = w.goal ? Math.round(w.ml / w.goal * 100) : 0;
-        el.innerHTML = `<div class="card" onclick="openHealth()">
+        el.innerHTML = `<div class="card" onclick="switchTab('health')">
             <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">Б ${kc.protein} · Ж ${kc.fat} · У ${kc.carbs}</span></div>
             ${bar(kpct)}
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><b>💧 ${(w.ml/1000).toFixed(1)} / ${(w.goal/1000).toFixed(1)} л</b><span style="color:var(--muted);font-size:12px">${wpct}%</span></div>
@@ -385,34 +388,84 @@
       catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Добавить"; } return tg.showAlert("Не удалось оценить: " + (e.message || e)); }
       closeSheet();
       if (tab === "home") renderHealthCard();
-      if (sheetOpen) openHealth();
+      if (tab === "health") renderHealth();
     };
-    window.openHealth = async () => {
-      openSheet(`<h3>Здоровье сегодня</h3><div id="health-detail"><div class="loading">Загрузка…</div></div>`);
+
+    /* ---------- Раздел «Здоровье» (отдельный экран) ---------- */
+    let healthOffset = 0; // 0 — сегодня, -1 — вчера …
+    const healthDateStr = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`; };
+    window.healthNav = (delta) => { const n = healthOffset + delta; if (n > 0) return; healthOffset = n; renderHealth(); };
+    async function renderHealth() {
+      view.innerHTML = '<div class="loading">Загрузка…</div>';
       try {
-        const d = await api("/health");
-        const kc = d.kcal, w = d.water;
-        let h = `<div class="card" style="display:flex;padding:6px;margin-bottom:8px">
-            <div style="flex:1;text-align:center;padding:8px"><div style="font-size:20px;font-weight:800">${kc.consumed}</div><div style="font-size:11px;color:var(--muted)">из ${kc.goal} ккал</div></div>
-            <div style="flex:1;text-align:center;padding:8px;border-left:1px solid var(--border)"><div style="font-size:20px;font-weight:800">${(w.ml/1000).toFixed(1)}</div><div style="font-size:11px;color:var(--muted)">из ${(w.goal/1000).toFixed(1)} л</div></div></div>`;
-        h += `<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(openHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(openHealth)">＋0.5л</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
-        h += `<div class="section-title">Съедено сегодня</div>`;
+        const d = await api(`/health?date=${healthDateStr(healthOffset)}`);
+        if (tab !== "health") return;
+        const kc = d.kcal, w = d.water, today = healthOffset === 0;
+        const label = healthOffset === 0 ? "Сегодня" : healthOffset === -1 ? "Вчера" : (() => { const dt = new Date(); dt.setDate(dt.getDate()+healthOffset); return dt.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "long" }); })();
+        const bar = (pct) => `<div style="height:8px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin-top:5px"><div style="height:100%;width:${Math.min(100,pct)}%;background:var(--fg)"></div></div>`;
+        let h = `<div style="display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px">
+            <button class="icon-btn" onclick="healthNav(-1)">‹</button>
+            <div style="font-weight:800;letter-spacing:-.02em">${label}</div>
+            <button class="icon-btn" onclick="healthNav(1)" ${today ? "disabled style=opacity:.3" : ""}>›</button></div>`;
+        // КБЖУ
+        h += `<div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">Б ${kc.protein} · Ж ${kc.fat} · У ${kc.carbs}</span></div>${bar(kc.goal?kc.consumed/kc.goal*100:0)}
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><b>💧 ${(w.ml/1000).toFixed(1)} / ${(w.goal/1000).toFixed(1)} л</b></div>${bar(w.goal?w.ml/w.goal*100:0)}</div>`;
+        if (today) h += `<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(renderHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(renderHealth)">＋ 0.5 л</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
+        // Еда
+        h += `<div class="section-title">Питание</div>`;
         h += d.entries.length
           ? `<div class="card">` + d.entries.map((e) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px"><div style="min-width:0"><div>${esc(e.title)}</div><div style="font-size:12px;color:var(--muted)">${e.kcal} ккал · Б${e.protein} Ж${e.fat} У${e.carbs}</div></div><button class="btn ghost" onclick="delFood(${e.id})">✕</button></div>`).join("") + `</div>`
-          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Пока ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
+          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
+        // Рекомендация ИИ (только сегодня)
+        if (today) h += `<div id="advice-box"></div><button class="btn" style="width:100%;margin-top:8px" onclick="getAdvice()">✨ Рекомендация от Сары</button>`;
+        // Вес
+        const wk = d.weight || { latest: null, history: [] };
+        h += `<div class="section-title">Вес</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:20px">${wk.latest != null ? wk.latest + " кг" : "—"}</b>${wk.history && wk.history.length > 1 ? `<span style="color:var(--muted);font-size:12px"> (было ${wk.history[1].kg})</span>` : ""}</div><button class="btn" onclick="logWeight()">Записать</button></div></div>`;
+        // Заметки
+        h += `<div class="section-title">Заметки о самочувствии</div>`;
+        h += (d.notes && d.notes.length)
+          ? `<div class="card">` + d.notes.map((n) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">${esc(n.text)}</span><button class="btn ghost" onclick="delHealthNote(${n.id})">✕</button></div>`).join("") + `</div>`
+          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Нет заметок</div></div>`;
+        if (today) h += `<button class="btn" style="width:100%;margin-top:8px" onclick="addHealthNote()">＋ заметка</button>`;
+        // Цели
         h += `<div class="section-title">Цели</div>
           <div class="field"><label>Калории в день</label><input id="g-kcal" type="number" inputmode="numeric" value="${kc.goal}"></div>
           <div class="field"><label>Вода в день, мл</label><input id="g-water" type="number" inputmode="numeric" value="${w.goal}"></div>
           <button class="btn" style="width:100%" onclick="saveHealthGoals()">Сохранить цели</button>`;
-        setHTML("health-detail", h);
-      } catch (e) { setHTML("health-detail", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
-    };
-    window.delFood = async (id) => { haptic(); try { await api(`/health/food/${id}`, { method: "DELETE" }); } catch (e) {} openHealth(); if (tab === "home") renderHealthCard(); };
+        view.innerHTML = h;
+      } catch (e) { view.innerHTML = err(e); }
+    }
+    window.delFood = async (id) => { haptic(); try { await api(`/health/food/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); if (tab === "home") renderHealthCard(); };
     window.saveHealthGoals = async () => {
       const kcal = +$("g-kcal").value || 0, water = +$("g-water").value || 0;
       try { await api("/health/goals", { method: "POST", body: JSON.stringify({ kcal, water }) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
       tg.showAlert("Цели сохранены"); if (tab === "home") renderHealthCard();
     };
+    window.getAdvice = async () => {
+      const box = $("advice-box"); if (box) box.innerHTML = `<div class="card"><div class="loading">Сара думает…</div></div>`;
+      try { const { advice } = await api("/health/advice", { method: "POST", body: "{}" }); if (box) box.innerHTML = `<div class="card" style="white-space:pre-wrap">${esc(advice)}</div>`; }
+      catch (e) { if (box) box.innerHTML = `<div class="card"><div style="color:var(--muted);padding:6px">Не вышло: ${esc(e.message || e)}</div></div>`; }
+    };
+    window.logWeight = () => {
+      openSheet(`<h3>Записать вес</h3><div class="field"><label>Вес, кг</label><input id="w-kg" type="number" inputmode="decimal" placeholder="напр. 80.5"></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveWeight()">Сохранить</button></div>`);
+      setTimeout(() => { const i = $("w-kg"); if (i) i.focus(); }, 150);
+    };
+    window.saveWeight = async () => {
+      const kg = parseFloat(($("w-kg").value || "").replace(",", ".")); if (!kg) return tg.showAlert("Введи вес");
+      try { await api("/health/weight", { method: "POST", body: JSON.stringify({ kg }) }); } catch (e) { return tg.showAlert("Ошибка"); }
+      closeSheet(); if (tab === "health") renderHealth();
+    };
+    window.addHealthNote = () => {
+      openSheet(`<h3>Заметка о самочувствии</h3><div class="field"><label>Например: плохо спал, тренировка, болит голова</label><input id="hn-text" placeholder="заметка" autocomplete="off"></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveHealthNote()">Добавить</button></div>`);
+      setTimeout(() => { const i = $("hn-text"); if (i) i.focus(); }, 150);
+    };
+    window.saveHealthNote = async () => {
+      const text = ($("hn-text").value || "").trim(); if (!text) return tg.showAlert("Введи текст");
+      try { await api("/health/note", { method: "POST", body: JSON.stringify({ text }) }); } catch (e) { return tg.showAlert("Ошибка"); }
+      closeSheet(); if (tab === "health") renderHealth();
+    };
+    window.delHealthNote = async (id) => { haptic(); try { await api(`/health/note/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); };
 
     async function renderTasks() {
       view.innerHTML =
@@ -561,23 +614,21 @@
       box.innerHTML = `<div class="section-title">${label}</div>` + (items.length ? items.map(calItemRow).join("") : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не запланировано</div></div>`);
     }
 
-    async function renderBirthdays() {
-      view.innerHTML = '<div class="section-title">Контакты и дни рождения</div><div id="clist"><div class="loading">Загрузка…</div></div>';
+    window.openContacts = async () => {
+      openSheet(`<h3>Контакты и дни рождения</h3><button class="btn primary" style="width:100%;margin-bottom:10px" onclick="openAddContact()">＋ добавить контакт</button><div id="clist"><div class="loading">Загрузка…</div></div>`);
       try {
         const { contacts } = await api("/contacts");
         contactsCache = contacts;
-        const el = $("clist");
-        if (!el) return;
-        if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с ДР — напомню заранее."); return; }
-        el.innerHTML = contacts.map((c) => {
+        setHTML("clist", contacts.length ? contacts.map((c) => {
           const tags = (c.tags || "").split(",").map((s) => s.trim()).filter(Boolean);
           return `<div class="card item">
-          <div class="top"><div class="name">${esc(c.name)}</div></div>
-          <div class="meta">${c.birthday?`<span class="pill strong">🎂 ${esc(fmtBd(c.birthday))}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}${tags.map((t)=>`<span class="pill">#${esc(t)}</span>`).join("")}</div>
-          <div class="actions"><button class="btn" onclick="editContact(${c.id})">Изменить</button><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
-        </div>`; }).join("");
+            <div class="top"><div class="name">${esc(c.name)}</div></div>
+            <div class="meta">${c.birthday?`<span class="pill strong">🎂 ${esc(fmtBd(c.birthday))}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}${tags.map((t)=>`<span class="pill">#${esc(t)}</span>`).join("")}</div>
+            <div class="actions"><button class="btn" onclick="editContact(${c.id})">Изменить</button><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
+          </div>`; }).join("") : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Пока пусто. Добавь контакт с ДР — напомню заранее.</div></div>`);
       } catch (e) { setHTML("clist", err(e)); }
-    }
+    };
+    function afterContactChange() { openContacts(); if (tab === "home") renderHome(); }
 
     async function renderClients() {
       view.innerHTML = '<div class="section-title">Клиенты и проекты</div><div id="cllist"><div class="loading">Загрузка…</div></div>';
@@ -777,7 +828,7 @@
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
     window.delTask = async (id) => { if (!confirm("Удалить задачу?")) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTasks(); };
     window.delEvent = async (id) => { if (!confirm("Удалить встречу?")) return; await api(`/events/${id}`, { method: "DELETE" }); renderCalendar(); };
-    window.delContact = async (id) => { if (!confirm("Удалить контакт?")) return; await api(`/contacts/${id}`, { method: "DELETE" }); renderBirthdays(); };
+    window.delContact = async (id) => { if (!confirm("Удалить контакт?")) return; await api(`/contacts/${id}`, { method: "DELETE" }); afterContactChange(); };
 
     /* ---------- Шторки ---------- */
     const sheet = $("sheet"), sheetBody = $("sheet-body");
@@ -838,13 +889,13 @@
     window.saveContact = async () => {
       const b = contactBody(); if (!b.name) return tg.showAlert("Введи имя");
       await api("/contacts", { method: "POST", body: JSON.stringify(b) });
-      closeSheet(); renderBirthdays();
+      closeSheet(); afterContactChange();
     };
     window.editContact = (id) => { const c = contactsCache.find((x) => x.id === id); if (c) contactSheet("Изменить контакт", c, `saveContactEdit(${id})`); };
     window.saveContactEdit = async (id) => {
       const b = contactBody(); if (!b.name) return tg.showAlert("Введи имя");
       await api(`/contacts/${id}`, { method: "POST", body: JSON.stringify(b) });
-      closeSheet(); renderBirthdays();
+      closeSheet(); afterContactChange();
     };
 
     /* Редактирование задачи */
@@ -913,8 +964,8 @@
     window.toggleClient = async (id, status) => { haptic(); await api(`/clients/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderClients(); };
     window.delClient = async (id) => { if (!confirm("Удалить клиента?")) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
 
-    $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "birthdays") openAddContact(); else if (tab === "clients") openAddClient(); };
-    function updateFab() { $("fab").style.display = ["tasks", "calendar", "birthdays", "clients"].includes(tab) ? "flex" : "none"; }
+    $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "health") openFoodAdd(); else if (tab === "clients") openAddClient(); };
+    function updateFab() { $("fab").style.display = ["tasks", "calendar", "health", "clients"].includes(tab) ? "flex" : "none"; }
 
     /* ---------- Навигация + кнопка «Назад» ---------- */
     function renderTab(t) {
@@ -924,7 +975,7 @@
       if (t === "home") renderHome();
       else if (t === "tasks") renderTasks();
       else if (t === "calendar") renderCalendar();
-      else if (t === "birthdays") renderBirthdays();
+      else if (t === "health") renderHealth();
       else if (t === "clients") renderClients();
       else if (t === "ai") renderAI();
     }

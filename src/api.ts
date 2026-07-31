@@ -114,6 +114,61 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // ---------- Здоровье: питание и вода ----------
   if (path === "/api/health" && request.method === "GET") {
     const tzh = tzOffsetOf(env);
+    const u = new URL(request.url);
+    const dateStr = u.searchParams.get("date"); // YYYY-MM-DD (локальная дата) или пусто = сегодня
+    let start: string, end: string;
+    if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const startMs = Date.parse(`${dateStr}T00:00:00Z`) - tzh * 3600_000;
+      start = new Date(startMs).toISOString();
+      end = new Date(startMs + 86400_000).toISOString();
+    } else {
+      start = startOfLocalDayIso(tzh);
+      end = startOfLocalDayOffsetIso(tzh, 1);
+    }
+    const entries = await db.listFood(uid, start, end);
+    const kcal = entries.reduce((s, e) => s + e.kcal, 0);
+    const protein = entries.reduce((s, e) => s + e.protein, 0);
+    const fat = entries.reduce((s, e) => s + e.fat, 0);
+    const carbs = entries.reduce((s, e) => s + e.carbs, 0);
+    const water = await db.waterTotal(uid, start, end);
+    const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
+    const waterGoal = parseInt((await db.getSetting(`hwater:${uid}`)) ?? "", 10) || 2000;
+    const notes = await db.listHealthNotes(uid, start, end);
+    const weights = await db.listWeights(uid, 14);
+    return json({
+      kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs },
+      water: { ml: water, goal: waterGoal },
+      entries,
+      notes,
+      weight: { latest: weights[0]?.kg ?? null, history: weights },
+    });
+  }
+
+  if (path === "/api/health/weight" && request.method === "POST") {
+    const body = (await request.json()) as { kg?: number };
+    const kg = Math.round((+(body.kg ?? 0) || 0) * 10) / 10;
+    if (kg <= 0 || kg > 500) return json({ error: "bad_weight" }, 400);
+    await db.addWeight(uid, kg);
+    return json({ ok: true });
+  }
+
+  if (path === "/api/health/note" && request.method === "POST") {
+    const body = (await request.json()) as { text?: string };
+    const text = (body.text ?? "").trim();
+    if (!text) return json({ error: "empty" }, 400);
+    const id = await db.addHealthNote(uid, text.slice(0, 500));
+    return json({ ok: true, id });
+  }
+
+  const hnoteDel = path.match(/^\/api\/health\/note\/(\d+)$/);
+  if (hnoteDel && request.method === "DELETE") {
+    await db.deleteHealthNote(parseInt(hnoteDel[1], 10), uid);
+    return json({ ok: true });
+  }
+
+  if (path === "/api/health/advice" && request.method === "POST") {
+    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+    const tzh = tzOffsetOf(env);
     const start = startOfLocalDayIso(tzh), end = startOfLocalDayOffsetIso(tzh, 1);
     const entries = await db.listFood(uid, start, end);
     const kcal = entries.reduce((s, e) => s + e.kcal, 0);
@@ -123,7 +178,19 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const water = await db.waterTotal(uid, start, end);
     const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
     const waterGoal = parseInt((await db.getSetting(`hwater:${uid}`)) ?? "", 10) || 2000;
-    return json({ kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs }, water: { ml: water, goal: waterGoal }, entries });
+    const weights = await db.listWeights(uid, 2);
+    const prompt =
+      `Данные питания за сегодня. Калории: ${kcal} из ${kcalGoal}. Белки ${protein} г, жиры ${fat} г, углеводы ${carbs} г. ` +
+      `Вода: ${(water / 1000).toFixed(1)} из ${(waterGoal / 1000).toFixed(1)} л. ` +
+      (weights[0] ? `Вес: ${weights[0].kg} кг. ` : "") +
+      `Съедено: ${entries.map((e) => e.title).join(", ") || "ничего не записано"}. ` +
+      `Дай короткую (3-5 пунктов) практичную рекомендацию по питанию и воде на остаток дня. Дружелюбно, по-русски, без воды и дисклеймеров.`;
+    try {
+      const advice = await askAIChat(env.ANTHROPIC_API_KEY, [{ role: "user", text: prompt }], DEFAULT_MODEL);
+      return json({ advice });
+    } catch (e) {
+      return json({ error: "advice_failed", message: (e as Error).message }, 502);
+    }
   }
 
   if (path === "/api/health/food" && request.method === "POST") {

@@ -582,7 +582,55 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS water_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, ml INTEGER NOT NULL)")
       .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS weight_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, kg REAL NOT NULL)")
+      .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS health_note (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL)")
+      .run();
     this.healthReady = true;
+  }
+
+  async lastFood(userId: number, startIso: string, endIso: string): Promise<FoodEntry | null> {
+    await this.ensureHealth();
+    return await this.d1
+      .prepare("SELECT * FROM food_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts DESC LIMIT 1")
+      .bind(userId, startIso, endIso)
+      .first<FoodEntry>();
+  }
+
+  async addWeight(userId: number, kg: number): Promise<void> {
+    await this.ensureHealth();
+    await this.d1.prepare("INSERT INTO weight_log (user_id, ts, kg) VALUES (?, ?, ?)").bind(userId, nowIso(), kg).run();
+  }
+
+  async listWeights(userId: number, limit = 14): Promise<{ id: number; ts: string; kg: number }[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT id, ts, kg FROM weight_log WHERE user_id = ? ORDER BY ts DESC LIMIT ?")
+      .bind(userId, limit)
+      .all<{ id: number; ts: string; kg: number }>();
+    return results ?? [];
+  }
+
+  async addHealthNote(userId: number, text: string): Promise<number> {
+    await this.ensureHealth();
+    const res = await this.d1.prepare("INSERT INTO health_note (user_id, ts, text) VALUES (?, ?, ?)").bind(userId, nowIso(), text).run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listHealthNotes(userId: number, startIso: string, endIso: string): Promise<{ id: number; ts: string; text: string }[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT id, ts, text FROM health_note WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+      .bind(userId, startIso, endIso)
+      .all<{ id: number; ts: string; text: string }>();
+    return results ?? [];
+  }
+
+  async deleteHealthNote(id: number, userId: number): Promise<void> {
+    await this.ensureHealth();
+    await this.d1.prepare("DELETE FROM health_note WHERE id = ? AND user_id = ?").bind(id, userId).run();
   }
 
   async addFood(userId: number, f: { title: string; kcal: number; protein: number; fat: number; carbs: number }): Promise<number> {

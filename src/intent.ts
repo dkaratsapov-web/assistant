@@ -6,7 +6,7 @@
 import { AssistantIntent, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, nowContext, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const FOOD_RE = /(съел\w*|поел\w*|скушал\w*|позавтракал\w*|пообедал\w*|поужинал\w*|перекусил\w*|на завтрак|на обед|на ужин|съесть)/i;
 
@@ -188,6 +188,34 @@ export async function tryPerformCommand(
   forceTask = false
 ): Promise<string | null> {
   const tz = tzOffsetOf(env);
+  const dayStart = startOfLocalDayIso(tz);
+  const dayEnd = startOfLocalDayOffsetIso(tz, 1);
+
+  // 0-health) Правки раздела «Здоровье» — локально, без ИИ
+  // Цель по калориям
+  if (/(цел|норм)/i.test(text) && /(калор|ккал)/i.test(text)) {
+    const n = text.match(/(\d{3,5})/);
+    if (n) { await db.setSetting(`hkcal:${uid}`, n[1]); return `🎯 Цель по калориям: ${n[1]} ккал/день.`; }
+  }
+  // Цель по воде
+  if (/(цел|норм)/i.test(text) && /вод/i.test(text)) {
+    const ml = parseWaterMl(text);
+    await db.setSetting(`hwater:${uid}`, String(ml));
+    return `🎯 Цель по воде: ${(ml / 1000).toFixed(1)} л/день.`;
+  }
+  // Удалить последнюю еду
+  if (/(удал|убери|убрать)/i.test(text) && /(последн)/i.test(text) && /(ед[уаы]|блюд|приём|прием)/i.test(text)) {
+    const last = await db.lastFood(uid, dayStart, dayEnd);
+    if (!last) return "Сегодня ещё нет записей о еде.";
+    await db.deleteFood(last.id, uid);
+    return `🗑 Удалила: ${last.title} (−${last.kcal} ккал).`;
+  }
+  // Вес
+  const wM = text.match(/\bвес\w*\s*[—:\-]?\s*(\d{2,3}(?:[.,]\d)?)/i) || text.match(/взвес\w+\D{0,6}(\d{2,3}(?:[.,]\d)?)/i);
+  if (wM) {
+    const kg = parseFloat(wM[1].replace(",", "."));
+    if (kg >= 20 && kg <= 400) { await db.addWeight(uid, kg); return `⚖️ Записала вес: ${kg} кг.`; }
+  }
 
   // 0a) Вода — локально, без ИИ
   const waterMl = matchWaterMl(text);
