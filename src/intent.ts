@@ -255,7 +255,10 @@ export async function tryPerformCommand(
   }
 
   // 0b) Еда — оценка калорий через ИИ
-  if (FOOD_RE.test(text)) {
+  const hasMealWord = /(завтрак|обед|ужин|перекус|полдник)/i.test(text);
+  const notOtherEntity = !/(встреч|созвон|задач|клиент|напомни|перезвон|позвон|заплан)/i.test(text);
+  const looksLikeFood = notOtherEntity && (FOOD_RE.test(text) || (hasMealWord && /(добав|запиш|плюс|учти|засчита|занеси|внеси)/i.test(text)));
+  if (looksLikeFood) {
     if (!env.ANTHROPIC_API_KEY) return null;
     const n = await estimateNutrition(env.ANTHROPIC_API_KEY, text);
     if (n) {
