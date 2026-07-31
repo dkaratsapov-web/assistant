@@ -107,25 +107,29 @@ const TASK_PARSE_SYSTEM = `Ты — парсер задач. На вход да�
 
 /** Намерение пользователя, распознанное ассистентом. */
 export interface AssistantIntent {
-  action: "task" | "event" | "contact" | "none";
+  action: "task" | "event" | "contact" | "client_add" | "client_delete" | "none";
   title?: string;
   due?: string; // срок задачи словами
   at?: string; // время встречи словами
   scope?: "work" | "personal";
-  name?: string; // имя контакта
+  name?: string; // имя контакта / клиента
   birthday?: string; // дата рождения
   location?: string; // место встречи
+  platforms?: string; // площадки клиента
+  budget?: string; // бюджет клиента
 }
 
 const ROUTER_SYSTEM = `Ты — маршрутизатор команд ассистента Сары. По сообщению пользователя определи,
 хочет ли он ВЫПОЛНИТЬ действие или просто задать вопрос/попросить текст.
 Верни СТРОГО один JSON-объект без пояснений и markdown:
-{"action":"task|event|contact|none","title":"","due":"","at":"","scope":"work|personal","name":"","birthday":"","location":""}
+{"action":"task|event|contact|client_add|client_delete|none","title":"","due":"","at":"","scope":"work|personal","name":"","birthday":"","location":"","platforms":"","budget":""}
 Правила:
 - "task" — добавить задачу, напоминание, дело («напомни», «добавь задачу», «нужно сделать»). title = суть без срока, due = срок.
 - "event" — добавить встречу, созвон, событие в календарь («встреча», «созвон», «запланируй»). title = с кем/о чём, at = когда, location = место или "".
-- "contact" — добавить контакт или день рождения («запиши др», «добавь контакт»). name = имя, birthday = дата.
-- "none" — если это вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ добавление задачи/встречи/контакта.
+- "contact" — добавить контакт/человека или день рождения («запиши др», «добавь контакт»). name = имя, birthday = дата.
+- "client_add" — добавить клиента/заказчика/проект («добавь клиента», «новый клиент/проект»). name = название, platforms = площадки/услуги или "", budget = бюджет или "".
+- "client_delete" — удалить клиента («удали клиента», «убери клиента»). name = название клиента.
+- "none" — вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ добавление/удаление записи.
 - scope: "personal" для личного (семья, здоровье, быт), иначе "work".
 ВАЖНО про даты: все относительные сроки («сегодня», «завтра», «через час», «в пятницу», «в 13 часов», «в обед»)
 переведи в АБСОЛЮТНЫЙ формат: due и at → "ГГГГ-ММ-ДД ЧЧ:ММ" (если время не названо — только "ГГГГ-ММ-ДД");
@@ -135,8 +139,10 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 "Добавь на завтра встречу с клиентом в 13 часов" → {"action":"event","title":"Встреча с клиентом","due":"","at":"2026-08-01 13:00","scope":"work","name":"","birthday":"","location":""}
 "напомни в пятницу отправить отчёт" → {"action":"task","title":"Отправить отчёт","due":"2026-08-01 10:00","at":"","scope":"work","name":"","birthday":"","location":""}
 "через час позвонить маме" → {"action":"task","title":"Позвонить маме","due":"2026-07-31 17:00","at":"","scope":"personal","name":"","birthday":"","location":""}
-"запиши день рождения Иры 15 марта" → {"action":"contact","title":"","due":"","at":"","scope":"personal","name":"Ира","birthday":"03-15","location":""}
-"напиши 3 заголовка для Директа" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","birthday":"","location":""}
+"запиши день рождения Иры 15 марта" → {"action":"contact","title":"","due":"","at":"","scope":"personal","name":"Ира","birthday":"03-15","location":"","platforms":"","budget":""}
+"добавь клиента Ромашка, Директ и VK, бюджет 100000" → {"action":"client_add","title":"","due":"","at":"","scope":"work","name":"Ромашка","birthday":"","location":"","platforms":"Директ, VK","budget":"100000"}
+"удали клиента Ромашка" → {"action":"client_delete","title":"","due":"","at":"","scope":"work","name":"Ромашка","birthday":"","location":"","platforms":"","budget":""}
+"напиши 3 заголовка для Директа" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","birthday":"","location":"","platforms":"","budget":""}
 
 Отвечай ТОЛЬКО одной строкой JSON, без markdown, без \`\`\`, без пояснений.`;
 

@@ -95,6 +95,27 @@ export class DB {
     await this.d1.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
   }
 
+  /** Поиск клиента по имени (для удаления голосом). */
+  async findClientByName(name: string): Promise<Client | null> {
+    const n = name.trim().toLowerCase();
+    return await this.d1
+      .prepare("SELECT * FROM clients WHERE lower(name) LIKE ? ORDER BY (lower(name) = ?) DESC, name LIMIT 1")
+      .bind(`%${n}%`, n)
+      .first<Client>();
+  }
+
+  /** Безопасная авто-миграция: добавляет колонку done_at, если базу создавали из старой схемы. */
+  private schemaReady = false;
+  private async ensureSchema(): Promise<void> {
+    if (this.schemaReady) return;
+    try {
+      await this.d1.prepare("ALTER TABLE tasks ADD COLUMN done_at TEXT").run();
+    } catch {
+      // колонка уже есть — игнорируем
+    }
+    this.schemaReady = true;
+  }
+
   // ---------- Задачи ----------
 
   async addTask(opts: {
@@ -136,7 +157,9 @@ export class DB {
     assigneeId?: number | null;
     clientId?: number | null;
     scope?: string | null;
+    orderByDone?: boolean;
   } = {}): Promise<Task[]> {
+    await this.ensureSchema();
     const statuses = opts.statuses ?? [TASK_OPEN, TASK_IN_PROGRESS];
     let q = "SELECT * FROM tasks WHERE 1=1";
     const binds: unknown[] = [];
@@ -156,14 +179,30 @@ export class DB {
       q += " AND scope = ?";
       binds.push(opts.scope);
     }
-    q += " ORDER BY (due_at IS NULL), due_at, priority DESC, created_at";
+    q += opts.orderByDone
+      ? " ORDER BY (done_at IS NULL), done_at DESC, created_at DESC"
+      : " ORDER BY (due_at IS NULL), due_at, priority DESC, created_at";
     const { results } = await this.d1.prepare(q).bind(...binds).all<Task>();
     return results ?? [];
   }
 
   async setTaskStatus(id: number, status: string): Promise<void> {
+    await this.ensureSchema();
     const doneAt = status === TASK_DONE ? nowIso() : null;
     await this.d1.prepare("UPDATE tasks SET status = ?, done_at = ? WHERE id = ?").bind(status, doneAt, id).run();
+  }
+
+  /** Частичное обновление задачи (редактирование). */
+  async updateTask(id: number, fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number }): Promise<void> {
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
+    if (fields.dueAt !== undefined) { sets.push("due_at = ?"); binds.push(fields.dueAt); }
+    if (fields.scope !== undefined) { sets.push("scope = ?"); binds.push(fields.scope); }
+    if (fields.priority !== undefined) { sets.push("priority = ?"); binds.push(fields.priority); }
+    if (!sets.length) return;
+    binds.push(id);
+    await this.d1.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
   }
 
   async deleteTask(id: number): Promise<void> {
@@ -256,6 +295,23 @@ export class DB {
 
   async deleteEvent(id: number, userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  /** Частичное обновление встречи (редактирование). */
+  async updateEvent(
+    id: number,
+    userId: number,
+    fields: { title?: string; startsAt?: string; location?: string; notes?: string }
+  ): Promise<void> {
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
+    if (fields.startsAt !== undefined) { sets.push("starts_at = ?"); binds.push(fields.startsAt); }
+    if (fields.location !== undefined) { sets.push("location = ?"); binds.push(fields.location); }
+    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
+    if (!sets.length) return;
+    binds.push(id, userId);
+    await this.d1.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
   }
 
   async eventsDueForReminder(nowIso: string): Promise<Event[]> {

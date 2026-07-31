@@ -60,6 +60,23 @@ export async function performIntent(
     return `👤 Контакт добавлен (#${id})\n${name}${bd}`;
   }
 
+  if (intent.action === "client_add") {
+    const name = (intent.name ?? intent.title ?? "").trim();
+    if (!name) return null;
+    const id = await db.addClient(name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim());
+    const extra = [intent.platforms, intent.budget ? `бюджет ${intent.budget}` : ""].filter(Boolean).join(" · ");
+    return `🤝 Клиент добавлен (#${id})\n${name}${extra ? `\n${extra}` : ""}`;
+  }
+
+  if (intent.action === "client_delete") {
+    const name = (intent.name ?? intent.title ?? "").trim();
+    if (!name) return null;
+    const client = await db.findClientByName(name);
+    if (!client) return `Не нашла клиента «${name}». Проверь название — точнее: /clients в боте.`;
+    await db.deleteClient(client.id);
+    return `🗑 Клиент удалён: ${client.name} (#${client.id})`;
+  }
+
   return null;
 }
 

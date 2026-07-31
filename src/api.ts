@@ -88,13 +88,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const scope = scopeParam === SCOPE_PERSONAL || scopeParam === SCOPE_WORK ? scopeParam : null;
     const statuses =
       filter === "done" ? [TASK_DONE] : filter === "all" ? [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE] : [TASK_OPEN, TASK_IN_PROGRESS];
-    const tasks = await db.listTasks({ statuses, assigneeId: isOwner ? null : uid, scope });
+    const tasks = await db.listTasks({ statuses, assigneeId: isOwner ? null : uid, scope, orderByDone: filter === "done" });
     const out = [];
     for (const t of tasks) {
       const client = t.client_id ? await db.getClient(t.client_id) : null;
       out.push({
         id: t.id, title: t.title, description: t.description, scope: t.scope,
-        status: t.status, priority: t.priority, due_at: t.due_at, client: client?.name ?? null,
+        status: t.status, priority: t.priority, due_at: t.due_at, done_at: t.done_at, client: client?.name ?? null,
       });
     }
     return json({ tasks: out });
@@ -124,6 +124,23 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const task = await db.getTask(parseInt(statusMatch[1], 10));
     if (!task) return json({ error: "not_found" }, 404);
     await db.setTaskStatus(task.id, body.status!);
+    return json({ ok: true });
+  }
+
+  // POST /api/tasks/{id} — редактирование задачи
+  const editMatch = path.match(/^\/api\/tasks\/(\d+)$/);
+  if (editMatch && request.method === "POST") {
+    const body = (await request.json()) as { title?: string; due?: string; scope?: string; priority?: number };
+    const fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number } = {};
+    if (body.title !== undefined) {
+      const t = body.title.trim();
+      if (!t) return json({ error: "empty_title" }, 400);
+      fields.title = t;
+    }
+    if (body.due !== undefined) fields.dueAt = body.due.trim() ? parseDue(body.due, tz) : null;
+    if (body.scope !== undefined) fields.scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
+    if (body.priority !== undefined) fields.priority = body.priority ? 1 : 0;
+    await db.updateTask(parseInt(editMatch[1], 10), fields);
     return json({ ok: true });
   }
 
@@ -230,6 +247,15 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     upcomingBirthdays.sort((a, b) => a.in_days - b.in_days);
 
+    // Статистика по выполненным задачам
+    const done = await db.listTasks({ statuses: [TASK_DONE], assigneeId: assignee, orderByDone: true });
+    const weekAgo = nowMs - 7 * 86400_000;
+    const stats = {
+      doneToday: done.filter((t) => t.done_at && Math.floor((new Date(t.done_at).getTime() + tz * 3600_000) / 86400_000) === todayLocalDay).length,
+      doneWeek: done.filter((t) => t.done_at && new Date(t.done_at).getTime() >= weekAgo).length,
+      doneTotal: done.length,
+    };
+
     return json({
       tasks: agendaTasks,
       events,
@@ -238,6 +264,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         personal: active.filter((t) => t.scope === SCOPE_PERSONAL).length,
         work: active.filter((t) => t.scope === SCOPE_WORK).length,
       },
+      stats,
     });
   }
 
@@ -256,6 +283,27 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (!startsAt) return json({ error: "bad_date" }, 400);
     const id = await db.addEvent({ userId: uid, title, startsAt, location: body.location ?? "", notes: body.notes ?? "" });
     return json({ ok: true, id });
+  }
+
+  // POST /api/events/{id} — редактирование встречи
+  const evEdit = path.match(/^\/api\/events\/(\d+)$/);
+  if (evEdit && request.method === "POST") {
+    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string };
+    const fields: { title?: string; startsAt?: string; location?: string; notes?: string } = {};
+    if (body.title !== undefined) {
+      const t = body.title.trim();
+      if (!t) return json({ error: "empty_title" }, 400);
+      fields.title = t;
+    }
+    if (body.at !== undefined) {
+      const s = localInputToUtc(body.at, tz);
+      if (!s) return json({ error: "bad_date" }, 400);
+      fields.startsAt = s;
+    }
+    if (body.location !== undefined) fields.location = body.location;
+    if (body.notes !== undefined) fields.notes = body.notes;
+    await db.updateEvent(parseInt(evEdit[1], 10), uid, fields);
+    return json({ ok: true });
   }
 
   // DELETE /api/events/{id}
