@@ -126,6 +126,24 @@
       background: var(--surface); color: var(--text); font-size: 15px; font-family: inherit; }
     .field textarea { resize: vertical; min-height: 54px; }
     .seg.mini div { padding: 8px; font-size: 13px; }
+
+    /* ИИ-чат */
+    .ai-cta { display: flex; align-items: center; gap: 12px; color: #fff; cursor: pointer;
+      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); border: 0; }
+    .ai-cta .ic { font-size: 26px; } .ai-cta .tx { font-weight: 700; } .ai-cta .sm { font-size: 12px; opacity: .9; font-weight: 500; }
+    .ai-wrap { padding-bottom: 150px; min-height: 40vh; }
+    .msg { max-width: 84%; padding: 10px 13px; border-radius: 16px; margin: 9px 0; font-size: 14.5px;
+      white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; box-shadow: var(--shadow); }
+    .msg.user { margin-left: auto; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border-bottom-right-radius: 5px; }
+    .msg.ai { margin-right: auto; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 5px; }
+    .msg.ai.think { color: var(--hint); font-style: italic; }
+    .chatbar { position: fixed; left: 0; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 45; padding: 0 14px; }
+    .chatbar-inner { max-width: 620px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 26px; padding: 5px 5px 5px 16px; box-shadow: var(--shadow); }
+    .chatbar input { flex: 1; border: 0; background: transparent; color: var(--text); font-size: 15px; font-family: inherit; outline: none; padding: 10px 0; }
+    .chatbar button { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; cursor: pointer; font-size: 18px;
+      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; }
+    .chatbar button:disabled { opacity: .5; }
   </style>
 </head>
 <body>
@@ -150,6 +168,7 @@
     <a data-tab="calendar"><span class="ic">📅</span>Календарь</a>
     <a data-tab="birthdays"><span class="ic">🎂</span>Дни&nbsp;р.</a>
     <a data-tab="clients"><span class="ic">👥</span>Клиенты</a>
+    <a data-tab="ai"><span class="ic">🤖</span>Sara</a>
   </div></nav>
 
   <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
@@ -211,6 +230,7 @@
           <div class="tile work" onclick="go('tasks','work')"><div class="n">${d.counts.work}</div><div class="l">💼 Рабочих задач</div></div>
           <div class="tile personal" onclick="go('tasks','personal')"><div class="n">${d.counts.personal}</div><div class="l">🙋 Личных задач</div></div>
         </div>`;
+        h += `<div class="card ai-cta" onclick="switchTab('ai')"><span class="ic">🤖</span><div><div class="tx">Спросить Сару</div><div class="sm">ИИ по рекламе: тексты, офферы, идеи</div></div></div>`;
         h += `<div class="section-title">На сегодня</div>`;
         if (!d.tasks.length && !d.events.length) {
           h += `<div class="card"><div style="color:var(--hint);text-align:center;padding:8px">На сегодня всё спокойно ✨</div></div>`;
@@ -311,6 +331,60 @@
       } catch (e) { $("cllist").innerHTML = err(e); }
     }
 
+    let aiHistory = [];
+    const AI_SUGG = ["3 заголовка для Директа", "Идеи для Reels", "Оффер для лендинга", "Минус-слова"];
+    function aiScrollBottom() { requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); }
+    async function renderAI() {
+      view.innerHTML =
+        `<div class="ai-wrap" id="ai-scroll"></div>
+         <div class="chatbar"><div class="chatbar-inner">
+           <input id="ai-input" placeholder="Спроси про рекламу, тексты, идеи…" autocomplete="off" enterkeyhint="send">
+           <button id="ai-send">➤</button>
+         </div></div>`;
+      const scroll = $("ai-scroll");
+      if (!aiHistory.length) {
+        scroll.innerHTML =
+          `<div class="msg ai">Привет! Я Сара 🤖\nПомогу с рекламой: тексты объявлений, заголовки, офферы, идеи для кампаний, разбор лендингов. Спрашивай что угодно.</div>
+           <div class="chips" id="ai-sugg">${AI_SUGG.map((s) => `<div class="chip" onclick="aiSend(this.textContent)">${s}</div>`).join("")}</div>`;
+      } else {
+        scroll.innerHTML = aiHistory.map((m) => `<div class="msg ${m.role === "user" ? "user" : "ai"}">${esc(m.content)}</div>`).join("");
+      }
+      const input = $("ai-input");
+      $("ai-send").onclick = () => aiSend(input.value);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aiSend(input.value); } });
+      aiScrollBottom();
+      setTimeout(() => input.focus(), 150);
+    }
+    window.aiSend = async (text) => {
+      text = (text || "").trim();
+      if (!text || tab !== "ai") return;
+      haptic();
+      const sugg = $("ai-sugg"); if (sugg) sugg.remove();
+      const input = $("ai-input"), sendBtn = $("ai-send"), scroll = $("ai-scroll");
+      if (input) input.value = "";
+      if (sendBtn) sendBtn.disabled = true;
+      aiHistory.push({ role: "user", content: text });
+      scroll.insertAdjacentHTML("beforeend", `<div class="msg user">${esc(text)}</div>`);
+      const think = document.createElement("div");
+      think.className = "msg ai think"; think.textContent = "Сара печатает…";
+      scroll.appendChild(think); aiScrollBottom();
+      try {
+        const { reply } = await api("/ai", { method: "POST", body: JSON.stringify({ messages: aiHistory.slice(-20) }) });
+        think.remove();
+        aiHistory.push({ role: "assistant", content: reply });
+        scroll.insertAdjacentHTML("beforeend", `<div class="msg ai">${esc(reply)}</div>`);
+      } catch (e) {
+        think.remove();
+        const m = String(e.message || e);
+        const msg = m === "ai_not_configured" ? "ИИ ещё не настроен: добавь ключи YandexGPT в настройках." : "⚠️ Ошибка: " + m;
+        scroll.insertAdjacentHTML("beforeend", `<div class="msg ai">${esc(msg)}</div>`);
+      } finally {
+        if (sendBtn) sendBtn.disabled = false;
+        aiScrollBottom();
+        if (tab === "ai") { const i = $("ai-input"); if (i) i.focus(); }
+      }
+    };
+
     window.go = (t, scope) => { if (scope) taskScope = scope; switchTab(t); };
     window.setScope = (s) => { taskScope = s; renderTasks(); };
     window.setStatus = (s) => { taskStatus = s; renderTasks(); };
@@ -390,6 +464,7 @@
       else if (t === "calendar") renderCalendar();
       else if (t === "birthdays") renderBirthdays();
       else if (t === "clients") renderClients();
+      else if (t === "ai") renderAI();
     }
     document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab); });
 

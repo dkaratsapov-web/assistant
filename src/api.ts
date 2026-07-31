@@ -1,3 +1,4 @@
+import { askAIChat, ChatMessage } from "./ai";
 import { DB } from "./db";
 import {
   Env,
@@ -136,6 +137,24 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (path === "/api/clients" && request.method === "GET") {
     const clients = await db.listClients();
     return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget })) });
+  }
+
+  // POST /api/ai — диалог с ИИ (YandexGPT) с историей
+  if (path === "/api/ai" && request.method === "POST") {
+    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return json({ error: "ai_not_configured" }, 400);
+    const body = (await request.json()) as { messages?: { role?: string; content?: string }[]; prompt?: string };
+    let msgs: ChatMessage[] = [];
+    if (Array.isArray(body.messages)) {
+      msgs = body.messages
+        .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
+        .slice(-20)
+        .map((m) => ({ role: m.role as "user" | "assistant", text: m.content as string }));
+    } else if (typeof body.prompt === "string" && body.prompt.trim()) {
+      msgs = [{ role: "user", text: body.prompt.trim() }];
+    }
+    if (!msgs.length) return json({ error: "empty" }, 400);
+    const reply = await askAIChat(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, msgs, env.YANDEX_MODEL ?? "yandexgpt/latest");
+    return json({ reply });
   }
 
   // GET /api/notes

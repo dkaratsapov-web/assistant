@@ -25,17 +25,23 @@ interface YandexResponse {
   code?: number;
 }
 
+/** Роль сообщения в диалоге. */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
 /**
- * Запрос к YandexGPT.
+ * Многоходовой диалог с YandexGPT (с историей переписки).
  * @param apiKey   API-ключ сервисного аккаунта (роль ai.languageModels.user). Секрет.
  * @param folderId Идентификатор каталога Yandex Cloud.
- * @param prompt   Текст запроса пользователя.
- * @param model    Имя модели без каталога, напр. "yandexgpt/latest" или "yandexgpt-lite/latest".
+ * @param messages История диалога (без system — он добавляется автоматически).
+ * @param model    Имя модели, напр. "yandexgpt/latest" или "yandexgpt-lite/latest".
  */
-export async function askAI(
+export async function askAIChat(
   apiKey: string,
   folderId: string,
-  prompt: string,
+  messages: ChatMessage[],
   model = "yandexgpt/latest"
 ): Promise<string> {
   try {
@@ -49,10 +55,7 @@ export async function askAI(
       body: JSON.stringify({
         modelUri: `gpt://${folderId}/${model}`,
         completionOptions: { stream: false, temperature: 0.6, maxTokens: "2000" },
-        messages: [
-          { role: "system", text: SYSTEM_PROMPT },
-          { role: "user", text: prompt },
-        ],
+        messages: [{ role: "system", text: SYSTEM_PROMPT }, ...messages],
       }),
     });
 
@@ -69,4 +72,9 @@ export async function askAI(
   } catch (e) {
     return `⚠️ Не удалось связаться с YandexGPT: ${(e as Error).message}`;
   }
+}
+
+/** Однократный запрос к YandexGPT (обёртка над askAIChat). */
+export function askAI(apiKey: string, folderId: string, prompt: string, model = "yandexgpt/latest"): Promise<string> {
+  return askAIChat(apiKey, folderId, [{ role: "user", text: prompt }], model);
 }
