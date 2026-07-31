@@ -132,6 +132,32 @@ export async function performIntent(
 const ACTION_RE = /(добав|запланир|напомн|созда|запиш|поставь|встреч|созвон|перезвон|позвон|купить|заплан)/i;
 
 /**
+ * Локальный разбор частых команд БЕЗ обращения к ИИ (экономия расхода).
+ * Возвращает намерение для однозначных шаблонов без дат, иначе null (тогда — Claude).
+ */
+export function localRoute(text: string): AssistantIntent | null {
+  const t = text.trim();
+  let m: RegExpMatchArray | null;
+
+  // Заметки
+  if (t.startsWith("!")) {
+    const body = t.slice(1).trim();
+    return body ? { action: "note_add", title: body } : null;
+  }
+  if ((m = t.match(/^(?:заметка|запиши идею|запомни)[:\s]+(.+)/i))) return { action: "note_add", title: m[1].trim() };
+
+  // Задачи: удалить / выполнить (без дат — можно локально)
+  if ((m = t.match(/^удал(?:и|ить)\s+задач\w*\s+(.+)/i))) return { action: "task_delete", title: m[1].trim() };
+  if ((m = t.match(/^(?:выполнил\w*|сделал\w*|отметь)\s+(?:задач\w*\s+)?(.+?)(?:\s+выполненн\w+)?$/i)))
+    return { action: "task_done", title: m[1].trim() };
+
+  // Клиенты: удалить (только имя — безопасно локально)
+  if ((m = t.match(/^удал(?:и|ить)\s+клиент\w*\s+(.+)/i))) return { action: "client_delete", name: m[1].trim() };
+
+  return null;
+}
+
+/**
  * Пытается выполнить команду из текста (задача/встреча/контакт). Возвращает подтверждение
  * или null, если это не команда (обычный вопрос — его должен обработать чат).
  * @param forceTask если true и намерение не распознано — принудительно создаёт задачу (для голоса).
@@ -143,11 +169,19 @@ export async function tryPerformCommand(
   text: string,
   forceTask = false
 ): Promise<string | null> {
-  if (!env.ANTHROPIC_API_KEY) return null;
   const tz = tzOffsetOf(env);
+
+  // 0) Локальный быстрый разбор — без ИИ (экономия). Частые команды без дат.
+  const local = localRoute(text);
+  if (local) {
+    const a = await performIntent(local, db, uid, tz);
+    if (a) return a;
+  }
+
+  if (!env.ANTHROPIC_API_KEY) return null;
   const now = nowContext(tz);
 
-  // Распознавание команды — на дешёвой модели (ROUTER_MODEL по умолчанию)
+  // 1) Иначе — распознавание команды на дешёвой модели (ROUTER_MODEL)
   const intent = await routeAssistant(env.ANTHROPIC_API_KEY, text, now);
   let action = await performIntent(intent, db, uid, tz);
 
