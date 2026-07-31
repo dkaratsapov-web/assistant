@@ -3,172 +3,213 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Sara — ассистент</title>
+  <title>Sara</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: var(--tg-theme-bg-color, #0e1621);
-      --surface: var(--tg-theme-secondary-bg-color, #182533);
-      --surface-2: rgba(255,255,255,.04);
-      --text: var(--tg-theme-text-color, #f5f7fa);
-      --hint: var(--tg-theme-hint-color, #8fa0b3);
-      --border: rgba(255,255,255,.08);
-      --brand-1: #6d5efc;
-      --brand-2: #9b6dff;
-      --accent: #ff7a9c;
-      --ok: #37d39b;
-      --warn: #ffcf5c;
-      --danger: #ff6b6b;
+      /* Светлая тема (по умолчанию) — премиальный монохром */
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #f5f5f6;
+      --text: #0a0a0a;
+      --muted: #86868b;
+      --border: rgba(0,0,0,.09);
+      --border-strong: rgba(0,0,0,.16);
+      --fg: #0a0a0a;            /* «акцент» = контрастный передний план */
+      --fg-contrast: #ffffff;   /* текст на --fg */
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
       --radius: 18px;
-      --shadow: 0 8px 24px rgba(0,0,0,.28);
+      --radius-sm: 12px;
+      --nav-h: 62px;
     }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: var(--tg-theme-bg-color, #eef1f6);
-        --surface: var(--tg-theme-bg-color, #ffffff);
-        --surface-2: rgba(0,0,0,.03);
-        --text: var(--tg-theme-text-color, #0e1621);
-        --hint: var(--tg-theme-hint-color, #6b7787);
-        --border: rgba(0,0,0,.08);
-        --shadow: 0 8px 24px rgba(20,30,60,.10);
-      }
+    :root[data-theme="dark"] {
+      --bg: #0a0a0b;
+      --surface: #151517;
+      --surface-2: rgba(255,255,255,.055);
+      --text: #f6f6f7;
+      --muted: #9a9aa1;
+      --border: rgba(255,255,255,.10);
+      --border-strong: rgba(255,255,255,.20);
+      --fg: #f6f6f7;
+      --fg-contrast: #0a0a0b;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 34px rgba(0,0,0,.5);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45;
-      padding-bottom: calc(76px + env(safe-area-inset-bottom));
-      overflow-x: hidden;
+      font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+      font-size: 15px; line-height: 1.5; letter-spacing: -.01em;
+      padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom));
+      overflow-x: hidden; transition: background .25s ease, color .25s ease;
+      -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     }
-    .wrap { max-width: 620px; margin: 0 auto; padding: 0 14px; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 0 18px; }
+    button, input, select, textarea { font-family: inherit; }
 
-    header {
-      position: relative; padding: 18px 14px 16px;
-      background: linear-gradient(160deg, rgba(109,94,252,.20), rgba(155,109,255,.06) 60%, transparent);
-    }
-    .hrow { display: flex; align-items: center; gap: 12px; max-width: 620px; margin: 0 auto; }
-    .avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex: none;
-      border: 2px solid rgba(255,255,255,.25); box-shadow: var(--shadow); background: var(--surface); }
+    /* Header */
+    header { padding: 20px 18px 6px; }
+    .hrow { display: flex; align-items: center; gap: 13px; max-width: 640px; margin: 0 auto; }
+    .avatar { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; flex: none;
+      border: 1px solid var(--border); background: var(--surface-2); }
     .hello { flex: 1; min-width: 0; }
-    .hello .h1 { font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
-    .hello .sub { color: var(--hint); font-size: 13px; margin-top: 2px; }
-    .badge-role { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
-      color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); }
+    .hello .h1 { font-size: 20px; font-weight: 800; letter-spacing: -.03em; }
+    .hello .sub { color: var(--muted); font-size: 13px; margin-top: 1px; font-weight: 500; }
+    .icon-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer;
+      box-shadow: var(--shadow-sm); transition: transform .12s ease, background .2s ease; }
+    .icon-btn:active { transform: scale(.92); }
+    .icon-btn svg { width: 19px; height: 19px; }
 
-    .section-title { font-size: 13px; font-weight: 700; color: var(--hint); text-transform: uppercase;
-      letter-spacing: .6px; margin: 18px 2px 10px; }
+    .section-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .13em; margin: 22px 4px 11px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
+      padding: 16px; margin-bottom: 11px; box-shadow: var(--shadow); }
 
-    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
-    .tile { border-radius: var(--radius); padding: 14px; color: #fff; box-shadow: var(--shadow); cursor: pointer; }
-    .tile .n { font-size: 26px; font-weight: 800; line-height: 1; }
-    .tile .l { font-size: 12.5px; opacity: .9; margin-top: 6px; }
-    .tile.work { background: linear-gradient(135deg, #6d5efc, #9b6dff); }
-    .tile.personal { background: linear-gradient(135deg, #ff7a9c, #ff9f6d); }
+    /* Home tiles */
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+    .tile { border-radius: var(--radius); padding: 16px; cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface); box-shadow: var(--shadow); transition: transform .12s ease; }
+    .tile:active { transform: scale(.98); }
+    .tile.accent { background: var(--fg); border-color: var(--fg); }
+    .tile.accent .n, .tile.accent .l { color: var(--fg-contrast); }
+    .tile .n { font-size: 30px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+    .tile .l { font-size: 12.5px; color: var(--muted); margin-top: 8px; font-weight: 600; }
 
-    .agenda-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
-    .agenda-item:last-child { border-bottom: 0; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--brand-2); }
-    .dot.over { background: var(--danger); } .dot.today { background: var(--warn); } .dot.ev { background: var(--brand-1); } .dot.bd { background: var(--accent); }
+    /* CTA */
+    .cta { display: flex; align-items: center; gap: 13px; cursor: pointer; background: var(--fg); border: 0;
+      border-radius: var(--radius); padding: 16px 18px; margin: 11px 0; box-shadow: var(--shadow); transition: transform .12s ease; }
+    .cta:active { transform: scale(.985); }
+    .cta .ci { width: 38px; height: 38px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--fg-contrast) 14%, transparent); }
+    .cta .ci svg { width: 20px; height: 20px; color: var(--fg-contrast); }
+    .cta .tx { color: var(--fg-contrast); font-weight: 700; font-size: 15.5px; letter-spacing: -.02em; }
+    .cta .sm { color: color-mix(in srgb, var(--fg-contrast) 70%, transparent); font-size: 12.5px; font-weight: 500; margin-top: 1px; }
+    .cta .arw { margin-left: auto; color: var(--fg-contrast); opacity: .7; }
+
+    /* Agenda */
+    .agenda-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .agenda-item:first-child { padding-top: 2px; } .agenda-item:last-child { border-bottom: 0; padding-bottom: 2px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--muted); }
+    .dot.strong { background: var(--fg); }
     .agenda-item .t { flex: 1; min-width: 0; }
-    .agenda-item .t .m { font-size: 12.5px; color: var(--hint); margin-top: 2px; }
+    .agenda-item .t .ttl { font-weight: 600; }
+    .agenda-item .t .m { font-size: 12.5px; color: var(--muted); margin-top: 2px; font-weight: 500; }
 
-    .seg { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 4px; gap: 4px; margin: 4px 0 12px; }
-    .seg div { flex: 1; text-align: center; padding: 9px; border-radius: 11px; font-weight: 600; font-size: 14px; color: var(--hint); cursor: pointer; transition: all .15s; }
-    .seg div.on { color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); box-shadow: var(--shadow); }
-    .chips { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-    .chip { padding: 6px 13px; border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border); color: var(--hint); font-size: 13px; font-weight: 600; cursor: pointer; }
-    .chip.on { color: #fff; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); border-color: transparent; }
+    /* Segmented + chips */
+    .seg { display: flex; background: var(--surface-2); border-radius: 13px; padding: 4px; gap: 4px; margin: 2px 0 14px; }
+    .seg div { flex: 1; text-align: center; padding: 9px; border-radius: 10px; font-weight: 600; font-size: 13.5px; color: var(--muted); cursor: pointer; transition: all .18s ease; }
+    .seg div.on { color: var(--fg-contrast); background: var(--fg); box-shadow: var(--shadow-sm); }
+    .chips { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .chip { padding: 7px 14px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s ease; }
+    .chip.on { color: var(--fg-contrast); background: var(--fg); border-color: var(--fg); }
 
-    .task { position: relative; padding-left: 16px; }
-    .task::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 4px; border-radius: 4px; background: var(--brand-2); }
-    .task.p1::before { background: var(--accent); }
-    .task.done { opacity: .6; }
-    .task .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-    .task .name { font-weight: 600; flex: 1; }
-    .task .name.done { text-decoration: line-through; }
-    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
-    .pill { font-size: 11.5px; padding: 3px 9px; border-radius: 10px; background: var(--surface-2); color: var(--hint); border: 1px solid var(--border); }
-    .pill.due-over { color: var(--danger); border-color: rgba(255,107,107,.3); }
-    .pill.due-today { color: #6b5300; background: var(--warn); border-color: transparent; font-weight: 700; }
-    .actions { display: flex; gap: 8px; margin-top: 12px; }
-    .btn { flex: 1; padding: 9px; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
-    .btn.primary { background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border: 0; }
-    .btn.danger { flex: 0 0 42px; color: var(--danger); }
+    /* Task / list cards */
+    .item { position: relative; }
+    .item .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .item .name { font-weight: 700; flex: 1; letter-spacing: -.02em; }
+    .item .name.done { text-decoration: line-through; color: var(--muted); }
+    .item.done { opacity: .55; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+    .pill { font-size: 11.5px; padding: 4px 10px; border-radius: 9px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); font-weight: 600; }
+    .pill.strong { color: var(--fg-contrast); background: var(--fg); border-color: var(--fg); }
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .btn { flex: 1; padding: 10px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); transition: transform .1s ease; }
+    .btn:active { transform: scale(.97); }
+    .btn.primary { background: var(--fg); color: var(--fg-contrast); border-color: var(--fg); }
+    .btn.ghost { flex: 0 0 44px; color: var(--muted); }
 
-    .empty { text-align: center; padding: 46px 20px; color: var(--hint); }
-    .empty img { width: 128px; height: 128px; object-fit: cover; border-radius: 24px; margin-bottom: 14px; box-shadow: var(--shadow); }
-    .empty .big { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
-    .loading { text-align: center; padding: 40px; color: var(--hint); }
+    .empty { text-align: center; padding: 54px 20px; color: var(--muted); }
+    .empty img { width: 96px; height: 96px; object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
+    .empty .big { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -.02em; }
+    .loading { text-align: center; padding: 48px; color: var(--muted); font-weight: 500; }
 
-    .fab { position: fixed; right: calc(50% - 296px); bottom: calc(88px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border: none; font-size: 30px; cursor: pointer;
-      box-shadow: 0 10px 24px rgba(109,94,252,.45); z-index: 40; display: none; align-items: center; justify-content: center; }
-    @media (max-width: 640px) { .fab { right: 18px; } }
+    /* FAB */
+    .fab { position: fixed; right: calc(50% - 300px); bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
+      width: 54px; height: 54px; border-radius: 50%; background: var(--fg); color: var(--fg-contrast); border: none; cursor: pointer;
+      box-shadow: var(--shadow); z-index: 40; display: none; align-items: center; justify-content: center; transition: transform .12s ease; }
+    .fab:active { transform: scale(.9); }
+    .fab svg { width: 24px; height: 24px; }
+    @media (max-width: 676px) { .fab { right: 20px; } }
 
+    /* Bottom nav */
     .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-      background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px);
-      border-top: 1px solid var(--border); padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); }
-    .nav-inner { max-width: 620px; margin: 0 auto; display: flex; }
-    .nav a { flex: 1; text-align: center; color: var(--hint); font-size: 10.5px; font-weight: 600; cursor: pointer; padding: 2px; }
-    .nav a .ic { font-size: 21px; display: block; line-height: 1.2; }
-    .nav a.on { color: var(--brand-2); }
+      background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: saturate(180%) blur(20px);
+      border-top: 1px solid var(--border); padding: 8px 6px calc(6px + env(safe-area-inset-bottom)); }
+    .nav-inner { max-width: 640px; margin: 0 auto; display: flex; }
+    .nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; padding: 2px; transition: color .15s ease; letter-spacing: -.01em; }
+    .nav a svg { width: 22px; height: 22px; }
+    .nav a.on { color: var(--text); }
 
-    .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; z-index: 60; }
-    .sheet-bg.show { display: flex; }
-    .sheet { background: var(--bg); width: 100%; max-width: 620px; margin: 0 auto; border-radius: 22px 22px 0 0; padding: 18px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 30px rgba(0,0,0,.35); }
-    .sheet h3 { margin-bottom: 14px; font-size: 17px; }
-    .field { margin-bottom: 12px; }
-    .field label { display: block; font-size: 12.5px; color: var(--hint); margin-bottom: 5px; font-weight: 600; }
-    .field input, .field select, .field textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text); font-size: 15px; font-family: inherit; }
-    .field textarea { resize: vertical; min-height: 54px; }
-    .seg.mini div { padding: 8px; font-size: 13px; }
+    /* Sheets */
+    .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); display: none; align-items: flex-end; z-index: 60; opacity: 0; transition: opacity .2s ease; }
+    .sheet-bg.show { display: flex; opacity: 1; }
+    .sheet { background: var(--bg); width: 100%; max-width: 640px; margin: 0 auto; border-radius: 24px 24px 0 0; padding: 10px 18px calc(22px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px rgba(0,0,0,.3); transform: translateY(12px); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
+    .sheet-bg.show .sheet { transform: translateY(0); }
+    .grabber { width: 38px; height: 4px; border-radius: 3px; background: var(--border-strong); margin: 4px auto 16px; }
+    .sheet h3 { margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -.03em; }
+    .field { margin-bottom: 13px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing: -.01em; }
+    .field input, .field select, .field textarea { width: 100%; padding: 13px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text); font-size: 15px; outline: none; transition: border-color .15s ease; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--border-strong); }
+    .field textarea { resize: vertical; min-height: 56px; }
+    .check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; cursor: pointer; }
+    .check input { width: 18px; height: 18px; accent-color: var(--fg); }
+    .seg.mini div { padding: 9px; font-size: 13px; }
 
-    /* ИИ-чат */
-    .ai-cta { display: flex; align-items: center; gap: 12px; color: #fff; cursor: pointer;
-      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); border: 0; }
-    .ai-cta .ic { font-size: 26px; } .ai-cta .tx { font-weight: 700; } .ai-cta .sm { font-size: 12px; opacity: .9; font-weight: 500; }
-    .ai-wrap { padding-bottom: 150px; min-height: 40vh; }
-    .msg { max-width: 84%; padding: 10px 13px; border-radius: 16px; margin: 9px 0; font-size: 14.5px;
-      white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; box-shadow: var(--shadow); }
-    .msg.user { margin-left: auto; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; border-bottom-right-radius: 5px; }
-    .msg.ai { margin-right: auto; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 5px; }
-    .msg.ai.think { color: var(--hint); font-style: italic; }
-    .chatbar { position: fixed; left: 0; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 45; padding: 0 14px; }
-    .chatbar-inner { max-width: 620px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
-      background: var(--surface); border: 1px solid var(--border); border-radius: 26px; padding: 5px 5px 5px 16px; box-shadow: var(--shadow); }
-    .chatbar input { flex: 1; border: 0; background: transparent; color: var(--text); font-size: 15px; font-family: inherit; outline: none; padding: 10px 0; }
-    .chatbar button { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; cursor: pointer; font-size: 18px;
-      background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #fff; }
-    .chatbar button:disabled { opacity: .5; }
+    /* AI chat */
+    .ai-wrap { padding-bottom: 130px; min-height: 44vh; }
+    .ai-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+    .msg { max-width: 85%; padding: 11px 14px; border-radius: 18px; margin: 9px 0; font-size: 14.5px; line-height: 1.5;
+      white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+    .msg.user { margin-left: auto; background: var(--fg); color: var(--fg-contrast); border-bottom-right-radius: 6px; }
+    .msg.ai { margin-right: auto; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 6px; box-shadow: var(--shadow-sm); }
+    .msg.ai.think { color: var(--muted); font-style: italic; }
+    .chatbar { position: fixed; left: 0; right: 0; bottom: calc(var(--nav-h) + 2px + env(safe-area-inset-bottom)); z-index: 45; padding: 8px 14px 10px;
+      background: linear-gradient(to top, var(--bg) 62%, transparent); }
+    .chatbar-inner { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 26px; padding: 5px 5px 5px 18px; box-shadow: var(--shadow); }
+    .chatbar input { flex: 1; border: 0; background: transparent; color: var(--text); font-size: 15px; outline: none; padding: 10px 0; }
+    .chatbar button { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; cursor: pointer;
+      background: var(--fg); color: var(--fg-contrast); display: flex; align-items: center; justify-content: center; transition: transform .1s ease; }
+    .chatbar button:active { transform: scale(.9); } .chatbar button:disabled { opacity: .4; }
+    .chatbar button svg { width: 18px; height: 18px; }
+
+    .link { color: var(--text); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
   </style>
 </head>
 <body>
   <header>
     <div class="hrow">
-      <img id="avatar" class="avatar" src="https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp" alt="Sara">
+      <img id="avatar" class="avatar" alt="Sara">
       <div class="hello">
-        <div class="h1" id="greeting">Привет 👋</div>
+        <div class="h1" id="greeting">Sara</div>
         <div class="sub" id="subtitle">Загрузка…</div>
       </div>
-      <span class="badge-role" id="role"></span>
+      <button class="icon-btn" id="theme-btn" aria-label="Тема"></button>
     </div>
   </header>
 
   <main class="wrap" id="view"><div class="loading">Загрузка…</div></main>
 
-  <button class="fab" id="fab">+</button>
+  <button class="fab" id="fab" aria-label="Добавить">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
 
   <nav class="nav"><div class="nav-inner" id="nav">
-    <a data-tab="home" class="on"><span class="ic">🏠</span>Главная</a>
-    <a data-tab="tasks"><span class="ic">✅</span>Задачи</a>
-    <a data-tab="calendar"><span class="ic">📅</span>Календарь</a>
-    <a data-tab="birthdays"><span class="ic">🎂</span>Дни&nbsp;р.</a>
-    <a data-tab="clients"><span class="ic">👥</span>Клиенты</a>
-    <a data-tab="ai"><span class="ic">🤖</span>Sara</a>
+    <a data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.8V21h14V9.8"/></svg>Главная</a>
+    <a data-tab="tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Задачи</a>
+    <a data-tab="calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg>Календарь</a>
+    <a data-tab="birthdays"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16v-7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7Z"/><path d="M4 15c2 1.5 3 1.5 4 0s3-1.5 4 0 3 1.5 4 0 3-1.5 4 0M12 7.5V5m0 0a1.2 1.2 0 1 0-1.2-1.2c0 .9 1.2 1.2 1.2 1.2Z"/></svg>Дни&nbsp;р.</a>
+    <a data-tab="clients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M16 5.2a3 3 0 0 1 0 5.6M17.5 20c-.3-1.7-1-3-2-3.9"/></svg>Клиенты</a>
+    <a data-tab="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15.5l-1.8-4.7L5.5 9l4.7-1.3L12 3Z"/><path d="M18.5 14.5l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z"/></svg>Sara</a>
   </div></nav>
 
   <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
@@ -176,20 +217,39 @@
   <script>
     const tg = window.Telegram.WebApp;
     tg.ready(); tg.expand();
-    try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
     const INIT = tg.initData || "";
     const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
-
-    let tab = "home";
-    let taskScope = "work";
-    let taskStatus = "active";
-    let clientsCache = [];
 
     const $ = (id) => document.getElementById(id);
     const view = $("view");
     const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const haptic = (t = "light") => { try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
+    $("avatar").src = SARA;
 
+    /* ---------- Тема ---------- */
+    const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>';
+    const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 7 7 0 1 0 20 14.5Z"/></svg>';
+    const THEME_KEY = "sara-theme";
+    function applyTheme(t) {
+      document.documentElement.setAttribute("data-theme", t);
+      $("theme-btn").innerHTML = t === "dark" ? SUN : MOON;
+      const bg = t === "dark" ? "#0a0a0b" : "#ffffff";
+      try { tg.setHeaderColor(bg); tg.setBackgroundColor(bg); } catch (e) {}
+      localStorage.setItem(THEME_KEY, t);
+    }
+    let theme = localStorage.getItem(THEME_KEY) || tg.colorScheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    applyTheme(theme);
+    $("theme-btn").onclick = () => { haptic(); theme = theme === "dark" ? "light" : "dark"; applyTheme(theme); };
+
+    /* ---------- Состояние ---------- */
+    let tab = "home";
+    let taskScope = "work";
+    let taskStatus = "active";
+    let clientsCache = [];
+    let sheetOpen = false;
+    const navStack = ["home"];
+
+    /* ---------- API ---------- */
     async function api(path, opts = {}) {
       const res = await fetch("/api" + path, {
         ...opts,
@@ -200,56 +260,56 @@
     }
 
     function fmtDue(iso) {
-      if (!iso) return { cls: "", txt: "" };
+      if (!iso) return { over: false, txt: "" };
       const dd = new Date(iso), now = new Date();
       const days = Math.round((new Date(iso).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000);
       const t = dd.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const dm = dd.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
-      if (dd < now) return { cls: "due-over", txt: "⚠️ " + dm };
-      if (days === 0) return { cls: "due-today", txt: "🔥 сегодня " + t };
-      if (days === 1) return { cls: "", txt: "завтра " + t };
-      return { cls: "", txt: dm + " " + t };
+      if (dd < now) return { over: true, txt: "просрочено · " + dm };
+      if (days === 0) return { over: false, txt: "сегодня " + t };
+      if (days === 1) return { over: false, txt: "завтра " + t };
+      return { over: false, txt: dm + " " + t };
     }
-    function fmtEv(iso) {
-      return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-    }
-    function emptyBox(big, small) {
-      return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`;
-    }
+    function fmtEv(iso) { return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    function emptyBox(big, small) { return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`; }
     function err(e) {
       const m = String(e.message || e);
       if (m === "no_access") return emptyBox("Нет доступа", "Получи доступ у владельца бота.");
       return `<div class="empty"><div class="big">Ошибка</div><div>${esc(m)}</div></div>`;
     }
+    const ARROW = '<svg class="arw" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
 
+    /* ---------- Экраны ---------- */
     async function renderHome() {
       view.innerHTML = '<div class="loading">Загрузка…</div>';
       try {
         const d = await api("/home");
         let h = `<div class="tiles">
-          <div class="tile work" onclick="go('tasks','work')"><div class="n">${d.counts.work}</div><div class="l">💼 Рабочих задач</div></div>
-          <div class="tile personal" onclick="go('tasks','personal')"><div class="n">${d.counts.personal}</div><div class="l">🙋 Личных задач</div></div>
+          <div class="tile accent" onclick="go('tasks','work')"><div class="n">${d.counts.work}</div><div class="l">Рабочие задачи</div></div>
+          <div class="tile" onclick="go('tasks','personal')"><div class="n">${d.counts.personal}</div><div class="l">Личные задачи</div></div>
         </div>`;
-        h += `<div class="card ai-cta" onclick="switchTab('ai')"><span class="ic">🤖</span><div><div class="tx">Спросить Сару</div><div class="sm">ИИ по рекламе: тексты, офферы, идеи</div></div></div>`;
+        h += `<div class="cta" onclick="go('ai')">
+          <div class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15.5l-1.8-4.7L5.5 9l4.7-1.3L12 3Z"/></svg></div>
+          <div><div class="tx">Спросить Сару</div><div class="sm">Задачи, встречи и помощь по рекламе</div></div>${ARROW}</div>`;
         h += `<div class="section-title">На сегодня</div>`;
         if (!d.tasks.length && !d.events.length) {
-          h += `<div class="card"><div style="color:var(--hint);text-align:center;padding:8px">На сегодня всё спокойно ✨</div></div>`;
+          h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Всё спокойно. Свободный день ✦</div></div>`;
         } else {
           h += `<div class="card">`;
           d.tasks.forEach((t) => {
             const due = fmtDue(t.due_at);
-            h += `<div class="agenda-item"><div class="dot ${t.overdue ? "over" : "today"}"></div><div class="t"><div>${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot ${t.overdue ? "strong" : ""}"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
           });
           d.events.forEach((e) => {
-            h += `<div class="agenda-item"><div class="dot ev"></div><div class="t"><div>📅 ${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · ${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
         if (d.birthdays.length) {
           h += `<div class="section-title">Скоро дни рождения</div><div class="card">`;
           d.birthdays.forEach((b) => {
-            const when = b.in_days === 0 ? "сегодня 🎉" : b.in_days === 1 ? "завтра" : "через " + b.in_days + " дн.";
-            h += `<div class="agenda-item"><div class="dot bd"></div><div class="t"><div>🎂 ${esc(b.name)}</div><div class="m">${when} · ${b.date}</div></div></div>`;
+            const when = b.in_days === 0 ? "сегодня" : b.in_days === 1 ? "завтра" : "через " + b.in_days + " дн.";
+            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(b.name)}</div><div class="m">${when} · ${b.date}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -259,7 +319,7 @@
 
     async function renderTasks() {
       view.innerHTML =
-        `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">💼 Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">🙋 Личные</div></div>
+        `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">Личные</div></div>
          <div class="chips">
            <div class="chip ${taskStatus==='active'?'on':''}" onclick="setStatus('active')">Активные</div>
            <div class="chip ${taskStatus==='done'?'on':''}" onclick="setStatus('done')">Готовые</div>
@@ -272,17 +332,19 @@
         el.innerHTML = tasks.map((t) => {
           const due = fmtDue(t.due_at);
           const done = t.status === "done";
-          return `<div class="card task ${t.priority?'p1':''} ${done?'done':''}">
+          return `<div class="card item ${done?'done':''}">
             <div class="top"><div class="name ${done?'done':''}">${esc(t.title)}</div></div>
             <div class="meta">
-              ${due.txt ? `<span class="pill ${due.cls}">${due.txt}</span>` : ""}
-              ${t.priority ? `<span class="pill" style="color:var(--accent)">★ важно</span>` : ""}
-              ${t.client ? `<span class="pill">👥 ${esc(t.client)}</span>` : ""}
+              ${due.txt ? `<span class="pill ${due.over?'strong':''}">${due.txt}</span>` : ""}
+              ${t.priority ? `<span class="pill strong">важно</span>` : ""}
+              ${t.client ? `<span class="pill">${esc(t.client)}</span>` : ""}
             </div>
             <div class="actions">
-              ${!done ? `<button class="btn" onclick="setTask(${t.id},'in_progress')">🟡 В работу</button><button class="btn primary" onclick="setTask(${t.id},'done')">✅ Готово</button>`
-                : `<button class="btn" onclick="setTask(${t.id},'open')">↩️ Вернуть</button>`}
-              <button class="btn danger" onclick="delTask(${t.id})">🗑</button>
+              ${!done ? `<button class="btn" onclick="setTask(${t.id},'in_progress')">В работу</button><button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button>`
+                : `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button>`}
+              <button class="btn ghost" onclick="delTask(${t.id})" aria-label="Удалить">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>
+              </button>
             </div></div>`;
         }).join("");
       } catch (e) { $("tasklist").innerHTML = err(e); }
@@ -293,11 +355,11 @@
       try {
         const { events } = await api("/events");
         const el = $("evlist");
-        if (!events.length) { el.innerHTML = emptyBox("Встреч нет", "Добавь встречу кнопкой «+»."); return; }
-        el.innerHTML = events.map((e) => `<div class="card">
-          <div class="top" style="display:flex;justify-content:space-between;gap:8px"><div class="name">📅 ${esc(e.title)}</div><button class="btn danger" onclick="delEvent(${e.id})">🗑</button></div>
-          <div class="meta"><span class="pill" style="color:var(--brand-2)">🕒 ${fmtEv(e.starts_at)}</span>${e.location?`<span class="pill">📍 ${esc(e.location)}</span>`:""}</div>
-          ${e.notes?`<div class="meta"><span style="color:var(--hint);font-size:13px">${esc(e.notes)}</span></div>`:""}
+        if (!events.length) { el.innerHTML = emptyBox("Встреч нет", "Добавь встречу кнопкой «+» или через Сару."); return; }
+        el.innerHTML = events.map((e) => `<div class="card item">
+          <div class="top"><div class="name">${esc(e.title)}</div><button class="btn ghost" onclick="delEvent(${e.id})">✕</button></div>
+          <div class="meta"><span class="pill strong">${fmtEv(e.starts_at)}</span>${e.location?`<span class="pill">${esc(e.location)}</span>`:""}</div>
+          ${e.notes?`<div class="meta"><span style="color:var(--muted);font-size:13px">${esc(e.notes)}</span></div>`:""}
         </div>`).join("");
       } catch (e) { $("evlist").innerHTML = err(e); }
     }
@@ -307,10 +369,10 @@
       try {
         const { contacts } = await api("/contacts");
         const el = $("clist");
-        if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с днём рождения — напомню заранее."); return; }
-        el.innerHTML = contacts.map((c) => `<div class="card">
-          <div class="top" style="display:flex;justify-content:space-between;gap:8px"><div class="name">${esc(c.name)}</div><button class="btn danger" onclick="delContact(${c.id})">🗑</button></div>
-          <div class="meta">${c.birthday?`<span class="pill" style="color:var(--accent)">🎂 ${esc(c.birthday)}</span>`:""}${c.phone?`<span class="pill">📞 ${esc(c.phone)}</span>`:""}</div>
+        if (!contacts.length) { el.innerHTML = emptyBox("Пока пусто", "Добавь контакт с ДР — напомню заранее."); return; }
+        el.innerHTML = contacts.map((c) => `<div class="card item">
+          <div class="top"><div class="name">${esc(c.name)}</div><button class="btn ghost" onclick="delContact(${c.id})">✕</button></div>
+          <div class="meta">${c.birthday?`<span class="pill strong">${esc(c.birthday)}</span>`:""}${c.phone?`<span class="pill">${esc(c.phone)}</span>`:""}</div>
         </div>`).join("");
       } catch (e) { $("clist").innerHTML = err(e); }
     }
@@ -325,24 +387,25 @@
         if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Добавь клиента в чате бота: /addclient"); return; }
         el.innerHTML = clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
-          return `<div class="card"><div class="top" style="display:flex;justify-content:space-between"><div class="name">${c.status === "active" ? "🟢" : "⏸"} ${esc(c.name)}</div></div>
-            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">💰 ${esc(c.budget)}</span>` : ""}</div></div>`;
+          return `<div class="card item"><div class="top"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div></div>
+            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">${esc(c.budget)}</span>` : ""}</div></div>`;
         }).join("");
       } catch (e) { $("cllist").innerHTML = err(e); }
     }
 
+    /* ---------- ИИ-чат ---------- */
     let aiHistory = [];
     let aiLoaded = false;
-    const AI_SUGG = ["3 заголовка для Директа", "Идеи для Reels", "Оффер для лендинга", "Минус-слова"];
+    const AI_SUGG = ["3 заголовка для Директа", "Идеи для Reels", "Оффер для лендинга", "Встреча завтра в 15:00"];
     function aiScrollBottom() { requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); }
+    const CLEAR_HEAD = `<div class="ai-head"><span class="chip" onclick="aiClear()">Очистить</span></div>`;
     function aiGreeting() {
-      return `<div class="msg ai">Привет! Я Сара 🤖\nПомогу с рекламой: тексты объявлений, заголовки, офферы, идеи для кампаний, разбор лендингов. Спрашивай что угодно.</div>
+      return `<div class="msg ai">Привет! Я Сара.\nПишу тексты объявлений, офферы, идеи — и завожу задачи, встречи и дни рождения прямо из чата. Просто скажи, что нужно.</div>
         <div class="chips" id="ai-sugg">${AI_SUGG.map((s) => `<div class="chip" onclick="aiSend(this.textContent)">${s}</div>`).join("")}</div>`;
     }
     function aiRenderMessages() {
       const scroll = $("ai-scroll"); if (!scroll) return;
-      const clearBtn = aiHistory.length ? `<div style="text-align:right;margin-bottom:2px"><span class="chip" onclick="aiClear()">🗑 Очистить</span></div>` : "";
-      scroll.innerHTML = clearBtn + (aiHistory.length
+      scroll.innerHTML = (aiHistory.length ? CLEAR_HEAD : "") + (aiHistory.length
         ? aiHistory.map((m) => `<div class="msg ${m.role === "user" ? "user" : "ai"}">${esc(m.content)}</div>`).join("")
         : aiGreeting());
     }
@@ -350,14 +413,10 @@
       view.innerHTML =
         `<div class="ai-wrap" id="ai-scroll"></div>
          <div class="chatbar"><div class="chatbar-inner">
-           <input id="ai-input" placeholder="Спроси про рекламу, тексты, идеи…" autocomplete="off" enterkeyhint="send">
-           <button id="ai-send">➤</button>
+           <input id="ai-input" placeholder="Сообщение Саре…" autocomplete="off" enterkeyhint="send">
+           <button id="ai-send" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
          </div></div>`;
-      // История из кеша на сервере (грузим один раз за сессию)
-      if (!aiLoaded) {
-        try { aiHistory = (await api("/ai/history")).messages || []; } catch (e) { aiHistory = []; }
-        aiLoaded = true;
-      }
+      if (!aiLoaded) { try { aiHistory = (await api("/ai/history")).messages || []; } catch (e) { aiHistory = []; } aiLoaded = true; }
       aiRenderMessages();
       const input = $("ai-input");
       $("ai-send").onclick = () => aiSend(input.value);
@@ -367,10 +426,8 @@
     }
     window.aiClear = async () => {
       if (!confirm("Очистить переписку с Сарой?")) return;
-      haptic();
-      try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
-      aiHistory = [];
-      aiRenderMessages();
+      haptic(); try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
+      aiHistory = []; aiRenderMessages();
     };
     window.aiSend = async (text) => {
       text = (text || "").trim();
@@ -379,8 +436,7 @@
       const input = $("ai-input"), sendBtn = $("ai-send"), scroll = $("ai-scroll");
       if (input) input.value = "";
       if (sendBtn) sendBtn.disabled = true;
-      // если был только приветственный экран — заменяем его на «шапку» с очисткой
-      if (!aiHistory.length) scroll.innerHTML = `<div style="text-align:right;margin-bottom:2px"><span class="chip" onclick="aiClear()">🗑 Очистить</span></div>`;
+      if (!aiHistory.length) scroll.innerHTML = CLEAR_HEAD;
       aiHistory.push({ role: "user", content: text });
       scroll.insertAdjacentHTML("beforeend", `<div class="msg user">${esc(text)}</div>`);
       const think = document.createElement("div");
@@ -394,7 +450,7 @@
       } catch (e) {
         think.remove();
         const m = String(e.message || e);
-        const msg = m === "ai_not_configured" ? "ИИ ещё не настроен: добавь ключи YandexGPT в настройках." : "⚠️ Ошибка: " + m;
+        const msg = m === "ai_not_configured" ? "ИИ ещё не настроен: добавь ключи YandexGPT." : "Ошибка: " + m;
         scroll.insertAdjacentHTML("beforeend", `<div class="msg ai">${esc(msg)}</div>`);
       } finally {
         if (sendBtn) sendBtn.disabled = false;
@@ -403,7 +459,7 @@
       }
     };
 
-    window.go = (t, scope) => { if (scope) taskScope = scope; switchTab(t); };
+    /* ---------- Действия по элементам ---------- */
     window.setScope = (s) => { taskScope = s; renderTasks(); };
     window.setStatus = (s) => { taskStatus = s; renderTasks(); };
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
@@ -411,19 +467,20 @@
     window.delEvent = async (id) => { if (!confirm("Удалить встречу?")) return; await api(`/events/${id}`, { method: "DELETE" }); renderCalendar(); };
     window.delContact = async (id) => { if (!confirm("Удалить контакт?")) return; await api(`/contacts/${id}`, { method: "DELETE" }); renderBirthdays(); };
 
+    /* ---------- Шторки ---------- */
     const sheet = $("sheet"), sheetBody = $("sheet-body");
-    const openSheet = (html) => { sheetBody.innerHTML = html; sheet.classList.add("show"); };
-    window.closeSheet = () => sheet.classList.remove("show");
+    function openSheet(html) { sheetBody.innerHTML = '<div class="grabber"></div>' + html; sheet.classList.add("show"); sheetOpen = true; updateBack(); }
+    window.closeSheet = () => { sheet.classList.remove("show"); sheetOpen = false; updateBack(); };
     sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSheet(); });
 
     async function openAddTask() {
       if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} }
       const opts = ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)).join("");
       openSheet(`<h3>Новая задача</h3>
-        <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">💼 Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">🙋 Личная</div></div></div>
+        <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">Личная</div></div></div>
         <div class="field"><label>Что нужно сделать</label><input id="f-title" placeholder="Название задачи"></div>
-        <div class="field"><label>Дедлайн</label><input id="f-due" placeholder="завтра, пятница, 15.03 14:00"></div>
-        <div class="field"><label><input type="checkbox" id="f-prio" style="width:auto;margin-right:6px">Важная задача</label></div>
+        <div class="field"><label>Дедлайн</label><input id="f-due" placeholder="завтра, в пятницу, 15.03 14:00"></div>
+        <div class="field"><label class="check"><input type="checkbox" id="f-prio">Важная задача</label></div>
         <div class="field" id="f-client-wrap"><label>Клиент</label><select id="f-client">${opts}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTask()">Создать</button></div>`);
       window.__ts = taskScope;
@@ -433,14 +490,14 @@
     window.saveTask = async () => {
       const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
       await api("/tasks", { method: "POST", body: JSON.stringify({ title, due: $("f-due").value, scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
-      closeSheet(); taskScope = window.__ts; switchTab("tasks");
+      closeSheet(); taskScope = window.__ts; switchTab("tasks", true);
     };
 
     function openAddEvent() {
       openSheet(`<h3>Новая встреча</h3>
         <div class="field"><label>Название</label><input id="f-title" placeholder="Встреча с клиентом"></div>
         <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
-        <div class="field"><label>Место (необязательно)</label><input id="f-loc" placeholder="Zoom / офис / адрес"></div>
+        <div class="field"><label>Место</label><input id="f-loc" placeholder="Zoom / офис / адрес"></div>
         <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveEvent()">Создать</button></div>`);
     }
@@ -465,15 +522,11 @@
       closeSheet(); renderBirthdays();
     };
 
-    $("fab").onclick = () => {
-      haptic();
-      if (tab === "tasks") openAddTask();
-      else if (tab === "calendar") openAddEvent();
-      else if (tab === "birthdays") openAddContact();
-    };
+    $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "birthdays") openAddContact(); };
     function updateFab() { $("fab").style.display = ["tasks", "calendar", "birthdays"].includes(tab) ? "flex" : "none"; }
 
-    function switchTab(t) {
+    /* ---------- Навигация + кнопка «Назад» ---------- */
+    function renderTab(t) {
       tab = t;
       document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === t));
       updateFab();
@@ -484,24 +537,43 @@
       else if (t === "clients") renderClients();
       else if (t === "ai") renderAI();
     }
-    document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab); });
+    // viaNav=true — переход по нижнему меню (сбрасывает историю); иначе — вглубь (можно вернуться)
+    function switchTab(t, viaNav) {
+      if (viaNav) { navStack.length = 0; navStack.push(t); }
+      else if (navStack[navStack.length - 1] !== t) navStack.push(t);
+      renderTab(t); updateBack();
+      window.scrollTo(0, 0);
+    }
+    window.switchTab = switchTab;
+    window.go = (t, scope) => { if (scope) taskScope = scope; switchTab(t, false); };
+
+    function updateBack() {
+      if (sheetOpen || navStack.length > 1) tg.BackButton.show();
+      else tg.BackButton.hide();
+    }
+    tg.BackButton.onClick(() => {
+      haptic();
+      if (sheetOpen) { closeSheet(); return; }
+      if (navStack.length > 1) { navStack.pop(); renderTab(navStack[navStack.length - 1]); }
+      updateBack();
+    });
+
+    document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab, true); });
 
     (async () => {
       try {
         const me = await api("/me");
-        $("role").textContent = me.role === "owner" ? "Владелец" : me.role === "member" ? "Команда" : "Клиент";
         const name = tg.initDataUnsafe?.user?.first_name || "";
         const hour = new Date().getHours();
         const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
-        $("greeting").textContent = `${hi}${name ? ", " + esc(name) : ""} 👋`;
-        $("subtitle").textContent = "Я Сара, твой ассистент";
+        $("greeting").textContent = `${hi}${name ? ", " + name : ""}`;
+        $("subtitle").textContent = me.role === "owner" ? "Личный ассистент" : me.role === "member" ? "Команда" : "Клиент";
       } catch (e) {
         $("subtitle").textContent = "Нет доступа";
-        $("role").style.display = "none";
         view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
         return;
       }
-      switchTab("home");
+      renderTab("home"); updateBack();
     })();
   </script>
 </body>
