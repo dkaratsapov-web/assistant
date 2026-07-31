@@ -108,6 +108,7 @@ export interface Event {
   notes: string;
   remind_before_min: number;
   reminded_at: string | null;
+  client_id: number | null;
   created_at: string;
 }
 

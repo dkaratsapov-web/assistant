@@ -674,9 +674,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, overdue: new Date(t.due_at!).getTime() < nowMs }));
 
     const evAll = await db.listEvents(uid, startOfLocalDayIso(tz));
+    const clientsForEv = await db.listClients();
+    const cName = (id: number | null) => (id ? clientsForEv.find((c) => c.id === id)?.name ?? null : null);
     const evDay = (e: { starts_at: string }) => Math.floor((new Date(e.starts_at).getTime() + tz * 3600_000) / 86400_000);
-    const mapEv = (e: { id: number; title: string; starts_at: string; location: string }) => ({
-      id: e.id, title: e.title, starts_at: e.starts_at, location: e.location,
+    const mapEv = (e: { id: number; title: string; starts_at: string; location: string; client_id: number | null }) => ({
+      id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, client: cName(e.client_id),
     });
     const todayEvents = evAll.filter((e) => evDay(e) === todayLocalDay).slice(0, 5).map(mapEv);
     const upcomingEvents = evAll.filter((e) => evDay(e) > todayLocalDay).slice(0, 5).map(mapEv);
@@ -723,12 +725,17 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/events
   if (path === "/api/events" && request.method === "GET") {
     const events = await db.listEvents(uid, startOfLocalDayIso(tz));
-    return json({ events: events.map((e) => ({ id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, notes: e.notes })) });
+    const out = [];
+    for (const e of events) {
+      const client = e.client_id ? await db.getClient(e.client_id) : null;
+      out.push({ id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, notes: e.notes, client_id: e.client_id, client: client?.name ?? null });
+    }
+    return json({ events: out });
   }
 
   // POST /api/events
   if (path === "/api/events" && request.method === "POST") {
-    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; telemost?: boolean };
+    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; telemost?: boolean; client_id?: number | null };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
     const startsAt = body.at ? localInputToUtc(body.at, tz) : null;
@@ -744,15 +751,15 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       }
     }
     const notes = link ? `${body.notes ? body.notes + "\n" : ""}🎥 Телемост: ${link}` : body.notes ?? "";
-    const id = await db.addEvent({ userId: uid, title, startsAt, location, notes });
+    const id = await db.addEvent({ userId: uid, title, startsAt, location, notes, clientId: body.client_id ?? null });
     return json({ ok: true, id, link });
   }
 
   // POST /api/events/{id} — редактирование встречи
   const evEdit = path.match(/^\/api\/events\/(\d+)$/);
   if (evEdit && request.method === "POST") {
-    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string };
-    const fields: { title?: string; startsAt?: string; location?: string; notes?: string } = {};
+    const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; client_id?: number | null };
+    const fields: { title?: string; startsAt?: string; location?: string; notes?: string; clientId?: number | null } = {};
     if (body.title !== undefined) {
       const t = body.title.trim();
       if (!t) return json({ error: "empty_title" }, 400);
@@ -765,6 +772,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (body.location !== undefined) fields.location = body.location;
     if (body.notes !== undefined) fields.notes = body.notes;
+    if (body.client_id !== undefined) fields.clientId = body.client_id;
     await db.updateEvent(parseInt(evEdit[1], 10), uid, fields);
     return json({ ok: true });
   }

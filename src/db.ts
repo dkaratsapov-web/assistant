@@ -140,6 +140,7 @@ export class DB {
       "ALTER TABLE clients ADD COLUMN metrika_counter TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN direct_login TEXT DEFAULT ''",
       "ALTER TABLE contacts ADD COLUMN tags TEXT DEFAULT ''",
+      "ALTER TABLE events ADD COLUMN client_id INTEGER",
     ];
     for (const sql of alters) {
       try {
@@ -310,11 +311,13 @@ export class DB {
     location?: string;
     notes?: string;
     remindBeforeMin?: number;
+    clientId?: number | null;
   }): Promise<number> {
+    await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO events (user_id, title, starts_at, location, notes, remind_before_min, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO events (user_id, title, starts_at, location, notes, remind_before_min, client_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         opts.userId,
@@ -323,6 +326,7 @@ export class DB {
         opts.location ?? "",
         opts.notes ?? "",
         opts.remindBeforeMin ?? 30,
+        opts.clientId ?? null,
         nowIso()
       )
       .run();
@@ -330,6 +334,7 @@ export class DB {
   }
 
   async listEvents(userId: number, fromIso: string): Promise<Event[]> {
+    await this.ensureSchema();
     const { results } = await this.d1
       .prepare("SELECT * FROM events WHERE user_id = ? AND starts_at >= ? ORDER BY starts_at LIMIT 100")
       .bind(userId, fromIso)
@@ -354,14 +359,16 @@ export class DB {
   async updateEvent(
     id: number,
     userId: number,
-    fields: { title?: string; startsAt?: string; location?: string; notes?: string }
+    fields: { title?: string; startsAt?: string; location?: string; notes?: string; clientId?: number | null }
   ): Promise<void> {
+    await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
     if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
     if (fields.startsAt !== undefined) { sets.push("starts_at = ?"); binds.push(fields.startsAt); }
     if (fields.location !== undefined) { sets.push("location = ?"); binds.push(fields.location); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
+    if (fields.clientId !== undefined) { sets.push("client_id = ?"); binds.push(fields.clientId); }
     if (!sets.length) return;
     binds.push(id, userId);
     await this.d1.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();

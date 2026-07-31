@@ -340,14 +340,14 @@
             h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
           });
           d.events.forEach((e) => {
-            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · сегодня ${tOnly(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · сегодня ${tOnly(e.starts_at)}${e.client ? " · 📁 " + esc(e.client) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
         if (d.upcomingEvents && d.upcomingEvents.length) {
           h += `<div class="section-title">Ближайшие встречи</div><div class="card">`;
           d.upcomingEvents.forEach((e) => {
-            h += `<div class="agenda-item"><div class="dot ev"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot ev"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.client ? " · 📁 " + esc(e.client) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -711,7 +711,7 @@
         const [ev, tk] = await Promise.all([api("/events"), api("/tasks?status=active")]);
         eventsCache = ev.events;
         calItems = [
-          ...ev.events.map((e) => ({ kind: "event", id: e.id, title: e.title, at: e.starts_at, location: e.location })),
+          ...ev.events.map((e) => ({ kind: "event", id: e.id, title: e.title, at: e.starts_at, location: e.location, client: e.client })),
           ...tk.tasks.filter((t) => t.due_at).map((t) => ({ kind: "task", id: t.id, title: t.title, at: t.due_at, scope: t.scope })),
         ].sort((a, b) => new Date(a.at) - new Date(b.at));
         calView === "month" ? calRenderMonth() : calRenderList();
@@ -742,7 +742,7 @@
       const tag = it.kind === "event" ? "встреча" : (it.scope === "personal" ? "личная" : "рабочая");
       const edit = it.kind === "event" ? `editEvent(${it.id})` : `editTask(${it.id})`;
       const del = it.kind === "event" ? `delEvent(${it.id})` : `delTask(${it.id})`;
-      return `<div class="card item"><div class="top"><div class="name">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</div></div>
+      return `<div class="card item"><div class="top"><div class="name">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</div>${it.client ? `<span class="pill" style="background:var(--fg);color:var(--fg-contrast);border-color:transparent;font-weight:700;flex:none">📁 ${esc(it.client)}</span>` : ""}</div>
         <div class="meta"><span class="pill ${over?'strong':''}">${t}</span><span class="pill">${tag}</span></div>
         <div class="actions"><button class="btn" onclick="${edit}">Изменить</button><button class="btn ghost" onclick="${del}">✕</button></div></div>`;
     }
@@ -1046,11 +1046,15 @@
       closeSheet(); taskScope = window.__ts; switchTab("tasks", true);
     };
 
-    function openAddEvent() {
+    async function ensureClients() { if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} } }
+    function clientOptions(sel) { return ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}" ${String(sel) === String(c.id) ? "selected" : ""}>${esc(c.name)}</option>`)).join(""); }
+    async function openAddEvent() {
+      await ensureClients();
       const tm = me.telemost ? `<div class="field"><label class="check"><input type="checkbox" id="f-tm">🎥 Создать ссылку Телемост</label></div>` : "";
       openSheet(`<h3>Новая встреча</h3>
         <div class="field"><label>Название</label><input id="f-title" placeholder="Встреча с клиентом"></div>
         <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
+        <div class="field"><label>Клиент</label><select id="f-eclient">${clientOptions("")}</select></div>
         <div class="field"><label>Место</label><input id="f-loc" placeholder="офис / адрес / ссылка"></div>
         ${tm}
         <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea></div>
@@ -1061,7 +1065,7 @@
       if (!title) return tg.showAlert("Введи название"); if (!at) return tg.showAlert("Выбери дату и время");
       const telemost = !!(document.getElementById("f-tm") && document.getElementById("f-tm").checked);
       try {
-        await api("/events", { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value, telemost }) });
+        await api("/events", { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value, telemost, client_id: $("f-eclient") && $("f-eclient").value ? +$("f-eclient").value : null }) });
       } catch (e) { return tg.showAlert("Не удалось создать: " + (e.message || e)); }
       closeSheet(); renderCalendar();
     };
@@ -1108,11 +1112,13 @@
     };
 
     /* Редактирование встречи */
-    window.editEvent = (id) => {
+    window.editEvent = async (id) => {
       const e = eventsCache.find((x) => x.id === id); if (!e) return;
+      await ensureClients();
       openSheet(`<h3>Изменить встречу</h3>
         <div class="field"><label>Название</label><input id="f-title" value="${esc(e.title)}"></div>
         <div class="field"><label>Когда</label><input id="f-at" type="datetime-local" value="${isoToLocalInput(e.starts_at)}"></div>
+        <div class="field"><label>Клиент</label><select id="f-eclient">${clientOptions(e.client_id)}</select></div>
         <div class="field"><label>Место</label><input id="f-loc" value="${esc(e.location||'')}"></div>
         <div class="field"><label>Заметки</label><textarea id="f-notes">${esc(e.notes||'')}</textarea></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveEventEdit(${id})">Сохранить</button></div>`);
@@ -1120,7 +1126,7 @@
     window.saveEventEdit = async (id) => {
       const title = $("f-title").value.trim(); const at = $("f-at").value;
       if (!title) return tg.showAlert("Введи название"); if (!at) return tg.showAlert("Выбери дату и время");
-      await api(`/events/${id}`, { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value }) });
+      await api(`/events/${id}`, { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value, client_id: $("f-eclient") && $("f-eclient").value ? +$("f-eclient").value : null }) });
       closeSheet(); renderCalendar();
     };
 
