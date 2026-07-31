@@ -1,5 +1,6 @@
 import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
-import { askAI, parseTaskFromText } from "./ai";
+import { askAI } from "./ai";
+import { tryPerformCommand } from "./intent";
 import { transcribeVoice } from "./speech";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
@@ -16,7 +17,7 @@ import {
   TASK_STATUS_LABELS,
   User,
 } from "./types";
-import { escapeHtml, extractTags, formatDue, nowContext, parseDue, platformsToText, resolveWhen, tzOffsetOf } from "./utils";
+import { escapeHtml, extractTags, formatDue, parseDue, platformsToText, tzOffsetOf } from "./utils";
 
 export type MyContext = Context & {
   db: DB;
@@ -576,18 +577,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return replyAI(ctx, transcript);
     }
 
-    // Иначе — превращаем в задачу
-    const parsed = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, transcript, nowContext(tz), env.YANDEX_MODEL ?? "yandexgpt/latest");
-    const title = parsed?.title || transcript;
-    const dueAt = resolveWhen(parsed?.due || transcript, tz, 10);
-    const scope = parsed?.scope === "personal" ? "personal" : "work";
-    const id = await db.addTask({ title, creatorId: ctx.from!.id, assigneeId: ctx.from!.id, scope, dueAt });
-    const dueLine = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
-    const scopeLine = scope === "personal" ? "🙋 Личная" : "💼 Рабочая";
-    await finish(
-      `🎤 Распознал: «${escapeHtml(transcript)}»\n\n✅ Задача #${id}\n<b>${escapeHtml(title)}</b>\n${scopeLine}${dueLine}`,
-      { ...HTML, reply_markup: taskActions(id, TASK_OPEN) }
-    );
+    // Иначе — распознаём команду (задача/встреча/контакт), для голоса всегда что-то создаём
+    const action = await tryPerformCommand(env, db, ctx.from!.id, transcript, true);
+    await finish(`🎤 Распознал: «${escapeHtml(transcript)}»\n\n${action ?? "Готово."}`, HTML);
   });
 
   bot.on("message:text", async (ctx) => {
