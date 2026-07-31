@@ -1,6 +1,52 @@
 import { DB } from "./db";
 import { ROLE_OWNER, TASK_IN_PROGRESS, TASK_OPEN, Task } from "./types";
-import { formatDue, formatEventTime, platformsToText } from "./utils";
+import { formatDue, formatEventTime, platformsToText, startOfLocalDayOffsetIso } from "./utils";
+
+const MEAL_LABELS: [string, string][] = [
+  ["breakfast", "🌅 Завтрак"],
+  ["lunch", "☀️ Обед"],
+  ["dinner", "🌙 Ужин"],
+  ["snack", "🍎 Перекус"],
+  ["", "🍽 Другое"],
+];
+
+/**
+ * Текстовая сводка по питанию за день (dayOffset: 0 — сегодня, -1 — вчера).
+ * Готова к пересылке тренеру.
+ */
+export async function buildNutritionSummary(db: DB, userId: number, tz: number, dayOffset: number): Promise<string> {
+  const start = startOfLocalDayOffsetIso(tz, dayOffset);
+  const end = startOfLocalDayOffsetIso(tz, dayOffset + 1);
+  const local = new Date(new Date(start).getTime() + tz * 3600_000);
+  const dateLabel = local.toLocaleDateString("ru-RU", { weekday: "long", day: "2-digit", month: "long", timeZone: "UTC" });
+
+  const entries = await db.listFood(userId, start, end);
+  const water = await db.waterTotal(userId, start, end);
+  const weights = await db.listWeights(userId, 30);
+  const weightForDay = weights.find((w) => w.ts >= start && w.ts < end);
+
+  const header = `🍽 Питание за ${dateLabel}`;
+  if (!entries.length && !water) return `${header}\n\nЗа этот день записей нет.`;
+
+  const kcal = entries.reduce((s, e) => s + e.kcal, 0);
+  const p = entries.reduce((s, e) => s + e.protein, 0);
+  const f = entries.reduce((s, e) => s + e.fat, 0);
+  const c = entries.reduce((s, e) => s + e.carbs, 0);
+
+  const lines = [header, ""];
+  for (const [key, label] of MEAL_LABELS) {
+    const items = entries.filter((e) => (e.meal || "") === key);
+    if (!items.length) continue;
+    const sub = items.reduce((s, e) => s + e.kcal, 0);
+    lines.push(`${label} — ${sub} ккал`);
+    items.forEach((e) => lines.push(`• ${e.title} — ${e.kcal} ккал`));
+    lines.push("");
+  }
+  lines.push(`Итого: ${kcal} ккал · Б ${p} · Ж ${f} · У ${c} г`);
+  lines.push(`💧 Вода: ${(water / 1000).toFixed(1)} л`);
+  if (weightForDay) lines.push(`⚖️ Вес: ${weightForDay.kg} кг`);
+  return lines.join("\n");
+}
 
 /** Утренняя сводка: просрочка, сегодня, ближайшие, без дедлайна. */
 export async function buildDigest(db: DB, userId: number, role: string, tzOffset: number): Promise<string> {

@@ -468,7 +468,8 @@
             <div style="border-left:1px solid var(--border)"></div>${cell(wd == null ? "—" : (wd > 0 ? "+" : "") + wd + " кг", "вес")}</div>`;
         }
         // Рекомендация и меню ИИ (только сегодня)
-        if (today) h += `<div id="advice-box"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="getAdvice()">✨ Рекомендация</button><button class="btn" style="flex:1" onclick="getMenu()">🍱 Меню на день</button></div>`;
+        if (today) h += `<div id="advice-box"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="getAdvice()">✨ Рекомендация</button><button class="btn" style="flex:1" onclick="getMenu()">🍱 Меню на день</button></div>
+          <button class="btn" style="width:100%;margin-top:8px" onclick="openFoodSummary()">📤 Сводка тренеру</button>`;
         // Вес + график
         const wk = d.weight || { latest: null, history: [] };
         const wvals = (wk.history || []).map((x) => x.kg).reverse();
@@ -533,6 +534,23 @@
       closeSheet(); if (tab === "health") renderHealth();
     };
     window.delHealthNote = async (id) => { haptic(); try { await api(`/health/note/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); };
+    let fsText = "";
+    window.openFoodSummary = () => {
+      openSheet(`<h3>Сводка по питанию</h3>
+        <div class="seg mini"><div class="on" onclick="loadFoodSummary(-1,this)">Вчера</div><div onclick="loadFoodSummary(0,this)">Сегодня</div></div>
+        <div id="fs-body"><div class="loading">Загрузка…</div></div>`);
+      loadFoodSummary(-1);
+    };
+    window.loadFoodSummary = async (off, el) => {
+      if (el) { el.parentNode.querySelectorAll("div").forEach((x) => x.classList.remove("on")); el.classList.add("on"); }
+      const box = $("fs-body"); if (box) box.innerHTML = `<div class="loading">Загрузка…</div>`;
+      try {
+        const { text } = await api(`/health/summary?offset=${off}`);
+        fsText = text;
+        if (box) box.innerHTML = `<div class="card" style="white-space:pre-wrap">${esc(text)}</div><button class="btn primary" style="width:100%;margin-top:8px" onclick="copyFs()">📋 Скопировать</button><div style="color:var(--muted);font-size:12px;margin-top:8px;text-align:center">Или перешли тренеру из чата бота: /foodreport</div>`;
+      } catch (e) { if (box) box.innerHTML = `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`; }
+    };
+    window.copyFs = async () => { try { await navigator.clipboard.writeText(fsText); tg.showAlert("Скопировано — вставь тренеру"); } catch (e) { tg.showAlert("Скопируй текст вручную"); } };
 
     async function renderTasks() {
       view.innerHTML =

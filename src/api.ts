@@ -3,6 +3,7 @@ import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, metrikaStats } from "./telemost";
 import { transcribeVoice } from "./speech";
+import { buildNutritionSummary } from "./reports";
 import {
   Env,
   NotifSettings,
@@ -282,6 +283,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     } catch (e) {
       return json({ error: "menu_failed", message: (e as Error).message }, 502);
     }
+  }
+
+  if (path === "/api/health/summary" && request.method === "GET") {
+    const u = new URL(request.url);
+    const off = parseInt(u.searchParams.get("offset") ?? "-1", 10);
+    const dayOffset = Number.isFinite(off) ? Math.min(0, Math.max(-31, off)) : -1;
+    const text = await buildNutritionSummary(db, uid, tzOffsetOf(env), dayOffset);
+    return json({ text });
   }
 
   if (path === "/api/health/recent" && request.method === "GET") {

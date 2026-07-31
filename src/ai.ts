@@ -251,6 +251,47 @@ export async function estimateNutrition(apiKey: string, text: string, model = RO
   }
 }
 
+/** Оценивает калории/БЖУ по ФОТО еды. Возвращает null при ошибке. */
+export async function estimateNutritionFromImage(
+  apiKey: string,
+  base64: string,
+  mediaType: string,
+  caption = "",
+  model = DEFAULT_MODEL
+): Promise<Nutrition | null> {
+  try {
+    const content = [
+      { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+      { type: "text", text: (caption ? `Подпись пользователя: "${caption}". ` : "") + "На фото — еда. Определи блюдо и оцени калорийность и БЖУ ВСЕЙ порции на фото." },
+    ];
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 250,
+        system: [{ type: "text", text: NUTRITION_SYSTEM }],
+        messages: [{ role: "user", content }],
+      }),
+    });
+    const data = (await res.json()) as AnthropicResponse;
+    if (!res.ok) return null;
+    const text = (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
+    const m = text.replace(/```json/gi, "").replace(/```/g, "").match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const o = JSON.parse(m[0]);
+    return {
+      title: String(o.title || caption || "Блюдо с фото").slice(0, 120),
+      kcal: Math.max(0, Math.round(+o.kcal || 0)),
+      protein: Math.max(0, Math.round(+o.protein || 0)),
+      fat: Math.max(0, Math.round(+o.fat || 0)),
+      carbs: Math.max(0, Math.round(+o.carbs || 0)),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Пытается извлечь задачу из произвольного текста (напр. распознанного голоса). */
 export async function parseTaskFromText(
   apiKey: string,

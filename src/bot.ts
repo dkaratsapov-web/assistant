@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
-import { askAI, DEFAULT_MODEL } from "./ai";
+import { askAI, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
 import { buildDocx } from "./docx";
+import { buildNutritionSummary } from "./reports";
 import { tryPerformCommand } from "./intent";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { transcribeVoice } from "./speech";
@@ -19,7 +20,15 @@ import {
   TASK_STATUS_LABELS,
   User,
 } from "./types";
-import { escapeHtml, extractTags, formatDue, parseDue, platformsToText, tzOffsetOf } from "./utils";
+import { escapeHtml, extractTags, formatDue, mealByHour, mealFromText, parseDue, platformsToText, tzOffsetOf } from "./utils";
+
+function bytesToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  return btoa(bin);
+}
 
 export type MyContext = Context & {
   db: DB;
@@ -378,6 +387,13 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     await db.clearState(ctx.from!.id);
     await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
   });
+  bot.command("foodreport", async (ctx) => {
+    const arg = ctx.match.trim().toLowerCase();
+    const off = /сегодня/.test(arg) ? 0 : -1;
+    const tz = Number(env.TZ_OFFSET ?? 3) || 3;
+    const text = await buildNutritionSummary(db, ctx.from!.id, tz, off);
+    await ctx.reply(text + "\n\n↪️ Перешли это сообщение тренеру.");
+  });
   bot.command("report", async (ctx) => {
     const name = ctx.match.trim();
     if (!name) { await ctx.reply("Использование: /report <клиент>\nПример: /report Ромашка"); return; }
@@ -568,6 +584,30 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
 
   // --- Свободный текст: шаги FSM, заметки, кнопки меню, ИИ ---
   // Голосовые сообщения: распознаём речь и создаём задачу (или отвечаем в режиме ИИ)
+  // Фото еды → оценка калорий/БЖУ и запись в дневник
+  bot.on("message:photo", async (ctx) => {
+    if (!env.ANTHROPIC_API_KEY) { await ctx.reply("ИИ не настроен."); return; }
+    const status = await ctx.reply("📷 Оцениваю блюдо по фото…");
+    const done = async (t: string) => { try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, t, HTML); } catch { await ctx.reply(t, HTML); } };
+    try {
+      const photos = ctx.message.photo;
+      const largest = photos[photos.length - 1];
+      const file = await ctx.api.getFile(largest.file_id);
+      if (!file.file_path) throw new Error("нет файла");
+      const buf = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
+      const caption = ctx.message.caption ?? "";
+      const n = await estimateNutritionFromImage(env.ANTHROPIC_API_KEY, bytesToBase64(buf), "image/jpeg", caption);
+      if (!n) { await done("Не смогла распознать еду на фото 🤔 Опиши текстом — например «съел борщ с хлебом»."); return; }
+      const tz = Number(env.TZ_OFFSET ?? 3) || 3;
+      const meal = mealFromText(caption) || mealByHour(new Date(Date.now() + tz * 3600_000).getUTCHours());
+      const mealRu: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
+      await db.addFood(ctx.from!.id, { ...n, meal });
+      await done(`🍽 Записала (${mealRu[meal]}) по фото: <b>${escapeHtml(n.title)}</b>\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`);
+    } catch (e) {
+      await done("⚠️ Не удалось обработать фото: " + escapeHtml((e as Error).message));
+    }
+  });
+
   bot.on("message:voice", async (ctx) => {
     if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
       await ctx.reply("Голосовой ввод не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID.");
@@ -827,6 +867,14 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       if (["стоп", "stop", "выход", "отмена"].includes(low)) {
         await db.clearState(ctx.from!.id);
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
+        return;
+      }
+      // Сводка по питанию (для тренера)
+      if (/(сводк|отч[её]т)[^.]{0,25}(пита|еде|калор)|питани[ея]\s+за\s+(вчера|сегодня)|тренеру/i.test(text)) {
+        const off = /сегодня/i.test(text) ? 0 : -1;
+        const tz = Number(env.TZ_OFFSET ?? 3) || 3;
+        const summary = await buildNutritionSummary(db, ctx.from!.id, tz, off);
+        await ctx.reply(summary + "\n\n↪️ Перешли это сообщение тренеру.");
         return;
       }
       // Запрос отчёта по клиенту → сводка Метрики
