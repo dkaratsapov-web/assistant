@@ -251,6 +251,21 @@ export async function estimateNutrition(apiKey: string, text: string, model = RO
   }
 }
 
+/** Оценивает сожжённые ккал по описанию активности. Возвращает число или null. */
+export async function estimateBurn(apiKey: string, text: string, model = ROUTER_MODEL): Promise<number | null> {
+  const raw = await complete(
+    apiKey,
+    [
+      { role: "system", text: "Оцени, сколько примерно килокалорий сжигает описанная физическая активность (для взрослого ~75 кг). Ответь СТРОГО одним целым числом — только ккал, без слов." },
+      { role: "user", text },
+    ],
+    model,
+    20
+  );
+  const m = raw.match(/\d+/);
+  return m ? Math.min(5000, parseInt(m[0], 10)) : null;
+}
+
 /** Оценивает калории/БЖУ по ФОТО еды. Возвращает null при ошибке. */
 export async function estimateNutritionFromImage(
   apiKey: string,

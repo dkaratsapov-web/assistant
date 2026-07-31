@@ -645,6 +645,7 @@ export class DB {
       events: { on: true, lead: 30 },
       birthdays: { on: true },
       water: { on: false, everyHours: 2, from: 9, to: 21 },
+      meals: { on: false, breakfast: 9, lunch: 14, dinner: 19 },
     };
     if (!raw) return def;
     try {
@@ -655,6 +656,7 @@ export class DB {
         events: { ...def.events, ...(p.events || {}) },
         birthdays: { ...def.birthdays, ...(p.birthdays || {}) },
         water: { ...def.water, ...(p.water || {}) },
+        meals: { ...def.meals, ...(p.meals || {}) },
       };
     } catch {
       return def;
@@ -688,7 +690,49 @@ export class DB {
     } catch {
       // колонка уже есть
     }
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, title TEXT NOT NULL, kcal INTEGER DEFAULT 0)")
+      .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS wellbeing (user_id INTEGER NOT NULL, date TEXT NOT NULL, sleep REAL, mood TEXT, PRIMARY KEY (user_id, date))")
+      .run();
     this.healthReady = true;
+  }
+
+  async addActivity(userId: number, title: string, kcal: number): Promise<number> {
+    await this.ensureHealth();
+    const res = await this.d1.prepare("INSERT INTO activity_log (user_id, ts, title, kcal) VALUES (?, ?, ?, ?)").bind(userId, nowIso(), title, kcal).run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listActivity(userId: number, startIso: string, endIso: string): Promise<{ id: number; ts: string; title: string; kcal: number }[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT id, ts, title, kcal FROM activity_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+      .bind(userId, startIso, endIso)
+      .all<{ id: number; ts: string; title: string; kcal: number }>();
+    return results ?? [];
+  }
+
+  async deleteActivity(id: number, userId: number): Promise<void> {
+    await this.ensureHealth();
+    await this.d1.prepare("DELETE FROM activity_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  async setWellbeing(userId: number, date: string, fields: { sleep?: number; mood?: string }): Promise<void> {
+    await this.ensureHealth();
+    const cur = await this.getWellbeing(userId, date);
+    const sleep = fields.sleep !== undefined ? fields.sleep : cur?.sleep ?? null;
+    const mood = fields.mood !== undefined ? fields.mood : cur?.mood ?? null;
+    await this.d1
+      .prepare("INSERT INTO wellbeing (user_id, date, sleep, mood) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, date) DO UPDATE SET sleep = excluded.sleep, mood = excluded.mood")
+      .bind(userId, date, sleep, mood)
+      .run();
+  }
+
+  async getWellbeing(userId: number, date: string): Promise<{ sleep: number | null; mood: string | null } | null> {
+    await this.ensureHealth();
+    return await this.d1.prepare("SELECT sleep, mood FROM wellbeing WHERE user_id = ? AND date = ?").bind(userId, date).first<{ sleep: number | null; mood: string | null }>();
   }
 
   async lastFood(userId: number, startIso: string, endIso: string): Promise<FoodEntry | null> {

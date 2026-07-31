@@ -3,7 +3,7 @@
  * и создаёт запись в БД. Используется и в Mini App (/api/ai), и в боте (текст/голос),
  * чтобы поведение было одинаковым.
  */
-import { AssistantIntent, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
+import { AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
 import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
@@ -217,6 +217,33 @@ export async function tryPerformCommand(
   if (wM) {
     const kg = parseFloat(wM[1].replace(",", "."));
     if (kg >= 20 && kg <= 400) { await db.addWeight(uid, kg); return `⚖️ Записала вес: ${kg} кг.`; }
+  }
+  // Активность / сон / настроение
+  const todayStr = new Date(Date.parse(dayStart) + tz * 3600_000).toISOString().slice(0, 10);
+  let am: RegExpMatchArray | null;
+  if ((am = text.match(/(\d{3,6})\s*шаг/i))) {
+    const steps = parseInt(am[1], 10); const kc = Math.round(steps * 0.04);
+    await db.addActivity(uid, `Шаги: ${steps}`, kc);
+    return `🏃 Записала ${steps} шагов (~${kc} ккал).`;
+  }
+  if ((am = text.match(/(?:сж[её]г|сожгла|потратил\w*)\s*(\d{2,4})\s*ккал/i))) {
+    const kc = parseInt(am[1], 10);
+    await db.addActivity(uid, "Активность", kc);
+    return `🔥 Записала −${kc} ккал (активность).`;
+  }
+  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед)/i.test(text) && env.ANTHROPIC_API_KEY) {
+    const kc = (await estimateBurn(env.ANTHROPIC_API_KEY, text)) ?? 0;
+    await db.addActivity(uid, text.slice(0, 80), kc);
+    return `🏋️ Активность записана: ${text.slice(0, 60)}${kc ? ` (~${kc} ккал)` : ""}.`;
+  }
+  if ((am = text.match(/спал\w*\s*(\d{1,2}(?:[.,]\d)?)\s*час/i))) {
+    const hrs = parseFloat(am[1].replace(",", "."));
+    await db.setWellbeing(uid, todayStr, { sleep: hrs });
+    return `😴 Записала сон: ${hrs} ч.`;
+  }
+  if ((am = text.match(/настроени[ея]\s+([а-яё]+)/i))) {
+    await db.setWellbeing(uid, todayStr, { mood: am[1] });
+    return `🙂 Настроение отмечено: ${am[1]}.`;
   }
 
   // 0a) Вода — локально, без ИИ

@@ -387,6 +387,20 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     await db.clearState(ctx.from!.id);
     await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
   });
+  bot.command("foodexport", async (ctx) => {
+    const days = Math.min(31, Math.max(1, parseInt(ctx.match.trim(), 10) || 7));
+    const tz = Number(env.TZ_OFFSET ?? 3) || 3;
+    const status = await ctx.reply(`📄 Собираю дневник питания за ${days} дн…`);
+    const parts: string[] = [];
+    for (let o = -(days - 1); o <= 0; o++) {
+      const t = await buildNutritionSummary(db, ctx.from!.id, tz, o);
+      if (t.includes("Итого:")) parts.push(t);
+    }
+    try { await ctx.api.deleteMessage(ctx.chat!.id, status.message_id); } catch {}
+    if (!parts.length) { await ctx.reply("За выбранный период нет записей о питании."); return; }
+    const bytes = buildDocx(`Дневник питания — ${days} дн.`, parts.join("\n\n———\n\n"));
+    await ctx.replyWithDocument(new InputFile(bytes, "Дневник питания.docx"), { caption: "📄 Дневник питания" });
+  });
   bot.command("foodreport", async (ctx) => {
     const arg = ctx.match.trim().toLowerCase();
     const off = /сегодня/.test(arg) ? 0 : -1;

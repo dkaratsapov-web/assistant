@@ -248,16 +248,28 @@ export default {
         }
       }
 
-      // Утренний брифинг — в час, выбранный пользователем
+      // Утренний брифинг + напоминания о приёмах пищи — в выбранные часы
       const recipients = [...(await db.listUsers(ROLE_OWNER)), ...(await db.listUsers(ROLE_MEMBER))];
+      const start = startOfLocalDayIso(tz), end = startOfLocalDayOffsetIso(tz, 1);
       for (const u of recipients) {
         try {
           const notif = await db.getNotif(u.user_id);
-          if (!notif.morning.on || notif.morning.hour !== localHour) continue;
-          const text = await buildDigest(db, u.user_id, u.role, tz);
-          await tgSend(env.BOT_TOKEN, u.user_id, "☀️ Доброе утро!\n\n" + text);
+          if (notif.morning.on && notif.morning.hour === localHour) {
+            const text = await buildDigest(db, u.user_id, u.role, tz);
+            await tgSend(env.BOT_TOKEN, u.user_id, "☀️ Доброе утро!\n\n" + text);
+          }
+          if (notif.meals.on) {
+            const slot = notif.meals.breakfast === localHour ? "breakfast" : notif.meals.lunch === localHour ? "lunch" : notif.meals.dinner === localHour ? "dinner" : null;
+            if (slot) {
+              const food = await db.listFood(u.user_id, start, end);
+              if (!food.some((f) => (f.meal || "") === slot)) {
+                const ru = { breakfast: "завтрак", lunch: "обед", dinner: "ужин" }[slot];
+                await tgSend(env.BOT_TOKEN, u.user_id, `🍽 Не забудь записать ${ru} — просто скажи «съел…» или пришли фото блюда.`);
+              }
+            }
+          }
         } catch (e) {
-          console.error("digest failed", u.user_id, e);
+          console.error("digest/meal failed", u.user_id, e);
         }
       }
     }

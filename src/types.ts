@@ -129,6 +129,7 @@ export interface NotifSettings {
   events: { on: boolean; lead: number }; // lead — минут до встречи
   birthdays: { on: boolean };
   water: { on: boolean; everyHours: number; from: number; to: number };
+  meals: { on: boolean; breakfast: number; lunch: number; dinner: number };
 }
 
 export interface FoodEntry {

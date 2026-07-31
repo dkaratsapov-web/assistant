@@ -1,4 +1,4 @@
-import { askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutrition } from "./ai";
+import { askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutrition, estimateBurn } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, metrikaStats } from "./telemost";
@@ -187,6 +187,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         from: clamp(b.water?.from, 0, 23, cur.water.from),
         to: clamp(b.water?.to, 0, 23, cur.water.to),
       },
+      meals: {
+        on: !!(b.meals?.on ?? cur.meals.on),
+        breakfast: clamp(b.meals?.breakfast, 0, 23, cur.meals.breakfast),
+        lunch: clamp(b.meals?.lunch, 0, 23, cur.meals.lunch),
+        dinner: clamp(b.meals?.dinner, 0, 23, cur.meals.dinner),
+      },
     };
     await db.setNotif(uid, next);
     return json({ ok: true, settings: next });
@@ -219,6 +225,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const cGoal = parseInt((await db.getSetting(`hcarb:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.4) / 4);
     const notes = await db.listHealthNotes(uid, start, end);
     const weights = await db.listWeights(uid, 14);
+    const activity = await db.listActivity(uid, start, end);
+    const burned = activity.reduce((s, a) => s + a.kcal, 0);
+    const wb = await db.getWellbeing(uid, dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : new Date(Date.parse(start) + tzh * 3600_000).toISOString().slice(0, 10));
 
     // Недельная сводка (последние 7 локальных дней)
     const wkStart = startOfLocalDayOffsetIso(tzh, -6);
@@ -249,6 +258,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       weight: { latest: weights[0]?.kg ?? null, history: weights },
       week: { avgKcal, avgWater, daysOnWater, weightDelta },
       streak,
+      activity: { entries: activity, burned },
+      balance: kcal - burned,
+      wellbeing: { sleep: wb?.sleep ?? null, mood: wb?.mood ?? null },
     });
   }
 
@@ -344,6 +356,33 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     await set("hprot", body.protein);
     await set("hfat", body.fat);
     await set("hcarb", body.carbs);
+    return json({ ok: true });
+  }
+
+  if (path === "/api/health/activity" && request.method === "POST") {
+    const b = (await request.json()) as { title?: string; kcal?: number; steps?: number };
+    let title = (b.title ?? "").trim();
+    let kcal = 0;
+    if (b.steps != null && +b.steps > 0) { const st = Math.round(+b.steps); title = title || `Шаги: ${st}`; kcal = Math.round(st * 0.04); }
+    else if (b.kcal != null) { kcal = Math.max(0, Math.round(+b.kcal || 0)); }
+    else if (title && env.ANTHROPIC_API_KEY) { kcal = (await estimateBurn(env.ANTHROPIC_API_KEY, title)) ?? 0; }
+    if (!title) return json({ error: "empty" }, 400);
+    const id = await db.addActivity(uid, title, kcal);
+    return json({ ok: true, id, kcal });
+  }
+  const actDel = path.match(/^\/api\/health\/activity\/(\d+)$/);
+  if (actDel && request.method === "DELETE") {
+    await db.deleteActivity(parseInt(actDel[1], 10), uid);
+    return json({ ok: true });
+  }
+  if (path === "/api/health/wellbeing" && request.method === "POST") {
+    const b = (await request.json()) as { sleep?: number; mood?: string };
+    const tzh = tzOffsetOf(env);
+    const today = new Date(Date.parse(startOfLocalDayIso(tzh)) + tzh * 3600_000).toISOString().slice(0, 10);
+    const fields: { sleep?: number; mood?: string } = {};
+    if (b.sleep != null) fields.sleep = Math.max(0, Math.min(24, +b.sleep || 0));
+    if (b.mood != null) fields.mood = String(b.mood).slice(0, 40);
+    await db.setWellbeing(uid, today, fields);
     return json({ ok: true });
   }
 
