@@ -467,8 +467,8 @@
             <div style="border-left:1px solid var(--border)"></div>${cell((wkS.avgWater/1000).toFixed(1) + " л", "вода/день")}
             <div style="border-left:1px solid var(--border)"></div>${cell(wd == null ? "—" : (wd > 0 ? "+" : "") + wd + " кг", "вес")}</div>`;
         }
-        // Рекомендация ИИ (только сегодня)
-        if (today) h += `<div id="advice-box"></div><button class="btn" style="width:100%;margin-top:8px" onclick="getAdvice()">✨ Рекомендация от Сары</button>`;
+        // Рекомендация и меню ИИ (только сегодня)
+        if (today) h += `<div id="advice-box"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="getAdvice()">✨ Рекомендация</button><button class="btn" style="flex:1" onclick="getMenu()">🍱 Меню на день</button></div>`;
         // Вес + график
         const wk = d.weight || { latest: null, history: [] };
         const wvals = (wk.history || []).map((x) => x.kg).reverse();
@@ -507,6 +507,11 @@
     window.getAdvice = async () => {
       const box = $("advice-box"); if (box) box.innerHTML = `<div class="card"><div class="loading">Сара думает…</div></div>`;
       try { const { advice } = await api("/health/advice", { method: "POST", body: "{}" }); if (box) box.innerHTML = `<div class="card" style="white-space:pre-wrap">${esc(advice)}</div>`; }
+      catch (e) { if (box) box.innerHTML = `<div class="card"><div style="color:var(--muted);padding:6px">Не вышло: ${esc(e.message || e)}</div></div>`; }
+    };
+    window.getMenu = async () => {
+      const box = $("advice-box"); if (box) box.innerHTML = `<div class="card"><div class="loading">Сара составляет меню…</div></div>`;
+      try { const { menu } = await api("/health/menu", { method: "POST", body: "{}" }); if (box) box.innerHTML = `<div class="card" style="white-space:pre-wrap">${esc(menu)}</div>`; }
       catch (e) { if (box) box.innerHTML = `<div class="card"><div style="color:var(--muted);padding:6px">Не вышло: ${esc(e.message || e)}</div></div>`; }
     };
     window.logWeight = () => {

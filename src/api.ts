@@ -266,6 +266,24 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
+  if (path === "/api/health/menu" && request.method === "POST") {
+    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+    const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
+    const pGoal = parseInt((await db.getSetting(`hprot:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 4);
+    const fGoal = parseInt((await db.getSetting(`hfat:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 9);
+    const cGoal = parseInt((await db.getSetting(`hcarb:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.4) / 4);
+    const prompt =
+      `Составь меню на день под цель ${kcalGoal} ккал (белки ${pGoal} г, жиры ${fGoal} г, углеводы ${cGoal} г). ` +
+      `Четыре приёма: завтрак, обед, ужин, перекус — для каждого укажи блюда и примерные калории, в конце итог по калориям. ` +
+      `Простые доступные продукты, по-русски, компактно, без вступлений и дисклеймеров.`;
+    try {
+      const menu = await askAIChat(env.ANTHROPIC_API_KEY, [{ role: "user", text: prompt }], DEFAULT_MODEL);
+      return json({ menu });
+    } catch (e) {
+      return json({ error: "menu_failed", message: (e as Error).message }, 502);
+    }
+  }
+
   if (path === "/api/health/recent" && request.method === "GET") {
     const tzh = tzOffsetOf(env);
     const recent = await db.recentFoods(uid, startOfLocalDayOffsetIso(tzh, -30), 8);
