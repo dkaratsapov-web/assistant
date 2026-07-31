@@ -288,6 +288,11 @@
     function isoToLocalInput(iso) { const d = new Date(iso); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; }
     function isoToDueText(iso) { if (!iso) return ""; const d = new Date(iso); return `${p2(d.getDate())}.${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; }
     const MON_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+    function money(v) {
+      v = (v || "").trim();
+      if (/^\d[\d\s]*$/.test(v)) return v.replace(/\s/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽";
+      return esc(v);
+    }
     function fmtBd(bd) { if (!bd) return ""; const p = bd.split("-"); const mo = p.length === 3 ? +p[1] : +p[0]; const d = p.length === 3 ? +p[2] : +p[1]; if (!mo || !d) return bd; return `${d} ${MON_RU[mo-1]}`; }
     function emptyBox(big, small) { return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`; }
     function err(e) {
@@ -823,7 +828,7 @@
         el.innerHTML = clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
           return `<div class="card item"><div class="top"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div></div>
-            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${esc(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${esc(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
+            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
             <div class="actions">
               ${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
               <button class="btn" onclick="editClient(${c.id})">Изменить</button>
