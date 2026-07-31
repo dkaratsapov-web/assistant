@@ -1,7 +1,7 @@
 import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
-import { telemostConnected, telemostCreate } from "./telemost";
+import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode } from "./telemost";
 import { transcribeVoice } from "./speech";
 import {
   Env,
@@ -81,6 +81,27 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
     return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // GET /api/telemost/auth-url — ссылка на вход в Яндекс (owner)
+  if (path === "/api/telemost/auth-url" && request.method === "GET") {
+    if (user.role !== ROLE_OWNER) return json({ error: "forbidden" }, 403);
+    if (!env.TELEMOST_CLIENT_ID) return json({ error: "no_client_id" }, 400);
+    return json({ url: telemostAuthUrl(env.TELEMOST_CLIENT_ID) });
+  }
+
+  // POST /api/telemost/connect {code} — обменять код на токены (owner)
+  if (path === "/api/telemost/connect" && request.method === "POST") {
+    if (user.role !== ROLE_OWNER) return json({ error: "forbidden" }, 403);
+    const body = (await request.json()) as { code?: string };
+    const code = (body.code ?? "").trim();
+    if (!code) return json({ error: "empty_code" }, 400);
+    try {
+      await telemostExchangeCode(env, db, code);
+      return json({ ok: true });
+    } catch (e) {
+      return json({ error: "connect_failed", message: (e as Error).message }, 502);
+    }
   }
 
   // POST /api/voice — распознать речь (PCM 16кГц из вебапа) → текст

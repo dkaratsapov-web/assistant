@@ -391,7 +391,11 @@
     const WD = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 
     async function renderCalendar() {
+      const tmBanner = me.telemost === false
+        ? `<div class="card" style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">🎥 Телемост не подключён</div><div style="color:var(--muted);font-size:13px;margin-bottom:10px">Подключи — и Сара будет добавлять ссылку на видеовстречу в события.</div><button class="btn primary" onclick="telemostConnect()">Подключить Телемост</button></div>`
+        : "";
       view.innerHTML =
+        tmBanner +
         `<div class="seg"><div class="${calView==='list'?'on':''}" onclick="calSetView('list')">Список</div><div class="${calView==='month'?'on':''}" onclick="calSetView('month')">Месяц</div></div>
          <div id="calbody"><div class="loading">Загрузка…</div></div>`;
       try {
@@ -404,6 +408,21 @@
         calView === "month" ? calRenderMonth() : calRenderList();
       } catch (e) { setHTML("calbody", err(e)); }
     }
+    window.telemostConnect = async () => {
+      haptic();
+      let url;
+      try { url = (await api("/telemost/auth-url")).url; } catch (e) { return tg.showAlert("Не удалось начать: " + (e.message || e) + "\n(нужны TELEMOST_CLIENT_ID/SECRET в Cloudflare)"); }
+      try { tg.openLink ? tg.openLink(url) : window.open(url, "_blank"); } catch (e) { window.open(url, "_blank"); }
+      openSheet(`<h3>Подключение Телемоста</h3>
+        <div class="field"><label>Вошёл Яндексом в открывшемся окне? Вставь код, который показал Яндекс</label><input id="tm-code" placeholder="Код подтверждения" autocomplete="off"></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="telemostFinish()">Подключить</button></div>`);
+    };
+    window.telemostFinish = async () => {
+      const code = ($("tm-code").value || "").trim(); if (!code) return tg.showAlert("Вставь код с экрана Яндекса");
+      try { await api("/telemost/connect", { method: "POST", body: JSON.stringify({ code }) }); }
+      catch (e) { return tg.showAlert("Не подключилось: " + (e.message || e)); }
+      me.telemost = true; closeSheet(); tg.showAlert("✅ Телемост подключён"); renderCalendar();
+    };
     window.calSetView = (v) => { calView = v; calSelDay = null; renderCalendar(); };
     window.calPrev = () => { calMonthOffset--; calSelDay = null; calRenderMonth(); };
     window.calNext = () => { calMonthOffset++; calSelDay = null; calRenderMonth(); };
