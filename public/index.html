@@ -227,6 +227,8 @@
     const $ = (id) => document.getElementById(id);
     const view = $("view");
     const setHTML = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+    // Надёжное подтверждение (в Telegram window.confirm часто не работает)
+    const ask = (msg) => new Promise((res) => { try { if (tg.showConfirm) { tg.showConfirm(msg, (ok) => res(!!ok)); return; } } catch (e) {} res(typeof confirm === "function" ? confirm(msg) : true); });
     const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const haptic = (t = "light") => { try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
     $("avatar").src = SARA;
@@ -580,9 +582,10 @@
       const over = it.kind === "task" && new Date(it.at) < new Date();
       const tag = it.kind === "event" ? "встреча" : (it.scope === "personal" ? "личная" : "рабочая");
       const edit = it.kind === "event" ? `editEvent(${it.id})` : `editTask(${it.id})`;
+      const del = it.kind === "event" ? `delEvent(${it.id})` : `delTask(${it.id})`;
       return `<div class="card item"><div class="top"><div class="name">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</div></div>
         <div class="meta"><span class="pill ${over?'strong':''}">${t}</span><span class="pill">${tag}</span></div>
-        <div class="actions"><button class="btn" onclick="${edit}">Изменить</button></div></div>`;
+        <div class="actions"><button class="btn" onclick="${edit}">Изменить</button><button class="btn ghost" onclick="${del}">✕</button></div></div>`;
     }
 
     function calRenderList() {
@@ -773,7 +776,7 @@
       setTimeout(() => { const i = $("ai-input"); if (i) i.focus(); }, 150);
     }
     window.aiClear = async () => {
-      if (!confirm("Очистить переписку с Сарой?")) return;
+      if (!(await ask("Очистить переписку с Сарой?"))) return;
       haptic(); try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
       aiHistory = []; aiRenderMessages();
     };
@@ -852,9 +855,9 @@
     window.setScope = (s) => { taskScope = s; renderTasks(); };
     window.setStatus = (s) => { taskStatus = s; renderTasks(); };
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
-    window.delTask = async (id) => { if (!confirm("Удалить задачу?")) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTasks(); };
-    window.delEvent = async (id) => { if (!confirm("Удалить встречу?")) return; await api(`/events/${id}`, { method: "DELETE" }); renderCalendar(); };
-    window.delContact = async (id) => { if (!confirm("Удалить контакт?")) return; await api(`/contacts/${id}`, { method: "DELETE" }); afterContactChange(); };
+    window.delTask = async (id) => { if (!(await ask("Удалить задачу?"))) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTab(tab); };
+    window.delEvent = async (id) => { if (!(await ask("Удалить встречу?"))) return; await api(`/events/${id}`, { method: "DELETE" }); renderTab(tab); };
+    window.delContact = async (id) => { if (!(await ask("Удалить контакт?"))) return; await api(`/contacts/${id}`, { method: "DELETE" }); afterContactChange(); };
 
     /* ---------- Шторки ---------- */
     const sheet = $("sheet"), sheetBody = $("sheet-body");
@@ -988,7 +991,7 @@
       closeSheet(); renderClients();
     };
     window.toggleClient = async (id, status) => { haptic(); await api(`/clients/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderClients(); };
-    window.delClient = async (id) => { if (!confirm("Удалить клиента?")) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
+    window.delClient = async (id) => { if (!(await ask("Удалить клиента?"))) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
 
     $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "health") openFoodAdd(); else if (tab === "clients") openAddClient(); };
     function updateFab() { $("fab").style.display = ["tasks", "calendar", "health", "clients"].includes(tab) ? "flex" : "none"; }
