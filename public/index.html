@@ -124,6 +124,7 @@
     .btn:active { transform: scale(.97); }
     .btn.primary { background: var(--fg); color: var(--fg-contrast); border-color: var(--fg); }
     .btn.ghost { flex: 0 0 44px; color: var(--muted); }
+    .btn.sm { flex: 0 0 auto; padding: 9px 16px; }
 
     .empty { text-align: center; padding: 54px 20px; color: var(--muted); }
     .empty img { width: 96px; height: 96px; object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
@@ -466,13 +467,13 @@
         // Активность
         const act = d.activity || { entries: [], burned: 0 };
         h += `<div class="section-title">Активность</div><div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center"><div><b>🔥 −${act.burned} ккал</b> <span style="color:var(--muted);font-size:12px">баланс ${d.balance >= 0 ? "+" : ""}${d.balance} ккал</span></div>${today ? `<button class="btn" onclick="openActivity()">＋</button>` : ""}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><div><b>🔥 −${act.burned} ккал</b> <span style="color:var(--muted);font-size:12px">баланс ${d.balance >= 0 ? "+" : ""}${d.balance} ккал</span></div>${today ? `<button class="btn sm" onclick="openActivity()">＋ активность</button>` : ""}</div>
             ${act.entries.map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">${esc(a.title)}</span><span style="color:var(--muted)">−${a.kcal}${today ? ` <button class="btn ghost" onclick="delActivity(${a.id})">✕</button>` : ""}</span></div>`).join("")}
           </div>`;
         // Самочувствие
         const wb = d.wellbeing || {};
         h += `<div class="section-title">Самочувствие</div><div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center"><span>😴 Сон: ${wb.sleep != null ? wb.sleep + " ч" : "—"}</span>${today ? `<button class="btn" onclick="logSleep()">Указать</button>` : ""}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><span>😴 Сон: ${wb.sleep != null ? wb.sleep + " ч" : "—"}</span>${today ? `<button class="btn sm" onclick="logSleep()">Указать</button>` : ""}</div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><span>Настроение: ${wb.mood ? esc(wb.mood) : "—"}</span>${today ? `<div style="display:flex;gap:8px">${["😞","😐","🙂","😃"].map((e) => `<span onclick="setMood('${e}')" style="font-size:22px;cursor:pointer">${e}</span>`).join("")}</div>` : ""}</div>
           </div>`;
         // Сводка за неделю
@@ -499,7 +500,7 @@
           const pts = wvals.map((v, i) => `${(i / (wvals.length - 1) * W).toFixed(1)},${(H - (v - mn) / rng * (H - 6) - 3).toFixed(1)}`).join(" ");
           return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="40" preserveAspectRatio="none" style="margin-top:8px"><polyline points="${pts}" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
         })();
-        h += `<div class="section-title">Вес</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:20px">${wk.latest != null ? wk.latest + " кг" : "—"}</b>${wk.history && wk.history.length > 1 ? `<span style="color:var(--muted);font-size:12px"> (было ${wk.history[1].kg})</span>` : ""}</div><button class="btn" onclick="logWeight()">Записать</button></div>${spark}</div>`;
+        h += `<div class="section-title">Вес</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:20px">${wk.latest != null ? wk.latest + " кг" : "—"}</b>${wk.history && wk.history.length > 1 ? `<span style="color:var(--muted);font-size:12px"> (было ${wk.history[1].kg})</span>` : ""}</div><button class="btn sm" onclick="logWeight()">Записать</button></div>${spark}</div>`;
         // Заметки
         h += `<div class="section-title">Заметки о самочувствии</div>`;
         h += (d.notes && d.notes.length)
