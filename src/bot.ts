@@ -1,6 +1,8 @@
-import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
+import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
 import { askAI, DEFAULT_MODEL } from "./ai";
+import { buildDocx } from "./docx";
 import { tryPerformCommand } from "./intent";
+import { telemostExchangeCode } from "./telemost";
 import { transcribeVoice } from "./speech";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
@@ -364,9 +366,31 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     }
     await replyAI(ctx, prompt);
   });
+  bot.command("doc", async (ctx) => {
+    const desc = ctx.match.trim();
+    if (!desc) {
+      await ctx.reply("Использование: /doc <что нужно>\nПример: /doc коммерческое предложение по настройке Яндекс Директ");
+      return;
+    }
+    await makeAndSendDoc(ctx, desc);
+  });
   bot.command("stop", async (ctx) => {
     await db.clearState(ctx.from!.id);
     await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
+  });
+  bot.command("telemost", async (ctx) => {
+    if (ctx.from!.id !== ownerId) return;
+    const code = ctx.match.trim();
+    if (!code) {
+      await ctx.reply("Подключение Телемоста:\n1) Открой ссылку /telemost/auth (см. инструкцию), войди Яндексом.\n2) Пришли код: /telemost <код с экрана Яндекса>");
+      return;
+    }
+    try {
+      await telemostExchangeCode(env, db, code);
+      await ctx.reply("✅ Телемост подключён! При создании встречи можно добавить ссылку на видеовстречу.");
+    } catch (e) {
+      await ctx.reply("Не удалось подключить Телемост: " + (e as Error).message);
+    }
   });
 
   // --- Владелец: пользователи ---
@@ -669,6 +693,31 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     for (const chunk of splitText(answer)) await ctx.reply(chunk);
   }
 
+  async function makeAndSendDoc(ctx: MyContext, request: string) {
+    if (!env.ANTHROPIC_API_KEY) {
+      await ctx.reply("ИИ не настроен. Добавь ANTHROPIC_API_KEY, чтобы формировать документы.");
+      return;
+    }
+    const thinking = await ctx.reply("📝 Готовлю документ…");
+    const content = await askAI(
+      env.ANTHROPIC_API_KEY,
+      `Составь готовый деловой документ по запросу: "${request}". ` +
+        `Первая строка — краткий заголовок документа. Далее — содержание. ` +
+        `Обычный текст (без markdown-разметки, без ** и #), абзацы — с новой строки.`,
+      env.ANTHROPIC_MODEL ?? DEFAULT_MODEL
+    );
+    try { await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id); } catch {}
+    if (content.startsWith("⚠️")) { await ctx.reply(content); return; }
+    const lines = content.split(/\r?\n/);
+    const title = (lines[0] || "Документ").trim().slice(0, 60);
+    const body = lines.slice(1).join("\n").trim() || content;
+    const bytes = buildDocx(title, body);
+    const fname = (title.replace(/[^\wа-яё0-9 -]/gi, "").trim() || "Документ") + ".docx";
+    await ctx.replyWithDocument(new InputFile(bytes, fname), { caption: "Готово ✅ Можно открыть в Word и при необходимости экспортировать в PDF." });
+  }
+
+  const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|\bкп\b|договор|бриф|отч[её]т в ворд)/i;
+
   async function handleStep(ctx: MyContext, step: string, state: Record<string, unknown>, text: string) {
     const low = text.toLowerCase();
     if (low === "отмена" && step !== "ai_mode") {
@@ -729,6 +778,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
         return;
       }
+      // Запрос на файл/документ → формируем .docx
+      if (DOC_RE.test(text)) return makeAndSendDoc(ctx, text);
       // Сначала пробуем выполнить команду; если это не команда — отвечаем как в чате
       const action = await tryPerformCommand(env, db, ctx.from!.id, text, false);
       if (action) {

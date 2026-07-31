@@ -12,14 +12,15 @@ const AUTH_URL = "https://oauth.yandex.ru/authorize";
 const TOKEN_URL = "https://oauth.yandex.ru/token";
 const API_URL = "https://cloud-api.yandex.net/v1/telemost-api/conferences";
 const SCOPE = "telemost-api:conferences.create";
+const VERIF_URI = "https://oauth.yandex.ru/verification_code";
 
-/** URL для одноразового входа владельца и выдачи прав Телемосту. */
-export function telemostAuthUrl(clientId: string, redirectUri: string): string {
+/** URL для одноразового входа владельца. Если redirectUri не задан — Яндекс покажет код подтверждения. */
+export function telemostAuthUrl(clientId: string, redirectUri?: string): string {
   const p = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     scope: SCOPE,
-    redirect_uri: redirectUri,
+    redirect_uri: redirectUri || VERIF_URI,
   });
   return `${AUTH_URL}?${p.toString()}`;
 }
@@ -45,15 +46,16 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResp> {
   return data;
 }
 
-/** Обменять authorization code на токены и сохранить их. */
-export async function telemostExchangeCode(env: Env, db: DB, code: string, redirectUri: string): Promise<void> {
-  const t = await tokenRequest({
+/** Обменять authorization code (или код подтверждения) на токены и сохранить их. */
+export async function telemostExchangeCode(env: Env, db: DB, code: string, redirectUri?: string): Promise<void> {
+  const body: Record<string, string> = {
     grant_type: "authorization_code",
-    code,
+    code: code.trim(),
     client_id: env.TELEMOST_CLIENT_ID ?? "",
     client_secret: env.TELEMOST_CLIENT_SECRET ?? "",
-    redirect_uri: redirectUri,
-  });
+  };
+  if (redirectUri) body.redirect_uri = redirectUri;
+  const t = await tokenRequest(body);
   await saveTokens(db, t);
 }
 

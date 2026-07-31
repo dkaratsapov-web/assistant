@@ -94,8 +94,8 @@ function handleTelemostAuth(request: Request, env: Env, origin: string): Respons
     return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
   }
   if (!env.TELEMOST_CLIENT_ID) return new Response("TELEMOST_CLIENT_ID не задан", { status: 400 });
-  const redirect = `${origin}/telemost/callback`;
-  return Response.redirect(telemostAuthUrl(env.TELEMOST_CLIENT_ID, redirect), 302);
+  // Без своего redirect: Яндекс покажет код подтверждения — его нужно прислать боту командой /telemost <код>
+  return Response.redirect(telemostAuthUrl(env.TELEMOST_CLIENT_ID), 302);
 }
 
 /** Колбэк OAuth Телемоста: меняем code на токены и сохраняем. */
