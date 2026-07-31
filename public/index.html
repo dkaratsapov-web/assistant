@@ -524,12 +524,41 @@
           return `<div class="card item"><div class="top"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div></div>
             <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${esc(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${esc(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
             <div class="actions">
+              ${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
               <button class="btn" onclick="editClient(${c.id})">Изменить</button>
               <button class="btn" onclick="toggleClient(${c.id},'${c.status === "active" ? "paused" : "active"}')">${c.status === "active" ? "Пауза" : "Вернуть"}</button>
               <button class="btn ghost" onclick="delClient(${c.id})">✕</button>
             </div></div>`;
         }).join("");
       } catch (e) { setHTML("cllist", err(e)); }
+    }
+
+    /* ---------- Отчёты Метрики ---------- */
+    let reportClient = null, reportDays = 30;
+    window.openReport = (id) => { reportClient = id; reportDays = 30; loadReport(); };
+    window.setReportDays = (n) => { reportDays = n; loadReport(); };
+    async function loadReport() {
+      openSheet(`<h3>Отчёт Метрики</h3>
+        <div class="seg mini"><div class="${reportDays===7?'on':''}" onclick="setReportDays(7)">7 дней</div><div class="${reportDays===30?'on':''}" onclick="setReportDays(30)">30 дней</div><div class="${reportDays===90?'on':''}" onclick="setReportDays(90)">90 дней</div></div>
+        <div id="rep-body"><div class="loading">Загрузка…</div></div>`);
+      try {
+        const d = await api(`/reports/metrika?client=${reportClient}&days=${reportDays}`);
+        const r = d.report;
+        const kpi = (v, l) => `<div style="flex:1;text-align:center;padding:12px 4px"><div style="font-size:22px;font-weight:800;letter-spacing:-.03em">${v}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${l}</div></div>`;
+        const dur = `${Math.floor(r.avgDuration/60)}:${String(r.avgDuration%60).padStart(2,'0')}`;
+        let h = `<div style="color:var(--muted);font-size:12.5px;margin-bottom:10px">${esc(d.client)} · ${d.date1} — ${d.date2}</div>`;
+        h += `<div class="card" style="display:flex;padding:4px;margin-bottom:8px">${kpi(r.visits,'визиты')}${kpi(r.users,'посетители')}</div>`;
+        h += `<div class="card" style="display:flex;padding:4px">${kpi(r.bounceRate+'%','отказы')}${kpi(dur,'на сайте')}${kpi(r.pageviews,'просмотры')}</div>`;
+        if (r.sources && r.sources.length) h += `<div class="section-title">Источники трафика</div><div class="card">${r.sources.map(s=>`<div style="display:flex;justify-content:space-between;padding:7px 2px"><span>${esc(s.name)}</span><b>${s.visits}</b></div>`).join("")}</div>`;
+        h += `<div style="color:var(--muted);font-size:12px;margin-top:12px">📄 Выгрузка в Word: напиши боту <b>/report ${esc(d.client)}</b></div>`;
+        setHTML("rep-body", h);
+      } catch (e) {
+        const m = e.message || e;
+        const msg = m === "yandex_not_connected" ? "Подключи Яндекс — кнопка «Подключить Телемост» в Календаре (тот же вход даёт и Метрику)."
+          : m === "no_counter" ? "У клиента не указан счётчик Метрики — добавь его в карточке («Изменить»)."
+          : "Ошибка: " + esc(m);
+        setHTML("rep-body", `<div class="card"><div style="color:var(--muted);padding:8px;text-align:center">${msg}</div></div>`);
+      }
     }
 
     /* ---------- ИИ-чат ---------- */

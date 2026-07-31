@@ -2,7 +2,7 @@ import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
 import { askAI, DEFAULT_MODEL } from "./ai";
 import { buildDocx } from "./docx";
 import { tryPerformCommand } from "./intent";
-import { telemostExchangeCode } from "./telemost";
+import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { transcribeVoice } from "./speech";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
@@ -378,6 +378,13 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     await db.clearState(ctx.from!.id);
     await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
   });
+  bot.command("report", async (ctx) => {
+    const name = ctx.match.trim();
+    if (!name) { await ctx.reply("Использование: /report <клиент>\nПример: /report Ромашка"); return; }
+    const client = await db.findClientByName(name);
+    if (!client) { await ctx.reply(`Клиент «${name}» не найден.`); return; }
+    await sendMetrikaReport(ctx, client);
+  });
   bot.command("telemost", async (ctx) => {
     if (ctx.from!.id !== ownerId) return;
     const code = ctx.match.trim();
@@ -717,6 +724,50 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|\bкп\b|договор|бриф|отч[её]т в ворд)/i;
+  const REPORT_RE = /(отч[её]т|статистик|метрик|посещаемост|трафик|сколько.*(визит|посет))/i;
+
+  function metrikaReportText(name: string, r: MetrikaReport, date1: string, date2: string): { tg: string; body: string } {
+    const dur = `${Math.floor(r.avgDuration / 60)} мин ${r.avgDuration % 60} сек`;
+    const lines = [
+      `Период: ${date1} — ${date2}`,
+      "",
+      `Визиты: ${r.visits}`,
+      `Посетители: ${r.users}`,
+      `Просмотры страниц: ${r.pageviews}`,
+      `Отказы: ${r.bounceRate}%`,
+      `Среднее время на сайте: ${dur}`,
+    ];
+    if (r.sources.length) {
+      lines.push("", "Источники трафика:");
+      r.sources.forEach((s) => lines.push(`• ${s.name}: ${s.visits}`));
+    }
+    const body = lines.join("\n");
+    return { tg: `📊 Отчёт Метрики — ${name}\n\n${body}`, body };
+  }
+
+  async function sendMetrikaReport(ctx: MyContext, client: { name: string; metrika_counter: string }) {
+    if (!client.metrika_counter) {
+      await ctx.reply(`У клиента «${client.name}» не указан счётчик Метрики. Добавь его в карточке клиента (приложение → Клиенты → Изменить).`);
+      return;
+    }
+    const status = await ctx.reply("📊 Собираю отчёт Метрики за 30 дней…");
+    const tz = Number(env.TZ_OFFSET ?? 3) || 3;
+    const nowL = new Date(Date.now() + tz * 3600_000);
+    const ymd = (dt: Date) => `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    const date2 = ymd(nowL);
+    const date1 = ymd(new Date(nowL.getTime() - 29 * 86400_000));
+    try {
+      const r = await metrikaStats(env, db, client.metrika_counter, date1, date2);
+      const { tg, body } = metrikaReportText(client.name, r, date1, date2);
+      try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, tg); } catch { await ctx.reply(tg); }
+      const bytes = buildDocx(`Отчёт Метрики — ${client.name}`, body);
+      await ctx.replyWithDocument(new InputFile(bytes, `Отчёт ${client.name}.docx`.replace(/[^\wа-яё0-9 .-]/gi, "")));
+    } catch (e) {
+      const msg = (e as Error).message || "";
+      const hint = /не подключ/i.test(msg) ? "\n\nПодключи Яндекс в приложении: Календарь → «Подключить Телемост» (тот же вход даёт и Метрику)." : "";
+      try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, `⚠️ Не удалось собрать отчёт: ${msg}${hint}`); } catch { await ctx.reply(`⚠️ ${msg}`); }
+    }
+  }
 
   async function handleStep(ctx: MyContext, step: string, state: Record<string, unknown>, text: string) {
     const low = text.toLowerCase();
@@ -777,6 +828,14 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         await db.clearState(ctx.from!.id);
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
         return;
+      }
+      // Запрос отчёта по клиенту → сводка Метрики
+      if (REPORT_RE.test(text)) {
+        const clients = await db.listClients();
+        const low2 = text.toLowerCase();
+        const client = clients.find((c) => c.name && low2.includes(c.name.toLowerCase()));
+        if (client) return sendMetrikaReport(ctx, client);
+        // клиент не распознан — пусть ответит ИИ (уточнит, по кому отчёт)
       }
       // Запрос на файл/документ → формируем .docx
       if (DOC_RE.test(text)) return makeAndSendDoc(ctx, text);

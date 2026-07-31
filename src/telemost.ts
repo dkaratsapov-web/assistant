@@ -11,7 +11,9 @@ import { Env } from "./types";
 const AUTH_URL = "https://oauth.yandex.ru/authorize";
 const TOKEN_URL = "https://oauth.yandex.ru/token";
 const API_URL = "https://cloud-api.yandex.net/v1/telemost-api/conferences";
-const SCOPE = "telemost-api:conferences.create";
+const METRIKA_URL = "https://api-metrika.yandex.net/stat/v1/data";
+// Телемост + Метрика (чтение) — один токен на обе интеграции
+const SCOPE = "telemost-api:conferences.create metrika:read";
 const VERIF_URI = "https://oauth.yandex.ru/verification_code";
 
 /** URL для одноразового входа владельца. Если redirectUri не задан — Яндекс покажет код подтверждения. */
@@ -71,7 +73,7 @@ async function validToken(env: Env, db: DB): Promise<string> {
   const access = await db.getSetting("telemost_access");
   const refresh = await db.getSetting("telemost_refresh");
   const exp = parseInt((await db.getSetting("telemost_exp")) ?? "0", 10);
-  if (!access) throw new Error("Телемост не подключён");
+  if (!access) throw new Error("Яндекс не подключён");
   if (Date.now() > exp - 60_000 && refresh && env.TELEMOST_CLIENT_ID && env.TELEMOST_CLIENT_SECRET) {
     const t = await tokenRequest({
       grant_type: "refresh_token",
@@ -100,7 +102,51 @@ export async function telemostCreate(env: Env, db: DB): Promise<string> {
   return data.join_url;
 }
 
-/** Подключён ли Телемост (есть сохранённый токен). */
+/** Подключён ли Яндекс (есть сохранённый токен — общий для Телемоста и Метрики). */
 export async function telemostConnected(db: DB): Promise<boolean> {
   return !!(await db.getSetting("telemost_access"));
+}
+
+export interface MetrikaReport {
+  visits: number;
+  users: number;
+  pageviews: number;
+  bounceRate: number;   // % отказов
+  avgDuration: number;  // сек, среднее время на сайте
+  sources: { name: string; visits: number }[];
+}
+
+/** Сводка Яндекс Метрики по счётчику за период (date1..date2 в формате YYYY-MM-DD). */
+export async function metrikaStats(env: Env, db: DB, counter: string, date1: string, date2: string): Promise<MetrikaReport> {
+  const token = await validToken(env, db);
+  const q = (params: Record<string, string>) => `${METRIKA_URL}?${new URLSearchParams(params).toString()}`;
+  const base = { ids: counter, date1, date2, accuracy: "full" };
+  const res = await fetch(
+    q({ ...base, metrics: "ym:s:visits,ym:s:users,ym:s:pageviews,ym:s:bounceRate,ym:s:avgVisitDurationSeconds" }),
+    { headers: { Authorization: `OAuth ${token}` } }
+  );
+  const d = (await res.json().catch(() => ({}))) as { totals?: number[][]; message?: string; errors?: { message?: string }[] };
+  if (!res.ok) throw new Error(d.message || d.errors?.[0]?.message || `metrika ${res.status}`);
+  const t = (d.totals && d.totals[0]) || [0, 0, 0, 0, 0];
+
+  let sources: { name: string; visits: number }[] = [];
+  try {
+    const rs = await fetch(
+      q({ ...base, metrics: "ym:s:visits", dimensions: "ym:s:lastTrafficSource", sort: "-ym:s:visits", limit: "5" }),
+      { headers: { Authorization: `OAuth ${token}` } }
+    );
+    const rd = (await rs.json()) as { data?: { dimensions?: { name?: string }[]; metrics?: number[] }[] };
+    sources = (rd.data || []).map((row) => ({ name: row.dimensions?.[0]?.name || "—", visits: Math.round(row.metrics?.[0] || 0) }));
+  } catch {
+    // источники — не критично
+  }
+
+  return {
+    visits: Math.round(t[0]),
+    users: Math.round(t[1]),
+    pageviews: Math.round(t[2]),
+    bounceRate: Math.round((t[3] || 0) * 10) / 10,
+    avgDuration: Math.round(t[4] || 0),
+    sources,
+  };
 }

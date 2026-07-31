@@ -1,7 +1,7 @@
 import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
-import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode } from "./telemost";
+import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, metrikaStats } from "./telemost";
 import { transcribeVoice } from "./speech";
 import {
   Env,
@@ -81,6 +81,28 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
     return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // GET /api/reports/metrika?client=ID&days=N — сводка Метрики по клиенту
+  if (path === "/api/reports/metrika" && request.method === "GET") {
+    const u = new URL(request.url);
+    const clientId = parseInt(u.searchParams.get("client") ?? "", 10);
+    const days = Math.min(365, Math.max(1, parseInt(u.searchParams.get("days") ?? "30", 10)));
+    const client = clientId ? await db.getClient(clientId) : null;
+    if (!client) return json({ error: "not_found" }, 404);
+    if (!client.metrika_counter) return json({ error: "no_counter" }, 400);
+    if (!(await telemostConnected(db))) return json({ error: "yandex_not_connected" }, 400);
+    const tz = tzOffsetOf(env);
+    const nowL = new Date(Date.now() + tz * 3600_000);
+    const ymd = (dt: Date) => `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    const date2 = ymd(nowL);
+    const date1 = ymd(new Date(nowL.getTime() - (days - 1) * 86400_000));
+    try {
+      const report = await metrikaStats(env, db, client.metrika_counter, date1, date2);
+      return json({ client: client.name, days, date1, date2, report });
+    } catch (e) {
+      return json({ error: "metrika_failed", message: (e as Error).message }, 502);
+    }
   }
 
   // GET /api/telemost/auth-url — ссылка на вход в Яндекс (owner)
