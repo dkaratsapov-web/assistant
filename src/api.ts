@@ -12,6 +12,7 @@ import {
   SCOPE_PERSONAL,
   SCOPE_WORK,
   TASK_DONE,
+  TASK_FAILED,
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
@@ -480,7 +481,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const scopeParam = url.searchParams.get("scope");
     const scope = scopeParam === SCOPE_PERSONAL || scopeParam === SCOPE_WORK ? scopeParam : null;
     const statuses =
-      filter === "done" ? [TASK_DONE] : filter === "all" ? [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE] : [TASK_OPEN, TASK_IN_PROGRESS];
+      filter === "done" ? [TASK_DONE]
+      : filter === "failed" ? [TASK_FAILED]
+      : filter === "open" ? [TASK_OPEN]
+      : filter === "in_progress" ? [TASK_IN_PROGRESS]
+      : filter === "all" ? [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED]
+      : [TASK_OPEN, TASK_IN_PROGRESS];
     const tasks = await db.listTasks({ statuses, assigneeId: isOwner ? null : uid, scope, orderByDone: filter === "done" });
     const out = [];
     for (const t of tasks) {
@@ -513,7 +519,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const statusMatch = path.match(/^\/api\/tasks\/(\d+)\/status$/);
   if (statusMatch && request.method === "POST") {
     const body = (await request.json()) as { status?: string };
-    if (![TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE].includes(body.status ?? "")) return json({ error: "bad_status" }, 400);
+    if (![TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED].includes(body.status ?? "")) return json({ error: "bad_status" }, 400);
     const task = await db.getTask(parseInt(statusMatch[1], 10));
     if (!task) return json({ error: "not_found" }, 404);
     await db.setTaskStatus(task.id, body.status!);

@@ -32,6 +32,7 @@ export const ROLE_PENDING = "pending";
 export const TASK_OPEN = "open";
 export const TASK_IN_PROGRESS = "in_progress";
 export const TASK_DONE = "done";
+export const TASK_FAILED = "failed";
 
 export const SCOPE_PERSONAL = "personal";
 export const SCOPE_WORK = "work";

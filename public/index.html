@@ -251,7 +251,7 @@
     /* ---------- Состояние ---------- */
     let tab = "home";
     let taskScope = "work";
-    let taskStatus = "active";
+    let taskStage = "open";
     let clientsCache = [];
     let tasksCache = [];
     let eventsCache = [];
@@ -317,17 +317,30 @@
             </div>`;
         }
         h += `<div class="section-title">Здоровье сегодня</div><div id="health-card"><div class="card"><div class="loading">…</div></div></div>`;
+        const tOnly = (iso) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        const overdue = d.tasks.filter((t) => t.overdue);
+        const todayTasks = d.tasks.filter((t) => !t.overdue);
+        // Просрочено — отдельно
+        if (overdue.length) {
+          h += `<div class="section-title">⚠️ Просрочено</div><div class="card">`;
+          overdue.forEach((t) => {
+            const due = fmtDue(t.due_at);
+            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m" style="color:#ff6b6b">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+          });
+          h += `</div>`;
+        }
+        // На сегодня — строго сегодняшнее (не просроченное)
         h += `<div class="section-title">На сегодня</div>`;
-        if (!d.tasks.length && !d.events.length) {
+        if (!todayTasks.length && !d.events.length) {
           h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Всё спокойно. Свободный день ✦</div></div>`;
         } else {
           h += `<div class="card">`;
-          d.tasks.forEach((t) => {
+          todayTasks.forEach((t) => {
             const due = fmtDue(t.due_at);
-            h += `<div class="agenda-item"><div class="dot ${t.overdue ? "strong" : ""}"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
           });
           d.events.forEach((e) => {
-            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · ${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · сегодня ${tOnly(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -631,40 +644,50 @@
     window.saveSupEdit = async (id) => { const b = supBody(); if (!b.name) return tg.showAlert("Введи название"); try { await api(`/supplements/${id}`, { method: "POST", body: JSON.stringify(b) }); } catch (e) { return tg.showAlert("Ошибка"); } openSupplements(); };
     window.delSup = async (id) => { if (!(await ask("Удалить курс?"))) return; try { await api(`/supplements/${id}`, { method: "DELETE" }); } catch (e) {} openSupplements(); };
 
+    const TASK_STAGES = [["open", "Неразобранное"], ["in_progress", "В работе"], ["done", "Выполнено"], ["failed", "Не выполнено"]];
+    const T_ED = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg>';
+    const T_DEL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>';
+    function taskActions(t) {
+      const s = t.status;
+      const del = `<button class="btn ghost" onclick="delTask(${t.id})">${T_DEL}</button>`;
+      const edit = `<button class="btn ghost" onclick="editTask(${t.id})">${T_ED}</button>`;
+      if (s === "done") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button>${del}`;
+      if (s === "failed") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button><button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button>${del}`;
+      if (s === "in_progress") return `<button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button><button class="btn" onclick="setTask(${t.id},'failed')">Не сделано</button>${edit}${del}`;
+      return `<button class="btn primary" onclick="setTask(${t.id},'in_progress')">В работу</button><button class="btn" onclick="setTask(${t.id},'done')">Готово</button><button class="btn" onclick="setTask(${t.id},'failed')">Не сделано</button>${edit}${del}`;
+    }
+    function taskCard(t) {
+      const due = fmtDue(t.due_at);
+      const done = t.status === "done", closed = done || t.status === "failed";
+      const doneTxt = t.done_at ? new Date(t.done_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }) : "";
+      let dueStyle = "";
+      if (!closed && t.due_at) {
+        const ms = new Date(t.due_at).getTime() - Date.now();
+        const c = ms < 3600000 ? ["rgba(229,72,77,.18)", "#ff6b6b"] : ms < 86400000 ? ["rgba(240,171,0,.18)", "#f2b705"] : ["rgba(48,164,108,.18)", "#43c883"];
+        dueStyle = `background:${c[0]};color:${c[1]};border-color:transparent;font-weight:700`;
+      }
+      return `<div class="card item ${done?'done':''}">
+        <div class="top"><div class="name ${done?'done':''}">${esc(t.title)}</div>${t.client && !closed ? `<span class="pill" style="background:var(--fg);color:var(--fg-contrast);border-color:transparent;font-weight:700;flex:none">📁 ${esc(t.client)}</span>` : ""}</div>
+        <div class="meta">
+          ${done && doneTxt ? `<span class="pill">выполнено ${doneTxt}</span>` : (due.txt ? `<span class="pill" style="${dueStyle}">⏱ ${due.txt}</span>` : "")}
+          ${!closed && t.priority ? `<span class="pill strong">важно</span>` : ""}
+          ${closed && t.client ? `<span class="pill">📁 ${esc(t.client)}</span>` : ""}
+        </div>
+        <div class="actions">${taskActions(t)}</div></div>`;
+    }
     async function renderTasks() {
       view.innerHTML =
         `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">Личные</div></div>
-         <div class="chips">
-           <div class="chip ${taskStatus==='active'?'on':''}" onclick="setStatus('active')">Активные</div>
-           <div class="chip ${taskStatus==='done'?'on':''}" onclick="setStatus('done')">Готовые</div>
-           <div class="chip ${taskStatus==='all'?'on':''}" onclick="setStatus('all')">Все</div>
-         </div><div id="tasklist"><div class="loading">Загрузка…</div></div>`;
+         <div class="chips" id="task-stages"></div><div id="tasklist"><div class="loading">Загрузка…</div></div>`;
       try {
-        const { tasks } = await api(`/tasks?scope=${taskScope}&status=${taskStatus}`);
+        const { tasks } = await api(`/tasks?scope=${taskScope}&status=all`);
         tasksCache = tasks;
-        const el = $("tasklist");
-        if (!el) return;
-        if (!tasks.length) { el.innerHTML = emptyBox("Задач нет", "Нажми «+», чтобы добавить."); return; }
-        const ED = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg>';
-        const DEL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>';
-        el.innerHTML = tasks.map((t) => {
-          const due = fmtDue(t.due_at);
-          const done = t.status === "done";
-          const doneTxt = done && t.done_at ? new Date(t.done_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }) : "";
-          return `<div class="card item ${done?'done':''}">
-            <div class="top"><div class="name ${done?'done':''}">${esc(t.title)}</div></div>
-            <div class="meta">
-              ${done && doneTxt ? `<span class="pill">выполнено ${doneTxt}</span>` : (due.txt ? `<span class="pill ${due.over?'strong':''}">${due.txt}</span>` : "")}
-              ${!done && t.priority ? `<span class="pill strong">важно</span>` : ""}
-              ${t.client ? `<span class="pill">${esc(t.client)}</span>` : ""}
-            </div>
-            <div class="actions">
-              ${!done ? `<button class="btn" onclick="setTask(${t.id},'in_progress')">В работу</button><button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button>`
-                : `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button>`}
-              ${!done ? `<button class="btn ghost" onclick="editTask(${t.id})" aria-label="Изменить">${ED}</button>` : ""}
-              <button class="btn ghost" onclick="delTask(${t.id})" aria-label="Удалить">${DEL}</button>
-            </div></div>`;
-        }).join("");
+        const groups = { open: [], in_progress: [], done: [], failed: [] };
+        tasks.forEach((t) => { (groups[t.status] || (groups[t.status] = [])).push(t); });
+        setHTML("task-stages", TASK_STAGES.map(([k, l]) => `<div class="chip ${taskStage===k?'on':''}" onclick="setStage('${k}')">${l} · ${(groups[k]||[]).length}</div>`).join(""));
+        const list = groups[taskStage] || [];
+        const el = $("tasklist"); if (!el) return;
+        el.innerHTML = list.length ? list.map(taskCard).join("") : emptyBox("Пусто", "Нет задач в этом статусе.");
       } catch (e) { setHTML("tasklist", err(e)); }
     }
 
@@ -991,7 +1014,7 @@
 
     /* ---------- Действия по элементам ---------- */
     window.setScope = (s) => { taskScope = s; renderTasks(); };
-    window.setStatus = (s) => { taskStatus = s; renderTasks(); };
+    window.setStage = (s) => { taskStage = s; renderTasks(); };
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
     window.delTask = async (id) => { if (!(await ask("Удалить задачу?"))) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTab(tab); };
     window.delEvent = async (id) => { if (!(await ask("Удалить встречу?"))) return; await api(`/events/${id}`, { method: "DELETE" }); renderTab(tab); };
