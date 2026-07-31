@@ -570,16 +570,18 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return;
     }
 
-    // В режиме ИИ голос = вопрос к ассистенту
+    // Сначала пробуем выполнить команду (задача/встреча/контакт/клиент).
+    // В режиме ИИ не форсируем задачу — вопрос уйдёт в чат; вне режима голос всегда что-то создаёт.
     const state = await db.getState(ctx.from!.id);
-    if (state.step === "ai_mode") {
-      await finish(`🎤 «${escapeHtml(transcript)}»`, HTML);
-      return replyAI(ctx, transcript);
+    const aiMode = state.step === "ai_mode";
+    const action = await tryPerformCommand(env, db, ctx.from!.id, transcript, !aiMode);
+    if (action) {
+      await finish(`🎤 Распознал: «${escapeHtml(transcript)}»\n\n${action}`, HTML);
+      return;
     }
-
-    // Иначе — распознаём команду (задача/встреча/контакт), для голоса всегда что-то создаём
-    const action = await tryPerformCommand(env, db, ctx.from!.id, transcript, true);
-    await finish(`🎤 Распознал: «${escapeHtml(transcript)}»\n\n${action ?? "Готово."}`, HTML);
+    // Не команда — в режиме ИИ отвечаем как в чате
+    await finish(`🎤 «${escapeHtml(transcript)}»`, HTML);
+    if (aiMode) return replyAI(ctx, transcript);
   });
 
   bot.on("message:text", async (ctx) => {
@@ -725,6 +727,12 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       if (["стоп", "stop", "выход", "отмена"].includes(low)) {
         await db.clearState(ctx.from!.id);
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
+        return;
+      }
+      // Сначала пробуем выполнить команду; если это не команда — отвечаем как в чате
+      const action = await tryPerformCommand(env, db, ctx.from!.id, text, false);
+      if (action) {
+        await ctx.reply(action);
         return;
       }
       await replyAI(ctx, text);

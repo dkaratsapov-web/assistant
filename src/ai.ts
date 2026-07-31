@@ -35,8 +35,7 @@ export interface ChatMessage {
 async function complete(
   apiKey: string,
   messages: ChatMessage[],
-  model: string,
-  temperature: number
+  model: string
 ): Promise<string> {
   try {
     const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
@@ -50,7 +49,8 @@ async function complete(
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({ model, max_tokens: 2000, temperature, system, messages: msgs }),
+      // temperature намеренно не передаём: модели Claude 5 его не принимают
+      body: JSON.stringify({ model, max_tokens: 2000, system, messages: msgs }),
     });
 
     const data = (await res.json()) as AnthropicResponse;
@@ -73,7 +73,7 @@ async function complete(
  * добавляется автоматически.
  */
 export function askAIChat(apiKey: string, messages: ChatMessage[], model = DEFAULT_MODEL): Promise<string> {
-  return complete(apiKey, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model, 0.6);
+  return complete(apiKey, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model);
 }
 
 /** Однократный запрос к Claude (обёртка над askAIChat). */
@@ -150,8 +150,7 @@ export async function routeAssistant(
       { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model,
-    0
+    model
   );
   const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "");
   const match = cleaned.match(/\{[\s\S]*\}/);
@@ -178,8 +177,7 @@ export async function parseTaskFromText(
       { role: "system", text: `${TASK_PARSE_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model,
-    0.2
+    model
   );
   // Вырезаем JSON из ответа (на случай code-fence или лишнего текста)
   const match = raw.match(/\{[\s\S]*\}/);
