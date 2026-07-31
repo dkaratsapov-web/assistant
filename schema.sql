@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS clients (
   notes      TEXT DEFAULT '',
   pay_amount TEXT DEFAULT '',   -- сумма оплаты за ведение
   pay_due    TEXT DEFAULT '',   -- дедлайн оплаты (напр. «5 число» или дата)
+  metrika_counter TEXT DEFAULT '', -- номер счётчика Яндекс Метрики
+  direct_login    TEXT DEFAULT '', -- логин аккаунта Яндекс Директ
   created_at TEXT NOT NULL
 );
 
