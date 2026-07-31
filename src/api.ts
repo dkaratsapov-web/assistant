@@ -267,9 +267,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .slice(0, 8)
       .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, overdue: new Date(t.due_at!).getTime() < nowMs }));
 
-    const events = (await db.listEvents(uid, startOfLocalDayIso(tz))).slice(0, 5).map((e) => ({
+    const evAll = await db.listEvents(uid, startOfLocalDayIso(tz));
+    const evDay = (e: { starts_at: string }) => Math.floor((new Date(e.starts_at).getTime() + tz * 3600_000) / 86400_000);
+    const mapEv = (e: { id: number; title: string; starts_at: string; location: string }) => ({
       id: e.id, title: e.title, starts_at: e.starts_at, location: e.location,
-    }));
+    });
+    const todayEvents = evAll.filter((e) => evDay(e) === todayLocalDay).slice(0, 5).map(mapEv);
+    const upcomingEvents = evAll.filter((e) => evDay(e) > todayLocalDay).slice(0, 5).map(mapEv);
 
     // Ближайшие дни рождения (14 дней)
     const contacts = await db.listContacts(uid);
@@ -299,7 +303,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     return json({
       tasks: agendaTasks,
-      events,
+      events: todayEvents,
+      upcomingEvents,
       birthdays: upcomingBirthdays,
       counts: {
         personal: active.filter((t) => t.scope === SCOPE_PERSONAL).length,

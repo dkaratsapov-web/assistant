@@ -318,6 +318,13 @@
           });
           h += `</div>`;
         }
+        if (d.upcomingEvents && d.upcomingEvents.length) {
+          h += `<div class="section-title">Ближайшие встречи</div><div class="card">`;
+          d.upcomingEvents.forEach((e) => {
+            h += `<div class="agenda-item"><div class="dot ev"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+          });
+          h += `</div>`;
+        }
         if (d.birthdays.length) {
           h += `<div class="section-title">Скоро дни рождения</div><div class="card">`;
           d.birthdays.forEach((b) => {
