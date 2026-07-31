@@ -402,11 +402,16 @@
         const { clients } = await api("/clients");
         clientsCache = clients;
         const el = $("cllist");
-        if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Добавь клиента в чате бота: /addclient"); return; }
+        if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Нажми «+» или скажи Саре: «добавь клиента …»."); return; }
         el.innerHTML = clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
           return `<div class="card item"><div class="top"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div></div>
-            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">${esc(c.budget)}</span>` : ""}</div></div>`;
+            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">${esc(c.budget)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
+            <div class="actions">
+              <button class="btn" onclick="editClient(${c.id})">Изменить</button>
+              <button class="btn" onclick="toggleClient(${c.id},'${c.status === "active" ? "paused" : "active"}')">${c.status === "active" ? "Пауза" : "Вернуть"}</button>
+              <button class="btn ghost" onclick="delClient(${c.id})">✕</button>
+            </div></div>`;
         }).join("");
       } catch (e) { $("cllist").innerHTML = err(e); }
     }
@@ -576,8 +581,37 @@
       closeSheet(); renderCalendar();
     };
 
-    $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "birthdays") openAddContact(); };
-    function updateFab() { $("fab").style.display = ["tasks", "calendar", "birthdays"].includes(tab) ? "flex" : "none"; }
+    /* Клиенты */
+    function openAddClient() {
+      openSheet(`<h3>Новый клиент</h3>
+        <div class="field"><label>Название</label><input id="f-name" placeholder="Компания / проект"></div>
+        <div class="field"><label>Площадки / услуги</label><input id="f-plat" placeholder="Директ, VK, сайт"></div>
+        <div class="field"><label>Бюджет</label><input id="f-budget" placeholder="напр. 100 000 ₽/мес"></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveClient()">Создать</button></div>`);
+    }
+    window.saveClient = async () => {
+      const name = $("f-name").value.trim(); if (!name) return tg.showAlert("Введи название");
+      await api("/clients", { method: "POST", body: JSON.stringify({ name, platforms: $("f-plat").value, budget: $("f-budget").value }) });
+      closeSheet(); renderClients();
+    };
+    window.editClient = (id) => {
+      const c = clientsCache.find((x) => x.id === id); if (!c) return;
+      openSheet(`<h3>Изменить клиента</h3>
+        <div class="field"><label>Название</label><input id="f-name" value="${esc(c.name)}"></div>
+        <div class="field"><label>Площадки / услуги</label><input id="f-plat" value="${esc(c.platforms||'')}"></div>
+        <div class="field"><label>Бюджет</label><input id="f-budget" value="${esc(c.budget||'')}"></div>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveClientEdit(${id})">Сохранить</button></div>`);
+    };
+    window.saveClientEdit = async (id) => {
+      const name = $("f-name").value.trim(); if (!name) return tg.showAlert("Введи название");
+      await api(`/clients/${id}`, { method: "POST", body: JSON.stringify({ name, platforms: $("f-plat").value, budget: $("f-budget").value }) });
+      closeSheet(); renderClients();
+    };
+    window.toggleClient = async (id, status) => { haptic(); await api(`/clients/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderClients(); };
+    window.delClient = async (id) => { if (!confirm("Удалить клиента?")) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
+
+    $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "birthdays") openAddContact(); else if (tab === "clients") openAddClient(); };
+    function updateFab() { $("fab").style.display = ["tasks", "calendar", "birthdays", "clients"].includes(tab) ? "flex" : "none"; }
 
     /* ---------- Навигация + кнопка «Назад» ---------- */
     function renderTab(t) {

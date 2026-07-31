@@ -24,6 +24,8 @@ interface AnthropicResponse {
 }
 
 export const DEFAULT_MODEL = "claude-sonnet-5";
+// Дешёвая модель для служебных задач (распознавание команд, парсинг) — экономит расход
+export const ROUTER_MODEL = "claude-haiku-4-5-20251001";
 
 /** Роль сообщения в диалоге. */
 export interface ChatMessage {
@@ -31,14 +33,24 @@ export interface ChatMessage {
   text: string;
 }
 
-/** Низкоуровневый вызов Claude (Anthropic Messages API). system-сообщения выносятся отдельно. */
+/**
+ * Низкоуровневый вызов Claude (Anthropic Messages API).
+ * system-сообщения выносятся отдельно; первый (большой статичный) промпт кешируется
+ * (prompt caching) — это резко снижает расход на повторных запросах.
+ */
 async function complete(
   apiKey: string,
   messages: ChatMessage[],
-  model: string
+  model: string,
+  maxTokens = 1500
 ): Promise<string> {
   try {
-    const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
+    const systemMsgs = messages.filter((m) => m.role === "system");
+    const system = systemMsgs.map((m, i) =>
+      i === 0
+        ? { type: "text", text: m.text, cache_control: { type: "ephemeral" } }
+        : { type: "text", text: m.text }
+    );
     const msgs = messages
       .filter((m) => m.role !== "system")
       .map((m) => ({ role: m.role, content: m.text }));
@@ -50,7 +62,7 @@ async function complete(
         "anthropic-version": "2023-06-01",
       },
       // temperature намеренно не передаём: модели Claude 5 его не принимают
-      body: JSON.stringify({ model, max_tokens: 2000, system, messages: msgs }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: msgs }),
     });
 
     const data = (await res.json()) as AnthropicResponse;
@@ -98,12 +110,19 @@ const TASK_PARSE_SYSTEM = `Ты — парсер задач. На вход да�
 
 /** Намерение пользователя, распознанное ассистентом. */
 export interface AssistantIntent {
-  action: "task" | "event" | "contact" | "client_add" | "client_delete" | "none";
+  action:
+    | "task" | "task_done" | "task_delete"
+    | "event" | "event_delete"
+    | "contact"
+    | "client_add" | "client_delete" | "client_edit"
+    | "note_add"
+    | "none";
   title?: string;
   due?: string; // срок задачи словами
   at?: string; // время встречи словами
   scope?: "work" | "personal";
   name?: string; // имя контакта / клиента
+  new_name?: string; // новое имя (переименование клиента)
   birthday?: string; // дата рождения
   location?: string; // место встречи
   platforms?: string; // площадки клиента
@@ -113,14 +132,19 @@ export interface AssistantIntent {
 const ROUTER_SYSTEM = `Ты — маршрутизатор команд ассистента Сары. По сообщению пользователя определи,
 хочет ли он ВЫПОЛНИТЬ действие или просто задать вопрос/попросить текст.
 Верни СТРОГО один JSON-объект без пояснений и markdown:
-{"action":"task|event|contact|client_add|client_delete|none","title":"","due":"","at":"","scope":"work|personal","name":"","birthday":"","location":"","platforms":"","budget":""}
+{"action":"task|task_done|task_delete|event|event_delete|contact|client_add|client_delete|client_edit|note_add|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 Правила:
-- "task" — добавить задачу, напоминание, дело («напомни», «добавь задачу», «нужно сделать»). title = суть без срока, due = срок.
-- "event" — добавить встречу, созвон, событие в календарь («встреча», «созвон», «запланируй»). title = с кем/о чём, at = когда, location = место или "".
+- "task" — добавить задачу/напоминание/дело («напомни», «добавь задачу»). title = суть без срока, due = срок.
+- "task_done" — отметить задачу выполненной («выполнил», «сделал», «задача … готова», «отметь … выполненной»). title = о какой задаче.
+- "task_delete" — удалить задачу («удали задачу …», «убери задачу …»). title = о какой задаче.
+- "event" — добавить встречу/созвон/событие («встреча», «созвон», «запланируй»). title = с кем/о чём, at = когда, location = место или "".
+- "event_delete" — отменить/удалить встречу («отмени встречу …», «удали созвон …»). title = о какой встрече.
 - "contact" — добавить контакт/человека или день рождения («запиши др», «добавь контакт»). name = имя, birthday = дата.
-- "client_add" — добавить клиента/заказчика/проект («добавь клиента», «новый клиент/проект»). name = название, platforms = площадки/услуги или "", budget = бюджет или "".
-- "client_delete" — удалить клиента («удали клиента», «убери клиента»). name = название клиента.
-- "none" — вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ добавление/удаление записи.
+- "client_add" — добавить клиента/заказчика/проект. name = название, platforms = площадки/услуги или "", budget = бюджет или "".
+- "client_delete" — удалить клиента. name = название клиента.
+- "client_edit" — переименовать/изменить клиента («переименуй клиента X в Y», «поменяй бюджет клиента …»). name = текущее название, new_name = новое (если переименование), platforms/budget — если меняются.
+- "note_add" — сохранить заметку/идею («запиши идею», «заметка: …», «запомни, что …»). title = текст заметки.
+- "none" — вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ операция с записями.
 - scope: "personal" для личного (семья, здоровье, быт), иначе "work".
 ВАЖНО про даты: все относительные сроки («сегодня», «завтра», «через час», «в пятницу», «в 13 часов», «в обед»)
 переведи в АБСОЛЮТНЫЙ формат: due и at → "ГГГГ-ММ-ДД ЧЧ:ММ" (если время не названо — только "ГГГГ-ММ-ДД");
@@ -132,8 +156,13 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 "через час позвонить маме" → {"action":"task","title":"Позвонить маме","due":"2026-07-31 17:00","at":"","scope":"personal","name":"","birthday":"","location":""}
 "запиши день рождения Иры 15 марта" → {"action":"contact","title":"","due":"","at":"","scope":"personal","name":"Ира","birthday":"03-15","location":"","platforms":"","budget":""}
 "добавь клиента Ромашка, Директ и VK, бюджет 100000" → {"action":"client_add","title":"","due":"","at":"","scope":"work","name":"Ромашка","birthday":"","location":"","platforms":"Директ, VK","budget":"100000"}
-"удали клиента Ромашка" → {"action":"client_delete","title":"","due":"","at":"","scope":"work","name":"Ромашка","birthday":"","location":"","platforms":"","budget":""}
-"напиши 3 заголовка для Директа" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","birthday":"","location":"","platforms":"","budget":""}
+"удали клиента Ромашка" → {"action":"client_delete","title":"","due":"","at":"","scope":"work","name":"Ромашка","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"переименуй клиента Ромашка в Лютик" → {"action":"client_edit","title":"","due":"","at":"","scope":"work","name":"Ромашка","new_name":"Лютик","birthday":"","location":"","platforms":"","budget":""}
+"я позвонил клиенту, отметь задачу выполненной" → {"action":"task_done","title":"позвонить клиенту","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"удали задачу про отчёт" → {"action":"task_delete","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"отмени встречу с клиентом" → {"action":"event_delete","title":"встреча с клиентом","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"запиши идею: запустить акцию к 8 марта" → {"action":"note_add","title":"запустить акцию к 8 марта","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"напиши 3 заголовка для Директа" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 
 Отвечай ТОЛЬКО одной строкой JSON, без markdown, без \`\`\`, без пояснений.`;
 
@@ -142,15 +171,17 @@ export async function routeAssistant(
   apiKey: string,
   text: string,
   nowStr: string,
-  model = DEFAULT_MODEL
+  model = ROUTER_MODEL
 ): Promise<AssistantIntent | null> {
   const raw = await complete(
     apiKey,
     [
-      { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.` },
+      { role: "system", text: ROUTER_SYSTEM }, // статичный — кешируется
+      { role: "system", text: `Сейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model
+    model,
+    400
   );
   const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "");
   const match = cleaned.match(/\{[\s\S]*\}/);
@@ -169,15 +200,17 @@ export async function parseTaskFromText(
   apiKey: string,
   text: string,
   nowStr: string,
-  model = DEFAULT_MODEL
+  model = ROUTER_MODEL
 ): Promise<ParsedTask | null> {
   const raw = await complete(
     apiKey,
     [
-      { role: "system", text: `${TASK_PARSE_SYSTEM}\nСейчас: ${nowStr}.` },
+      { role: "system", text: TASK_PARSE_SYSTEM }, // статичный — кешируется
+      { role: "system", text: `Сейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model
+    model,
+    300
   );
   // Вырезаем JSON из ответа (на случай code-fence или лишнего текста)
   const match = raw.match(/\{[\s\S]*\}/);

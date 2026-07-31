@@ -157,6 +157,47 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget })) });
   }
 
+  // POST /api/clients — добавить клиента
+  if (path === "/api/clients" && request.method === "POST") {
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string };
+    const name = (body.name ?? "").trim();
+    if (!name) return json({ error: "empty_name" }, 400);
+    const id = await db.addClient(name, (body.platforms ?? "").trim(), (body.budget ?? "").trim());
+    return json({ ok: true, id });
+  }
+
+  // POST /api/clients/{id}/status — пауза/актив
+  const clStatus = path.match(/^\/api\/clients\/(\d+)\/status$/);
+  if (clStatus && request.method === "POST") {
+    const body = (await request.json()) as { status?: string };
+    const status = body.status === "paused" ? "paused" : "active";
+    await db.updateClientStatus(parseInt(clStatus[1], 10), status);
+    return json({ ok: true });
+  }
+
+  // POST /api/clients/{id} — редактировать клиента
+  const clEdit = path.match(/^\/api\/clients\/(\d+)$/);
+  if (clEdit && request.method === "POST") {
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string };
+    const fields: { name?: string; platforms?: string; budget?: string } = {};
+    if (body.name !== undefined) {
+      const n = body.name.trim();
+      if (!n) return json({ error: "empty_name" }, 400);
+      fields.name = n;
+    }
+    if (body.platforms !== undefined) fields.platforms = body.platforms;
+    if (body.budget !== undefined) fields.budget = body.budget;
+    await db.updateClient(parseInt(clEdit[1], 10), fields);
+    return json({ ok: true });
+  }
+
+  // DELETE /api/clients/{id}
+  const clDel = path.match(/^\/api\/clients\/(\d+)$/);
+  if (clDel && request.method === "DELETE") {
+    await db.deleteClient(parseInt(clDel[1], 10));
+    return json({ ok: true });
+  }
+
   // GET /api/ai/history — кеш переписки с Сарой
   if (path === "/api/ai/history" && request.method === "GET") {
     const messages = await db.listAiMessages(uid, 60);

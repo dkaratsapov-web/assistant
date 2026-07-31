@@ -3,9 +3,9 @@
  * и создаёт запись в БД. Используется и в Mini App (/api/ai), и в боте (текст/голос),
  * чтобы поведение было одинаковым.
  */
-import { AssistantIntent, DEFAULT_MODEL, parseTaskFromText, routeAssistant } from "./ai";
+import { AssistantIntent, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
-import { Env, SCOPE_PERSONAL, SCOPE_WORK } from "./types";
+import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
 import { formatDue, formatEventTime, nowContext, resolveWhen, tzOffsetOf } from "./utils";
 
 /** Выполняет распознанное намерение. Возвращает подтверждение или null (если это не команда). */
@@ -28,6 +28,24 @@ export async function performIntent(
     return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}`;
   }
 
+  if (intent.action === "task_done") {
+    const q = (intent.title ?? "").trim();
+    if (!q) return null;
+    const task = await db.findTaskByTitle(q);
+    if (!task) return `Не нашла активную задачу «${q}».`;
+    await db.setTaskStatus(task.id, TASK_DONE);
+    return `✅ Задача #${task.id} «${task.title}» отмечена выполненной. Молодец!`;
+  }
+
+  if (intent.action === "task_delete") {
+    const q = (intent.title ?? "").trim();
+    if (!q) return null;
+    const task = await db.findTaskByTitle(q);
+    if (!task) return `Не нашла задачу «${q}».`;
+    await db.deleteTask(task.id);
+    return `🗑 Задача #${task.id} «${task.title}» удалена.`;
+  }
+
   if (intent.action === "event") {
     const title = (intent.title ?? "").trim();
     if (!title) return null;
@@ -40,6 +58,15 @@ export async function performIntent(
     const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "" });
     const loc = intent.location ? `\n📍 ${intent.location}` : "";
     return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}`;
+  }
+
+  if (intent.action === "event_delete") {
+    const q = (intent.title ?? "").trim();
+    if (!q) return null;
+    const ev = await db.findEventByTitle(uid, q);
+    if (!ev) return `Не нашла встречу «${q}».`;
+    await db.deleteEvent(ev.id, uid);
+    return `🗑 Встреча #${ev.id} «${ev.title}» отменена.`;
   }
 
   if (intent.action === "contact") {
@@ -77,6 +104,28 @@ export async function performIntent(
     return `🗑 Клиент удалён: ${client.name} (#${client.id})`;
   }
 
+  if (intent.action === "client_edit") {
+    const name = (intent.name ?? "").trim();
+    if (!name) return null;
+    const client = await db.findClientByName(name);
+    if (!client) return `Не нашла клиента «${name}».`;
+    const fields: { name?: string; platforms?: string; budget?: string } = {};
+    if (intent.new_name && intent.new_name.trim()) fields.name = intent.new_name.trim();
+    if (intent.platforms && intent.platforms.trim()) fields.platforms = intent.platforms.trim();
+    if (intent.budget && intent.budget.trim()) fields.budget = intent.budget.trim();
+    if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи новое название, площадки или бюджет.`;
+    await db.updateClient(client.id, fields);
+    const changes = [fields.name && `название → ${fields.name}`, fields.platforms && `площадки → ${fields.platforms}`, fields.budget && `бюджет → ${fields.budget}`].filter(Boolean).join(", ");
+    return `✏️ Клиент обновлён: ${client.name}\n${changes}`;
+  }
+
+  if (intent.action === "note_add") {
+    const text = (intent.title ?? "").trim();
+    if (!text) return null;
+    const id = await db.addNote(uid, text);
+    return `📝 Заметка сохранена (#${id})\n«${text}»`;
+  }
+
   return null;
 }
 
@@ -96,15 +145,15 @@ export async function tryPerformCommand(
 ): Promise<string | null> {
   if (!env.ANTHROPIC_API_KEY) return null;
   const tz = tzOffsetOf(env);
-  const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
   const now = nowContext(tz);
 
-  const intent = await routeAssistant(env.ANTHROPIC_API_KEY, text, now, model);
+  // Распознавание команды — на дешёвой модели (ROUTER_MODEL по умолчанию)
+  const intent = await routeAssistant(env.ANTHROPIC_API_KEY, text, now);
   let action = await performIntent(intent, db, uid, tz);
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {
-    const p = await parseTaskFromText(env.ANTHROPIC_API_KEY, text, now, model);
+    const p = await parseTaskFromText(env.ANTHROPIC_API_KEY, text, now);
     const title = (p?.title || text).trim();
     if (title) {
       const dueAt = p?.due ? resolveWhen(p.due, tz, 10) : resolveWhen(text, tz, 10);

@@ -95,13 +95,25 @@ export class DB {
     await this.d1.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
   }
 
-  /** Поиск клиента по имени (для удаления голосом). */
+  /** Поиск клиента по имени (для удаления/правки голосом). */
   async findClientByName(name: string): Promise<Client | null> {
     const n = name.trim().toLowerCase();
     return await this.d1
       .prepare("SELECT * FROM clients WHERE lower(name) LIKE ? ORDER BY (lower(name) = ?) DESC, name LIMIT 1")
       .bind(`%${n}%`, n)
       .first<Client>();
+  }
+
+  /** Частичное обновление клиента. */
+  async updateClient(id: number, fields: { name?: string; platforms?: string; budget?: string }): Promise<void> {
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
+    if (fields.platforms !== undefined) { sets.push("platforms = ?"); binds.push(fields.platforms); }
+    if (fields.budget !== undefined) { sets.push("budget = ?"); binds.push(fields.budget); }
+    if (!sets.length) return;
+    binds.push(id);
+    await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
   }
 
   /** Безопасная авто-миграция: добавляет колонку done_at, если базу создавали из старой схемы. */
@@ -150,6 +162,15 @@ export class DB {
 
   async getTask(id: number): Promise<Task | null> {
     return await this.d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>();
+  }
+
+  /** Поиск активной задачи по названию (для «выполни/удали задачу …» голосом). */
+  async findTaskByTitle(title: string): Promise<Task | null> {
+    const n = title.trim().toLowerCase();
+    return await this.d1
+      .prepare("SELECT * FROM tasks WHERE status IN ('open','in_progress') AND lower(title) LIKE ? ORDER BY (lower(title) = ?) DESC, created_at DESC LIMIT 1")
+      .bind(`%${n}%`, n)
+      .first<Task>();
   }
 
   async listTasks(opts: {
@@ -295,6 +316,15 @@ export class DB {
 
   async deleteEvent(id: number, userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  /** Поиск ближайшей встречи по названию (для «отмени встречу …» голосом). */
+  async findEventByTitle(userId: number, title: string): Promise<Event | null> {
+    const n = title.trim().toLowerCase();
+    return await this.d1
+      .prepare("SELECT * FROM events WHERE user_id = ? AND lower(title) LIKE ? ORDER BY starts_at LIMIT 1")
+      .bind(userId, `%${n}%`)
+      .first<Event>();
   }
 
   /** Частичное обновление встречи (редактирование). */
