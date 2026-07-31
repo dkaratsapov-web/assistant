@@ -211,6 +211,46 @@ export async function routeAssistant(
   }
 }
 
+export interface Nutrition {
+  title: string;
+  kcal: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
+const NUTRITION_SYSTEM = `Ты — нутрициолог. По описанию съеденного оцени калорийность и БЖУ ВСЕЙ ПОРЦИИ (не на 100 г). \
+Если размер порции не указан — прими обычную бытовую порцию. Ответь СТРОГО одним JSON без пояснений и markdown: \
+{"title":"кратко что съедено","kcal":целое,"protein":целое,"fat":целое,"carbs":целое}. \
+kcal — ккал всей еды; protein/fat/carbs — граммы. Только реалистичные числа. Только JSON.`;
+
+/** Оценивает калории и БЖУ по описанию еды. Возвращает null при ошибке. */
+export async function estimateNutrition(apiKey: string, text: string, model = ROUTER_MODEL): Promise<Nutrition | null> {
+  const raw = await complete(
+    apiKey,
+    [
+      { role: "system", text: NUTRITION_SYSTEM },
+      { role: "user", text },
+    ],
+    model,
+    200
+  );
+  const match = raw.replace(/```json/gi, "").replace(/```/g, "").match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const o = JSON.parse(match[0]);
+    return {
+      title: String(o.title || text).slice(0, 120),
+      kcal: Math.max(0, Math.round(+o.kcal || 0)),
+      protein: Math.max(0, Math.round(+o.protein || 0)),
+      fat: Math.max(0, Math.round(+o.fat || 0)),
+      carbs: Math.max(0, Math.round(+o.carbs || 0)),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Пытается извлечь задачу из произвольного текста (напр. распознанного голоса). */
 export async function parseTaskFromText(
   apiKey: string,

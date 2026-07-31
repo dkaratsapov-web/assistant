@@ -230,6 +230,33 @@ export function startOfLocalDayIso(tzOffset: number): string {
   return new Date(localDayStart).toISOString();
 }
 
+/** ISO начала локального дня со сдвигом на dayOffset дней (0 — сегодня). */
+export function startOfLocalDayOffsetIso(tzOffset: number, dayOffset: number): string {
+  return new Date(new Date(startOfLocalDayIso(tzOffset)).getTime() + dayOffset * 86400_000).toISOString();
+}
+
+/** Разбирает объём воды из текста. Стакан = 250 мл. По умолчанию 250. */
+export function parseWaterMl(text: string): number {
+  const t = text.toLowerCase();
+  let m: RegExpMatchArray | null;
+  if ((m = t.match(/(\d+[.,]?\d*)\s*(?:л|литр)/))) return Math.round(parseFloat(m[1].replace(",", ".")) * 1000);
+  if ((m = t.match(/(\d+)\s*мл/))) return parseInt(m[1], 10);
+  if (/(пол\s*стакан|полстакан|половин)/.test(t)) return 125;
+  if ((m = t.match(/(\d+)\s*(?:стакан|чашк|кружк|бокал|бутыл)/))) return parseInt(m[1], 10) * 250;
+  if (/(бутыл)/.test(t)) return 500;
+  return 250;
+}
+
+/** Если текст — про питьё воды, возвращает объём в мл, иначе null. */
+export function matchWaterMl(text: string): number | null {
+  const t = text.toLowerCase();
+  const drink = /(вып(и|ь)|попил|попью|выпью|дринк)/.test(t);
+  const waterNoun = /(вод[аыуёе]|стакан|\bмл\b|\d+\s*мл|литр|бутыл)/.test(t);
+  if (drink && waterNoun) return parseWaterMl(t);
+  if (/^\+?\s*(вода|воды|стакан)\b/.test(t)) return parseWaterMl(t);
+  return null;
+}
+
 /** Дата/время события человекочитаемо (для чата/дайджеста). */
 export function formatEventTime(iso: string, tzOffset: number): string {
   const local = new Date(new Date(iso).getTime() + tzOffset * 3600_000);

@@ -1,4 +1,4 @@
-import { askAIChat, ChatMessage, DEFAULT_MODEL } from "./ai";
+import { askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutrition } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, metrikaStats } from "./telemost";
@@ -13,7 +13,7 @@ import {
   TASK_IN_PROGRESS,
   TASK_OPEN,
 } from "./types";
-import { localInputToUtc, parseDue, startOfLocalDayIso, tzOffsetOf } from "./utils";
+import { localInputToUtc, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
 
@@ -81,6 +81,60 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
     return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // ---------- Здоровье: питание и вода ----------
+  if (path === "/api/health" && request.method === "GET") {
+    const tzh = tzOffsetOf(env);
+    const start = startOfLocalDayIso(tzh), end = startOfLocalDayOffsetIso(tzh, 1);
+    const entries = await db.listFood(uid, start, end);
+    const kcal = entries.reduce((s, e) => s + e.kcal, 0);
+    const protein = entries.reduce((s, e) => s + e.protein, 0);
+    const fat = entries.reduce((s, e) => s + e.fat, 0);
+    const carbs = entries.reduce((s, e) => s + e.carbs, 0);
+    const water = await db.waterTotal(uid, start, end);
+    const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
+    const waterGoal = parseInt((await db.getSetting(`hwater:${uid}`)) ?? "", 10) || 2000;
+    return json({ kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs }, water: { ml: water, goal: waterGoal }, entries });
+  }
+
+  if (path === "/api/health/food" && request.method === "POST") {
+    const body = (await request.json()) as { title?: string; kcal?: number; protein?: number; fat?: number; carbs?: number };
+    const title = (body.title ?? "").trim();
+    if (!title) return json({ error: "empty" }, 400);
+    let n = { title, kcal: 0, protein: 0, fat: 0, carbs: 0 };
+    if (body.kcal != null) {
+      n = { title, kcal: Math.max(0, Math.round(+body.kcal || 0)), protein: Math.max(0, Math.round(+(body.protein ?? 0))), fat: Math.max(0, Math.round(+(body.fat ?? 0))), carbs: Math.max(0, Math.round(+(body.carbs ?? 0))) };
+    } else {
+      if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+      const est = await estimateNutrition(env.ANTHROPIC_API_KEY, title);
+      if (!est) return json({ error: "estimate_failed" }, 502);
+      n = est;
+    }
+    const id = await db.addFood(uid, n);
+    return json({ ok: true, id, entry: { id, ...n } });
+  }
+
+  const foodDel = path.match(/^\/api\/health\/food\/(\d+)$/);
+  if (foodDel && request.method === "DELETE") {
+    await db.deleteFood(parseInt(foodDel[1], 10), uid);
+    return json({ ok: true });
+  }
+
+  if (path === "/api/health/water" && request.method === "POST") {
+    const body = (await request.json()) as { ml?: number };
+    const ml = Math.max(1, Math.round(+(body.ml ?? 250) || 250));
+    await db.addWater(uid, ml);
+    const tzh = tzOffsetOf(env);
+    const total = await db.waterTotal(uid, startOfLocalDayIso(tzh), startOfLocalDayOffsetIso(tzh, 1));
+    return json({ ok: true, total });
+  }
+
+  if (path === "/api/health/goals" && request.method === "POST") {
+    const body = (await request.json()) as { kcal?: number; water?: number };
+    if (body.kcal != null) await db.setSetting(`hkcal:${uid}`, String(Math.max(0, Math.round(+body.kcal || 0))));
+    if (body.water != null) await db.setSetting(`hwater:${uid}`, String(Math.max(0, Math.round(+body.water || 0))));
+    return json({ ok: true });
   }
 
   // GET /api/reports/metrika?client=ID&days=N — сводка Метрики по клиенту

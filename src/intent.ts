@@ -3,10 +3,12 @@
  * и создаёт запись в БД. Используется и в Mini App (/api/ai), и в боте (текст/голос),
  * чтобы поведение было одинаковым.
  */
-import { AssistantIntent, parseTaskFromText, routeAssistant } from "./ai";
+import { AssistantIntent, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, nowContext, resolveWhen, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, nowContext, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+
+const FOOD_RE = /(съел\w*|поел\w*|скушал\w*|позавтракал\w*|пообедал\w*|поужинал\w*|перекусил\w*|на завтрак|на обед|на ужин|съесть)/i;
 
 /** Выполняет распознанное намерение. Возвращает подтверждение или null (если это не команда). */
 export async function performIntent(
@@ -186,6 +188,24 @@ export async function tryPerformCommand(
   forceTask = false
 ): Promise<string | null> {
   const tz = tzOffsetOf(env);
+
+  // 0a) Вода — локально, без ИИ
+  const waterMl = matchWaterMl(text);
+  if (waterMl) {
+    await db.addWater(uid, waterMl);
+    const total = await db.waterTotal(uid, startOfLocalDayIso(tz), startOfLocalDayOffsetIso(tz, 1));
+    return `💧 +${waterMl} мл. Сегодня выпито: ${(total / 1000).toFixed(1)} л.`;
+  }
+
+  // 0b) Еда — оценка калорий через ИИ
+  if (FOOD_RE.test(text)) {
+    if (!env.ANTHROPIC_API_KEY) return null;
+    const n = await estimateNutrition(env.ANTHROPIC_API_KEY, text);
+    if (n) {
+      await db.addFood(uid, n);
+      return `🍽 Записала: ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`;
+    }
+  }
 
   // 0) Локальный быстрый разбор — без ИИ (экономия). Частые команды без дат.
   const local = localRoute(text);

@@ -110,6 +110,17 @@ export interface Event {
   created_at: string;
 }
 
+export interface FoodEntry {
+  id: number;
+  user_id: number;
+  ts: string;
+  title: string;
+  kcal: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
 export interface Contact {
   id: number;
   user_id: number;

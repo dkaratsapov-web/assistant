@@ -2,6 +2,7 @@ import {
   Client,
   Contact,
   Event,
+  FoodEntry,
   Note,
   ROLE_OWNER,
   Task,
@@ -537,5 +538,57 @@ export class DB {
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind(key, value)
       .run();
+  }
+
+  // ---------- Здоровье: питание и вода ----------
+  private healthReady = false;
+  private async ensureHealth(): Promise<void> {
+    if (this.healthReady) return;
+    await this.d1
+      .prepare(
+        "CREATE TABLE IF NOT EXISTS food_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, title TEXT NOT NULL, kcal INTEGER DEFAULT 0, protein INTEGER DEFAULT 0, fat INTEGER DEFAULT 0, carbs INTEGER DEFAULT 0)"
+      )
+      .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS water_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, ml INTEGER NOT NULL)")
+      .run();
+    this.healthReady = true;
+  }
+
+  async addFood(userId: number, f: { title: string; kcal: number; protein: number; fat: number; carbs: number }): Promise<number> {
+    await this.ensureHealth();
+    const res = await this.d1
+      .prepare("INSERT INTO food_log (user_id, ts, title, kcal, protein, fat, carbs) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(userId, nowIso(), f.title, f.kcal, f.protein, f.fat, f.carbs)
+      .run();
+    return res.meta.last_row_id as number;
+  }
+
+  async listFood(userId: number, startIso: string, endIso: string): Promise<FoodEntry[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT * FROM food_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+      .bind(userId, startIso, endIso)
+      .all<FoodEntry>();
+    return results ?? [];
+  }
+
+  async deleteFood(id: number, userId: number): Promise<void> {
+    await this.ensureHealth();
+    await this.d1.prepare("DELETE FROM food_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  async addWater(userId: number, ml: number): Promise<void> {
+    await this.ensureHealth();
+    await this.d1.prepare("INSERT INTO water_log (user_id, ts, ml) VALUES (?, ?, ?)").bind(userId, nowIso(), ml).run();
+  }
+
+  async waterTotal(userId: number, startIso: string, endIso: string): Promise<number> {
+    await this.ensureHealth();
+    const r = await this.d1
+      .prepare("SELECT COALESCE(SUM(ml), 0) AS ml FROM water_log WHERE user_id = ? AND ts >= ? AND ts < ?")
+      .bind(userId, startIso, endIso)
+      .first<{ ml: number }>();
+    return r?.ml ?? 0;
   }
 }
