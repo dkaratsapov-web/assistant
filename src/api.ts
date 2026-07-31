@@ -190,7 +190,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/clients
   if (path === "/api/clients" && request.method === "GET") {
     const clients = await db.listClients();
-    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due })) });
+    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due, metrika_counter: c.metrika_counter, direct_login: c.direct_login })) });
   }
 
   // POST /api/clients — добавить клиента
@@ -217,8 +217,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/clients/{id} — редактировать клиента
   const clEdit = path.match(/^\/api\/clients\/(\d+)$/);
   if (clEdit && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string };
-    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string; metrika_counter?: string; direct_login?: string };
+    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string } = {};
     if (body.name !== undefined) {
       const n = body.name.trim();
       if (!n) return json({ error: "empty_name" }, 400);
@@ -228,6 +228,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.budget !== undefined) fields.budget = body.budget;
     if (body.pay_amount !== undefined) fields.payAmount = body.pay_amount;
     if (body.pay_due !== undefined) fields.payDue = body.pay_due;
+    if (body.metrika_counter !== undefined) fields.metrikaCounter = body.metrika_counter;
+    if (body.direct_login !== undefined) fields.directLogin = body.direct_login;
     await db.updateClient(parseInt(clEdit[1], 10), fields);
     return json({ ok: true });
   }

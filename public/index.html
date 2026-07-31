@@ -763,10 +763,12 @@
         <div class="field"><label>Рекламный бюджет</label><input id="f-budget" value="${c ? esc(c.budget||'') : ''}" placeholder="напр. 100 000 ₽/мес"></div>
         <div class="field"><label>Сумма за ведение</label><input id="f-pay" value="${c ? esc(c.pay_amount||'') : ''}" placeholder="напр. 30 000 ₽/мес"></div>
         <div class="field"><label>Дедлайн оплаты</label><input id="f-paydue" value="${c ? esc(c.pay_due||'') : ''}" placeholder="напр. 5 число / 15.08"></div>
+        <div class="field"><label>Счётчик Яндекс Метрики</label><input id="f-metrika" value="${c ? esc(c.metrika_counter||'') : ''}" placeholder="напр. 12345678" inputmode="numeric"></div>
+        <div class="field"><label>Логин Яндекс Директ</label><input id="f-direct" value="${c ? esc(c.direct_login||'') : ''}" placeholder="логин рекламного аккаунта"></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="${saveCall}">Сохранить</button></div>`);
     }
     function clientBody() {
-      return { name: $("f-name").value.trim(), platforms: $("f-plat").value, budget: $("f-budget").value, pay_amount: $("f-pay").value, pay_due: $("f-paydue").value };
+      return { name: $("f-name").value.trim(), platforms: $("f-plat").value, budget: $("f-budget").value, pay_amount: $("f-pay").value, pay_due: $("f-paydue").value, metrika_counter: $("f-metrika").value, direct_login: $("f-direct").value };
     }
     function openAddClient() { clientSheet("Новый клиент", null, "saveClient()"); }
     window.saveClient = async () => {

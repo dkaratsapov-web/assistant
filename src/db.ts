@@ -109,7 +109,7 @@ export class DB {
   /** Частичное обновление клиента. */
   async updateClient(
     id: number,
-    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string }
+    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string }
   ): Promise<void> {
     await this.ensureSchema();
     const sets: string[] = [];
@@ -119,6 +119,8 @@ export class DB {
     if (fields.budget !== undefined) { sets.push("budget = ?"); binds.push(fields.budget); }
     if (fields.payAmount !== undefined) { sets.push("pay_amount = ?"); binds.push(fields.payAmount); }
     if (fields.payDue !== undefined) { sets.push("pay_due = ?"); binds.push(fields.payDue); }
+    if (fields.metrikaCounter !== undefined) { sets.push("metrika_counter = ?"); binds.push(fields.metrikaCounter); }
+    if (fields.directLogin !== undefined) { sets.push("direct_login = ?"); binds.push(fields.directLogin); }
     if (!sets.length) return;
     binds.push(id);
     await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
@@ -132,6 +134,8 @@ export class DB {
       "ALTER TABLE tasks ADD COLUMN done_at TEXT",
       "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN pay_due TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN metrika_counter TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN direct_login TEXT DEFAULT ''",
       "ALTER TABLE contacts ADD COLUMN tags TEXT DEFAULT ''",
     ];
     for (const sql of alters) {

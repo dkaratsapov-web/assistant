@@ -69,6 +69,8 @@ export interface Client {
   notes: string;
   pay_amount: string;
   pay_due: string;
+  metrika_counter: string;
+  direct_login: string;
   created_at: string;
 }
 
