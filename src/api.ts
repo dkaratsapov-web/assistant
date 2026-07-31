@@ -133,6 +133,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const water = await db.waterTotal(uid, start, end);
     const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
     const waterGoal = parseInt((await db.getSetting(`hwater:${uid}`)) ?? "", 10) || 2000;
+    const pGoal = parseInt((await db.getSetting(`hprot:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 4);
+    const fGoal = parseInt((await db.getSetting(`hfat:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 9);
+    const cGoal = parseInt((await db.getSetting(`hcarb:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.4) / 4);
     const notes = await db.listHealthNotes(uid, start, end);
     const weights = await db.listWeights(uid, 14);
 
@@ -150,13 +153,21 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const daysOnWater = Object.values(waterByDay).filter((v) => v >= waterGoal).length;
     const weightDelta = weights.length > 1 ? Math.round((weights[0].kg - weights[weights.length - 1].kg) * 10) / 10 : null;
 
+    // Стрик — сколько дней подряд (заканчивая сегодня) ведётся дневник еды
+    const streakFood = await db.listFood(uid, startOfLocalDayOffsetIso(tzh, -29), end);
+    const daysWithFood = new Set(streakFood.map((e) => dayOf(e.ts)));
+    const todayNum = Math.floor((Date.now() + tzh * 3600_000) / 86400_000);
+    let streak = 0;
+    while (daysWithFood.has(todayNum - streak)) streak++;
+
     return json({
-      kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs },
+      kcal: { consumed: kcal, goal: kcalGoal, protein, fat, carbs, goalP: pGoal, goalF: fGoal, goalC: cGoal },
       water: { ml: water, goal: waterGoal },
       entries,
       notes,
       weight: { latest: weights[0]?.kg ?? null, history: weights },
       week: { avgKcal, avgWater, daysOnWater, weightDelta },
+      streak,
     });
   }
 
@@ -245,10 +256,20 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/health/goals" && request.method === "POST") {
-    const body = (await request.json()) as { kcal?: number; water?: number };
-    if (body.kcal != null) await db.setSetting(`hkcal:${uid}`, String(Math.max(0, Math.round(+body.kcal || 0))));
-    if (body.water != null) await db.setSetting(`hwater:${uid}`, String(Math.max(0, Math.round(+body.water || 0))));
+    const body = (await request.json()) as { kcal?: number; water?: number; protein?: number; fat?: number; carbs?: number };
+    const set = async (k: string, v: number | undefined) => { if (v != null) await db.setSetting(`${k}:${uid}`, String(Math.max(0, Math.round(+v || 0)))); };
+    await set("hkcal", body.kcal);
+    await set("hwater", body.water);
+    await set("hprot", body.protein);
+    await set("hfat", body.fat);
+    await set("hcarb", body.carbs);
     return json({ ok: true });
+  }
+
+  if (path === "/api/health/recent" && request.method === "GET") {
+    const tzh = tzOffsetOf(env);
+    const recent = await db.recentFoods(uid, startOfLocalDayOffsetIso(tzh, -30), 8);
+    return json({ recent: recent.map((e) => ({ title: e.title, kcal: e.kcal, protein: e.protein, fat: e.fat, carbs: e.carbs, meal: e.meal })) });
   }
 
   // GET /api/reports/metrika?client=ID&days=N — сводка Метрики по клиенту

@@ -378,14 +378,29 @@
     }
     window.waterQuick = async (ml) => { haptic(); try { await api("/health/water", { method: "POST", body: JSON.stringify({ ml }) }); } catch (e) {} if (tab === "home") renderHealthCard(); };
     const mealDefault = () => { const hh = new Date().getHours(); return hh >= 5 && hh < 11 ? "breakfast" : hh >= 11 && hh < 16 ? "lunch" : hh >= 16 && hh < 22 ? "dinner" : "snack"; };
-    window.openFoodAdd = () => {
+    let recentFoods = [];
+    window.openFoodAdd = async () => {
       const md = mealDefault();
       const opt = (v, l) => `<option value="${v}" ${v === md ? "selected" : ""}>${l}</option>`;
       openSheet(`<h3>Что съели?</h3>
         <div class="field"><label>Опиши блюдо — калории и БЖУ оценит ИИ</label><input id="f-food" placeholder="напр. тарелка борща с хлебом" autocomplete="off"></div>
         <div class="field"><label>Приём пищи</label><select id="f-meal">${opt("breakfast","🌅 Завтрак")}${opt("lunch","☀️ Обед")}${opt("dinner","🌙 Ужин")}${opt("snack","🍎 Перекус")}</select></div>
+        <div id="food-recent"></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" id="food-save" onclick="saveFood()">Добавить</button></div>`);
       setTimeout(() => { const i = $("f-food"); if (i) i.focus(); }, 150);
+      try {
+        const { recent } = await api("/health/recent");
+        recentFoods = recent || [];
+        const box = $("food-recent");
+        if (box && recentFoods.length) box.innerHTML = `<label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Часто едите — тап, чтобы добавить</label><div class="chips">${recentFoods.map((r, i) => `<div class="chip" onclick="quickFood(${i})">${esc(r.title)} · ${r.kcal}</div>`).join("")}</div>`;
+      } catch (e) {}
+    };
+    window.quickFood = async (i) => {
+      const r = recentFoods[i]; if (!r) return;
+      const meal = $("f-meal") ? $("f-meal").value : r.meal;
+      try { await api("/health/food", { method: "POST", body: JSON.stringify({ title: r.title, kcal: r.kcal, protein: r.protein, fat: r.fat, carbs: r.carbs, meal }) }); }
+      catch (e) { return tg.showAlert("Ошибка"); }
+      closeSheet(); if (tab === "health") renderHealth(); if (tab === "home") renderHealthCard();
     };
     window.saveFood = async () => {
       const title = ($("f-food").value || "").trim(); if (!title) return tg.showAlert("Опиши, что съел");
@@ -410,15 +425,22 @@
         const kc = d.kcal, w = d.water, today = healthOffset === 0;
         const label = healthOffset === 0 ? "Сегодня" : healthOffset === -1 ? "Вчера" : (() => { const dt = new Date(); dt.setDate(dt.getDate()+healthOffset); return dt.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "long" }); })();
         const bar = (pct) => `<div style="height:8px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin-top:5px"><div style="height:100%;width:${Math.min(100,pct)}%;background:var(--fg)"></div></div>`;
-        let h = `<div style="display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px">
+        const streakTxt = d.streak ? `🔥 ${d.streak} ${d.streak % 10 === 1 && d.streak % 100 !== 11 ? "день" : (d.streak % 10 >= 2 && d.streak % 10 <= 4 && (d.streak % 100 < 10 || d.streak % 100 >= 20) ? "дня" : "дней")} подряд` : "";
+        let h = `<div style="display:flex;align-items:center;justify-content:space-between;margin:2px 2px 4px">
             <button class="icon-btn" onclick="healthNav(-1)">‹</button>
             <div style="font-weight:800;letter-spacing:-.02em">${label}</div>
             <button class="icon-btn" onclick="healthNav(1)" ${today ? "disabled style=opacity:.3" : ""}>›</button></div>`;
+        if (today && streakTxt) h += `<div style="text-align:center;margin-bottom:10px;color:var(--muted);font-size:13px">${streakTxt}</div>`;
         // КБЖУ
         const remain = kc.goal - kc.consumed;
+        const mbar = (v, g) => bar(g ? v / g * 100 : 0);
         h += `<div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">Б ${kc.protein} · Ж ${kc.fat} · У ${kc.carbs}</span></div>${bar(kc.goal?kc.consumed/kc.goal*100:0)}
-            <div style="font-size:12px;color:var(--muted);margin-top:5px">${remain >= 0 ? `Осталось ${remain} ккал` : `Перебор ${-remain} ккал`}</div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">${remain >= 0 ? `осталось ${remain}` : `перебор ${-remain}`}</span></div>${bar(kc.goal?kc.consumed/kc.goal*100:0)}
+            <div style="display:flex;gap:10px;margin-top:12px">
+              <div style="flex:1"><div style="font-size:11.5px;color:var(--muted)">Белки ${kc.protein}/${kc.goalP}</div>${mbar(kc.protein,kc.goalP)}</div>
+              <div style="flex:1"><div style="font-size:11.5px;color:var(--muted)">Жиры ${kc.fat}/${kc.goalF}</div>${mbar(kc.fat,kc.goalF)}</div>
+              <div style="flex:1"><div style="font-size:11.5px;color:var(--muted)">Углев. ${kc.carbs}/${kc.goalC}</div>${mbar(kc.carbs,kc.goalC)}</div>
+            </div>
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><b>💧 ${(w.ml/1000).toFixed(1)} / ${(w.goal/1000).toFixed(1)} л</b></div>${bar(w.goal?w.ml/w.goal*100:0)}</div>`;
         if (today) h += `<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(renderHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(renderHealth)">＋ 0.5 л</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
         // Питание по приёмам
@@ -447,9 +469,16 @@
         }
         // Рекомендация ИИ (только сегодня)
         if (today) h += `<div id="advice-box"></div><button class="btn" style="width:100%;margin-top:8px" onclick="getAdvice()">✨ Рекомендация от Сары</button>`;
-        // Вес
+        // Вес + график
         const wk = d.weight || { latest: null, history: [] };
-        h += `<div class="section-title">Вес</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:20px">${wk.latest != null ? wk.latest + " кг" : "—"}</b>${wk.history && wk.history.length > 1 ? `<span style="color:var(--muted);font-size:12px"> (было ${wk.history[1].kg})</span>` : ""}</div><button class="btn" onclick="logWeight()">Записать</button></div></div>`;
+        const wvals = (wk.history || []).map((x) => x.kg).reverse();
+        const spark = (() => {
+          if (wvals.length < 2) return "";
+          const W = 280, H = 40, mn = Math.min(...wvals), mx = Math.max(...wvals), rng = mx - mn || 1;
+          const pts = wvals.map((v, i) => `${(i / (wvals.length - 1) * W).toFixed(1)},${(H - (v - mn) / rng * (H - 6) - 3).toFixed(1)}`).join(" ");
+          return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="40" preserveAspectRatio="none" style="margin-top:8px"><polyline points="${pts}" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+        })();
+        h += `<div class="section-title">Вес</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:20px">${wk.latest != null ? wk.latest + " кг" : "—"}</b>${wk.history && wk.history.length > 1 ? `<span style="color:var(--muted);font-size:12px"> (было ${wk.history[1].kg})</span>` : ""}</div><button class="btn" onclick="logWeight()">Записать</button></div>${spark}</div>`;
         // Заметки
         h += `<div class="section-title">Заметки о самочувствии</div>`;
         h += (d.notes && d.notes.length)
@@ -459,16 +488,21 @@
         // Цели
         h += `<div class="section-title">Цели</div>
           <div class="field"><label>Калории в день</label><input id="g-kcal" type="number" inputmode="numeric" value="${kc.goal}"></div>
-          <div class="field"><label>Вода в день, мл</label><input id="g-water" type="number" inputmode="numeric" value="${w.goal}"></div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Белки, г</label><input id="g-prot" type="number" inputmode="numeric" value="${kc.goalP}"></div>
+            <div class="field" style="flex:1"><label>Жиры, г</label><input id="g-fat" type="number" inputmode="numeric" value="${kc.goalF}"></div>
+            <div class="field" style="flex:1"><label>Углев., г</label><input id="g-carb" type="number" inputmode="numeric" value="${kc.goalC}"></div>
+          </div>
+          <div class="field"><label>Вода в день, мл ${wk.latest ? `<span onclick="$('g-water').value=${Math.round(wk.latest*30)}" style="color:var(--muted);cursor:pointer">· рассчитать по весу</span>` : ""}</label><input id="g-water" type="number" inputmode="numeric" value="${w.goal}"></div>
           <button class="btn" style="width:100%" onclick="saveHealthGoals()">Сохранить цели</button>`;
         view.innerHTML = h;
       } catch (e) { view.innerHTML = err(e); }
     }
     window.delFood = async (id) => { haptic(); try { await api(`/health/food/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); if (tab === "home") renderHealthCard(); };
     window.saveHealthGoals = async () => {
-      const kcal = +$("g-kcal").value || 0, water = +$("g-water").value || 0;
-      try { await api("/health/goals", { method: "POST", body: JSON.stringify({ kcal, water }) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
-      tg.showAlert("Цели сохранены"); if (tab === "home") renderHealthCard();
+      const body = { kcal: +$("g-kcal").value || 0, water: +$("g-water").value || 0, protein: +$("g-prot").value || 0, fat: +$("g-fat").value || 0, carbs: +$("g-carb").value || 0 };
+      try { await api("/health/goals", { method: "POST", body: JSON.stringify(body) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
+      tg.showAlert("Цели сохранены"); if (tab === "health") renderHealth(); if (tab === "home") renderHealthCard();
     };
     window.getAdvice = async () => {
       const box = $("advice-box"); if (box) box.innerHTML = `<div class="card"><div class="loading">Сара думает…</div></div>`;

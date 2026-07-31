@@ -661,6 +661,25 @@ export class DB {
     await this.d1.prepare("DELETE FROM food_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
   }
 
+  /** Частые/недавние блюда (уникальные по названию), для быстрого повтора. */
+  async recentFoods(userId: number, sinceIso: string, limit = 8): Promise<FoodEntry[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT * FROM food_log WHERE user_id = ? AND ts >= ? ORDER BY ts DESC")
+      .bind(userId, sinceIso)
+      .all<FoodEntry>();
+    const seen = new Set<string>();
+    const out: FoodEntry[] = [];
+    for (const e of results ?? []) {
+      const key = e.title.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(e);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   async addWater(userId: number, ml: number): Promise<void> {
     await this.ensureHealth();
     await this.d1.prepare("INSERT INTO water_log (user_id, ts, ml) VALUES (?, ?, ?)").bind(userId, nowIso(), ml).run();
