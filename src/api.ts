@@ -1,4 +1,4 @@
-import { AssistantIntent, askAIChat, ChatMessage, routeAssistant } from "./ai";
+import { AssistantIntent, askAIChat, ChatMessage, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import {
   Env,
@@ -217,8 +217,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     // 1) Определяем: это команда (создать задачу/встречу/контакт) или обычный вопрос?
     let reply: string;
-    const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, nowContext(tz), model);
-    const action = await performIntent(intent, db, uid, tz);
+    const now = nowContext(tz);
+    const intent = await routeAssistant(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, now, model);
+    let action = await performIntent(intent, db, uid, tz);
+
+    // Страховка: явная команда, но роутер не распознал → создаём задачу принудительно
+    if (!action && /\b(добав|запланир|напомн|созда|запиш|поставь|встреч|созвон|перезвон|позвон)/i.test(userText)) {
+      const p = await parseTaskFromText(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, userText, now, model);
+      if (p?.title) {
+        const dueAt = p.due ? resolveWhen(p.due, tz, 10) : null;
+        const scope = p.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
+        const id = await db.addTask({ title: p.title, creatorId: uid, assigneeId: uid, scope, dueAt });
+        const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
+        action = `✅ Добавила задачу #${id}\n«${p.title}»${due}`;
+      }
+    }
+
     if (action) {
       reply = action;
     } else {
