@@ -566,16 +566,17 @@
       activityReturn = from || "";
       openSheet(`<h3>Тренировка / активность</h3>
         <div class="field"><label>Что делал — Сара оценит калории</label><input id="a-title" placeholder="напр. бег 30 минут / силовая" autocomplete="off"></div>
-        <div class="field"><label>или калории вручную</label><input id="a-kcal" type="number" inputmode="numeric" placeholder="ккал (необязательно)"></div>
-        <div class="field"><label>или шаги</label><input id="a-steps" type="number" inputmode="numeric" placeholder="шаги (необязательно)"></div>
+        <div style="display:flex;gap:8px"><div class="field" style="flex:1"><label>Тип</label><select id="a-type"><option value="">— тип —</option><option value="кардио">🏃 Кардио</option><option value="силовая">🏋️ Силовая</option><option value="растяжка">🧘 Растяжка</option><option value="другое">Другое</option></select></div><div class="field" style="flex:1"><label>Длит., мин</label><input id="a-dur" type="number" inputmode="numeric" placeholder="мин"></div></div>
+        <div style="display:flex;gap:8px"><div class="field" style="flex:1"><label>Калории вручную</label><input id="a-kcal" type="number" inputmode="numeric" placeholder="ккал"></div><div class="field" style="flex:1"><label>или шаги</label><input id="a-steps" type="number" inputmode="numeric" placeholder="шаги"></div></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" id="a-save" onclick="saveActivity()">Добавить</button></div>`);
       setTimeout(() => { const i = $("a-title"); if (i) i.focus(); }, 150);
     };
     window.saveActivity = async () => {
       const title = ($("a-title").value || "").trim(), kcal = +$("a-kcal").value || null, steps = +$("a-steps").value || null;
+      const type = $("a-type") ? $("a-type").value : "", duration = +($("a-dur") ? $("a-dur").value : 0) || 0;
       if (!title && !steps) return tg.showAlert("Опиши активность или укажи шаги");
       const btn = $("a-save"); if (btn) { btn.disabled = true; btn.textContent = "Оцениваю…"; }
-      try { await api("/health/activity", { method: "POST", body: JSON.stringify({ title, kcal, steps }) }); }
+      try { await api("/health/activity", { method: "POST", body: JSON.stringify({ title, kcal, steps, type, duration }) }); }
       catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Добавить"; } return tg.showAlert("Ошибка"); }
       closeSheet();
       if (activityReturn === "workouts") openWorkouts();
@@ -583,20 +584,36 @@
       activityReturn = "";
     };
     window.delActivity = async (id) => { haptic(); try { await api(`/health/activity/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); };
+    let recentWk = [];
+    const WK_ICON = { "кардио": "🏃", "силовая": "🏋️", "растяжка": "🧘", "другое": "💪", "": "💪" };
     window.openWorkouts = async () => {
       openSheet(`<h3>🏋️ Мои тренировки</h3><button class="btn primary" style="width:100%;margin-bottom:10px" onclick="openActivity('workouts')">＋ добавить тренировку</button><div id="wk-body"><div class="loading">Загрузка…</div></div>`);
       try {
         const d = await api("/health/workouts?days=30");
+        recentWk = d.recent || [];
+        const goal = d.weekGoal || 3, wc = d.weekCount || 0;
+        const bar = (pct) => `<div style="height:8px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin-top:6px"><div style="height:100%;width:${Math.min(100, pct)}%;background:var(--fg)"></div></div>`;
+        // Цель недели
+        let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Цель недели: ${wc} / ${goal} трен.</b><span style="color:var(--muted);font-size:12px">${d.weekMin || 0} мин · −${d.weekTotal || 0} ккал</span></div>${bar(goal ? wc / goal * 100 : 0)}
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center"><span style="color:var(--muted);font-size:12px">Цель, трен/нед:</span><input id="wk-goal" type="number" inputmode="numeric" value="${goal}" style="width:64px;padding:7px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)"><button class="btn sm" onclick="saveWkGoal()">OK</button></div></div>`;
+        // Частые тренировки
+        if (recentWk.length) h += `<div class="section-title">Частые — тап, чтобы повторить</div><div class="chips">${recentWk.map((r, i) => `<div class="chip" onclick="quickWorkout(${i})">${WK_ICON[r.type] || "💪"} ${esc(r.title)}${r.kcal ? " · " + r.kcal : ""}</div>`).join("")}</div>`;
+        // Статистика по типам
+        const bt = d.byType || {};
+        const btKeys = Object.keys(bt);
+        if (btKeys.length) h += `<div class="meta" style="margin:10px 0 2px">${btKeys.map((k) => `<span class="pill">${WK_ICON[k] || ""} ${k}: ${bt[k]}</span>`).join("")}</div>`;
+        // История
         const groups = {};
         d.entries.forEach((a) => { const k = new Date(a.ts).toLocaleDateString("ru-RU", { day: "2-digit", month: "long" }); (groups[k] = groups[k] || []).push(a); });
-        let h = `<div class="card" style="display:flex;padding:6px;margin-bottom:8px"><div style="flex:1;text-align:center;padding:8px"><div style="font-size:18px;font-weight:800">${d.weekCount}</div><div style="font-size:11px;color:var(--muted)">за неделю</div></div><div style="flex:1;text-align:center;padding:8px;border-left:1px solid var(--border)"><div style="font-size:18px;font-weight:800">−${d.weekTotal}</div><div style="font-size:11px;color:var(--muted)">ккал/нед</div></div><div style="flex:1;text-align:center;padding:8px;border-left:1px solid var(--border)"><div style="font-size:18px;font-weight:800">${d.count}</div><div style="font-size:11px;color:var(--muted)">за 30 дн</div></div></div>`;
-        if (!d.entries.length) h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Пока нет тренировок. Добавь первую 💪</div></div>`;
+        if (!d.entries.length) h += `<div class="card" style="margin-top:8px"><div style="color:var(--muted);text-align:center;padding:6px">Пока нет тренировок. Добавь первую 💪 или скажи «пробежка 30 минут».</div></div>`;
         else Object.keys(groups).forEach((k) => {
-          h += `<div class="section-title">${k}</div><div class="card">` + groups[k].map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">🏋️ ${esc(a.title)}</span><span style="color:var(--muted)">−${a.kcal} <button class="btn ghost" onclick="delWorkout(${a.id})">✕</button></span></div>`).join("") + `</div>`;
+          h += `<div class="section-title">${k}</div><div class="card">` + groups[k].map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">${WK_ICON[a.type] || "💪"} ${esc(a.title)}${a.duration_min ? ` · ${a.duration_min} мин` : ""}</span><span style="color:var(--muted)">−${a.kcal} <button class="btn ghost" onclick="delWorkout(${a.id})">✕</button></span></div>`).join("") + `</div>`;
         });
         setHTML("wk-body", h);
       } catch (e) { setHTML("wk-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
     };
+    window.quickWorkout = async (i) => { const r = recentWk[i]; if (!r) return; try { await api("/health/activity", { method: "POST", body: JSON.stringify({ title: r.title, kcal: r.kcal, type: r.type, duration: r.duration }) }); } catch (e) { return tg.showAlert("Ошибка"); } openWorkouts(); if (tab === "health") renderHealthCard(); };
+    window.saveWkGoal = async () => { const n = +$("wk-goal").value || 0; try { await api("/health/workout-goal", { method: "POST", body: JSON.stringify({ count: n }) }); } catch (e) {} openWorkouts(); };
     window.delWorkout = async (id) => { haptic(); try { await api(`/health/activity/${id}`, { method: "DELETE" }); } catch (e) {} openWorkouts(); if (tab === "health") renderHealthCard(); };
     window.logSleep = () => {
       openSheet(`<h3>Сон</h3><div class="field"><label>Сколько часов спал</label><input id="sl-h" type="number" inputmode="decimal" placeholder="напр. 7.5"></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveSleep()">Сохранить</button></div>`);

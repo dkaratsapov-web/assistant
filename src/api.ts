@@ -361,15 +361,23 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/health/activity" && request.method === "POST") {
-    const b = (await request.json()) as { title?: string; kcal?: number; steps?: number };
+    const b = (await request.json()) as { title?: string; kcal?: number; steps?: number; type?: string; duration?: number };
     let title = (b.title ?? "").trim();
     let kcal = 0;
     if (b.steps != null && +b.steps > 0) { const st = Math.round(+b.steps); title = title || `Шаги: ${st}`; kcal = Math.round(st * 0.04); }
     else if (b.kcal != null) { kcal = Math.max(0, Math.round(+b.kcal || 0)); }
     else if (title && env.ANTHROPIC_API_KEY) { kcal = (await estimateBurn(env.ANTHROPIC_API_KEY, title)) ?? 0; }
     if (!title) return json({ error: "empty" }, 400);
-    const id = await db.addActivity(uid, title, kcal);
+    const type = (b.type ?? "").slice(0, 30);
+    const duration = Math.max(0, Math.round(+(b.duration ?? 0) || 0));
+    const id = await db.addActivity(uid, title, kcal, type, duration);
     return json({ ok: true, id, kcal });
+  }
+
+  if (path === "/api/health/workout-goal" && request.method === "POST") {
+    const b = (await request.json()) as { count?: number };
+    await db.setSetting(`wgoal:${uid}`, String(Math.max(0, Math.min(21, Math.round(+(b.count ?? 0) || 0)))));
+    return json({ ok: true });
   }
   if (path === "/api/health/workouts" && request.method === "GET") {
     const tzh = tzOffsetOf(env);
@@ -380,7 +388,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const total = entries.reduce((s, a) => s + a.kcal, 0);
     const week = await db.listActivity(uid, startOfLocalDayOffsetIso(tzh, -6), end);
     const weekTotal = week.reduce((s, a) => s + a.kcal, 0);
-    return json({ entries: entries.reverse(), total, count: entries.length, weekTotal, weekCount: week.length });
+    const weekMin = week.reduce((s, a) => s + (a.duration_min || 0), 0);
+    const weekGoal = parseInt((await db.getSetting(`wgoal:${uid}`)) ?? "", 10) || 3;
+    const byType: Record<string, number> = {};
+    entries.forEach((a) => { const t = a.type || "другое"; byType[t] = (byType[t] || 0) + 1; });
+    const recent = await db.recentWorkouts(uid, startOfLocalDayOffsetIso(tzh, -60), 6);
+    return json({
+      entries: entries.reverse(), total, count: entries.length,
+      weekTotal, weekCount: week.length, weekMin, weekGoal, byType,
+      recent: recent.map((a) => ({ title: a.title, kcal: a.kcal, type: a.type, duration: a.duration_min })),
+    });
   }
   const actDel = path.match(/^\/api\/health\/activity\/(\d+)$/);
   if (actDel && request.method === "DELETE") {

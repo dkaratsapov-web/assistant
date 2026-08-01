@@ -1,4 +1,5 @@
 import {
+  ActivityRow,
   Client,
   Contact,
   Event,
@@ -711,30 +712,57 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, title TEXT NOT NULL, kcal INTEGER DEFAULT 0)")
       .run();
+    for (const a of ["ALTER TABLE activity_log ADD COLUMN type TEXT DEFAULT ''", "ALTER TABLE activity_log ADD COLUMN duration_min INTEGER DEFAULT 0"]) {
+      try { await this.d1.prepare(a).run(); } catch { /* колонка есть */ }
+    }
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS wellbeing (user_id INTEGER NOT NULL, date TEXT NOT NULL, sleep REAL, mood TEXT, PRIMARY KEY (user_id, date))")
       .run();
     this.healthReady = true;
   }
 
-  async addActivity(userId: number, title: string, kcal: number): Promise<number> {
+  async addActivity(userId: number, title: string, kcal: number, type = "", durationMin = 0): Promise<number> {
     await this.ensureHealth();
-    const res = await this.d1.prepare("INSERT INTO activity_log (user_id, ts, title, kcal) VALUES (?, ?, ?, ?)").bind(userId, nowIso(), title, kcal).run();
+    const res = await this.d1
+      .prepare("INSERT INTO activity_log (user_id, ts, title, kcal, type, duration_min) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(userId, nowIso(), title, kcal, type, durationMin)
+      .run();
     return res.meta.last_row_id as number;
   }
 
-  async listActivity(userId: number, startIso: string, endIso: string): Promise<{ id: number; ts: string; title: string; kcal: number }[]> {
+  async listActivity(userId: number, startIso: string, endIso: string): Promise<ActivityRow[]> {
     await this.ensureHealth();
     const { results } = await this.d1
-      .prepare("SELECT id, ts, title, kcal FROM activity_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+      .prepare("SELECT id, ts, title, kcal, type, duration_min FROM activity_log WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
       .bind(userId, startIso, endIso)
-      .all<{ id: number; ts: string; title: string; kcal: number }>();
+      .all<ActivityRow>();
     return results ?? [];
   }
 
   async deleteActivity(id: number, userId: number): Promise<void> {
     await this.ensureHealth();
     await this.d1.prepare("DELETE FROM activity_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  async lastActivity(userId: number): Promise<ActivityRow | null> {
+    await this.ensureHealth();
+    return await this.d1
+      .prepare("SELECT id, ts, title, kcal, type, duration_min FROM activity_log WHERE user_id = ? ORDER BY ts DESC LIMIT 1")
+      .bind(userId)
+      .first<ActivityRow>();
+  }
+
+  /** Частые/недавние тренировки (уникальные по названию) для быстрого повтора. */
+  async recentWorkouts(userId: number, sinceIso: string, limit = 6): Promise<ActivityRow[]> {
+    await this.ensureHealth();
+    const { results } = await this.d1
+      .prepare("SELECT id, ts, title, kcal, type, duration_min FROM activity_log WHERE user_id = ? AND ts >= ? ORDER BY ts DESC")
+      .bind(userId, sinceIso)
+      .all<ActivityRow>();
+    const seen = new Set<string>();
+    const out: ActivityRow[] = [];
+    for (const a of results ?? []) { const k = a.title.toLowerCase(); if (seen.has(k)) continue; seen.add(k); out.push(a); if (out.length >= limit) break; }
+    return out;
   }
 
   async setWellbeing(userId: number, date: string, fields: { sleep?: number; mood?: string }): Promise<void> {

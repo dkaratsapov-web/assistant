@@ -134,6 +134,15 @@ export interface NotifSettings {
   meals: { on: boolean; breakfast: number; lunch: number; dinner: number };
 }
 
+export interface ActivityRow {
+  id: number;
+  ts: string;
+  title: string;
+  kcal: number;
+  type: string;
+  duration_min: number;
+}
+
 export interface FoodEntry {
   id: number;
   user_id: number;

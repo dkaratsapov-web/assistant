@@ -231,10 +231,32 @@ export async function tryPerformCommand(
     await db.addActivity(uid, "Активность", kc);
     return `🔥 Записала −${kc} ккал (активность).`;
   }
-  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед)/i.test(text) && env.ANTHROPIC_API_KEY) {
+  // Удалить последнюю тренировку
+  if (/(удал|убери|убрать)/i.test(text) && /(последн)/i.test(text) && /(трениров|активност|пробежк|заняти)/i.test(text)) {
+    const last = await db.lastActivity(uid);
+    if (!last) return "Тренировок пока нет.";
+    await db.deleteActivity(last.id, uid);
+    return `🗑 Удалила тренировку: ${last.title} (−${last.kcal} ккал).`;
+  }
+  // Недельная цель по тренировкам
+  if ((am = text.match(/цел\w*\D{0,15}(\d{1,2})\D{0,15}трениров/i)) || (am = text.match(/(\d{1,2})\s*трениров\w*\s*в\s*недел/i))) {
+    const n = parseInt(am[1], 10);
+    if (n >= 1 && n <= 21) { await db.setSetting(`wgoal:${uid}`, String(n)); return `🎯 Цель: ${n} трениров${n === 1 ? "ка" : n < 5 ? "ки" : "ок"} в неделю.`; }
+  }
+  // Тренировка/активность
+  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед|заняти|кардио|силов|растяж|планк)/i.test(text) && env.ANTHROPIC_API_KEY) {
     const kc = (await estimateBurn(env.ANTHROPIC_API_KEY, text)) ?? 0;
-    await db.addActivity(uid, text.slice(0, 80), kc);
-    return `🏋️ Активность записана: ${text.slice(0, 60)}${kc ? ` (~${kc} ккал)` : ""}.`;
+    let dur = 0;
+    let dm;
+    if ((dm = text.match(/(\d{1,3})\s*(?:мин|минут)/i))) dur = parseInt(dm[1], 10);
+    else if ((dm = text.match(/(\d{1,2})\s*(?:час|ч)\b/i))) dur = parseInt(dm[1], 10) * 60;
+    const low = text.toLowerCase();
+    const type = /(бег|пробежк|кардио|велосипед|плаван|ходьб)/.test(low) ? "кардио"
+      : /(силов|качал|\bзал\b|штанг|жим|присед|отжим|турник)/.test(low) ? "силовая"
+      : /(йог|растяж|стретч|планк)/.test(low) ? "растяжка"
+      : "другое";
+    await db.addActivity(uid, text.slice(0, 80), kc, type, dur);
+    return `🏋️ Тренировка записана: ${text.slice(0, 60)}${dur ? ` · ${dur} мин` : ""}${kc ? ` · ~${kc} ккал` : ""}.`;
   }
   if ((am = text.match(/спал\w*\s*(\d{1,2}(?:[.,]\d)?)\s*час/i))) {
     const hrs = parseFloat(am[1].replace(",", "."));
