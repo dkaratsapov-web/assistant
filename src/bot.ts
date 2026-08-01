@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
 import { askAI, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
 import { buildDocx } from "./docx";
+import { buildPptx, Slide } from "./pptx";
 import { buildNutritionSummary } from "./reports";
 import { editSite, revertLastSiteEdit, siteConfigured } from "./site";
 import { tryPerformCommand } from "./intent";
@@ -383,6 +384,14 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return;
     }
     await makeAndSendDoc(ctx, desc);
+  });
+  bot.command("preso", async (ctx) => {
+    const desc = ctx.match.trim();
+    if (!desc) {
+      await ctx.reply("Использование: /preso <тема>\nПример: /preso презентация услуг по настройке Яндекс Директ для клиента");
+      return;
+    }
+    await makeAndSendPresentation(ctx, desc);
   });
   bot.command("stop", async (ctx) => {
     await db.clearState(ctx.from!.id);
@@ -789,6 +798,49 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|\bкп\b|договор|бриф|отч[её]т в ворд)/i;
+  const PRESO_RE = /(презентаци|слайд|pptx|powerpoint|power point|питч[- ]?дек|pitch)/i;
+
+  async function makeAndSendPresentation(ctx: MyContext, request: string) {
+    if (!env.ANTHROPIC_API_KEY) {
+      await ctx.reply("ИИ не настроен. Добавь ANTHROPIC_API_KEY, чтобы формировать презентации.");
+      return;
+    }
+    const thinking = await ctx.reply("📊 Собираю презентацию…");
+    const raw = await askAI(
+      env.ANTHROPIC_API_KEY,
+      `Составь структуру презентации по запросу: "${request}".\n` +
+        `Верни СТРОГО JSON-массив слайдов, без markdown и пояснений. Формат:\n` +
+        `[{"title":"Заголовок титульного слайда","subtitle":"подзаголовок"},` +
+        `{"title":"Заголовок слайда","bullets":["пункт 1","пункт 2","пункт 3"]}]\n` +
+        `Первый элемент — титульный (title + subtitle). Далее 5–9 содержательных слайдов ` +
+        `(title + 3–6 коротких пунктов bullets). Пиши по-русски, по делу, без воды.`,
+      env.ANTHROPIC_MODEL ?? DEFAULT_MODEL
+    );
+    try { await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id); } catch {}
+    let slides: Slide[] = [];
+    try {
+      const json = raw.replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/i, "").trim();
+      const start = json.indexOf("[");
+      const end = json.lastIndexOf("]");
+      const arr = JSON.parse(start >= 0 && end > start ? json.slice(start, end + 1) : json);
+      if (Array.isArray(arr)) {
+        slides = arr
+          .filter((s: any) => s && typeof s.title === "string")
+          .map((s: any) => ({
+            title: String(s.title).slice(0, 120),
+            subtitle: s.subtitle ? String(s.subtitle).slice(0, 160) : undefined,
+            bullets: Array.isArray(s.bullets) ? s.bullets.map((b: any) => String(b).slice(0, 200)).slice(0, 8) : undefined,
+          }));
+      }
+    } catch {}
+    if (!slides.length) { await ctx.reply("Не удалось собрать слайды — переформулируй запрос."); return; }
+    const bytes = buildPptx(slides);
+    const title = slides[0].title || "Презентация";
+    const fname = (title.replace(/[^\wа-яё0-9 -]/gi, "").trim() || "Презентация").slice(0, 50) + ".pptx";
+    await ctx.replyWithDocument(new InputFile(bytes, fname), {
+      caption: `Готово ✅ ${slides.length} слайд(ов). Откроется в PowerPoint / Google Slides / Keynote, редактируется и экспортируется в PDF в один клик.`,
+    });
+  }
 
   async function makeSiteEdit(ctx: MyContext, req: string) {
     if (ctx.from!.id !== ownerId) return;
@@ -930,6 +982,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         if (client) return sendMetrikaReport(ctx, client);
         // клиент не распознан — пусть ответит ИИ (уточнит, по кому отчёт)
       }
+      // Запрос на презентацию → формируем .pptx (редактируется, экспорт в PDF в 1 клик)
+      if (PRESO_RE.test(text)) return makeAndSendPresentation(ctx, text);
       // Запрос на файл/документ → формируем .docx
       if (DOC_RE.test(text)) return makeAndSendDoc(ctx, text);
       // Сначала пробуем выполнить команду; если это не команда — отвечаем как в чате

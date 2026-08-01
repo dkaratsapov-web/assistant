@@ -14,10 +14,10 @@ function crc32(buf: Uint8Array): number {
   return ~c >>> 0;
 }
 
-interface ZipEntry { name: string; data: Uint8Array; }
+export interface ZipEntry { name: string; data: Uint8Array; }
 
-/** Простейший ZIP (STORE) — достаточно для .docx. */
-function zip(entries: ZipEntry[]): Uint8Array {
+/** Простейший ZIP (STORE) — достаточно для .docx/.pptx. */
+export function zip(entries: ZipEntry[]): Uint8Array {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
