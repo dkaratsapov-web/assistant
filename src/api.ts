@@ -371,6 +371,17 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const id = await db.addActivity(uid, title, kcal);
     return json({ ok: true, id, kcal });
   }
+  if (path === "/api/health/workouts" && request.method === "GET") {
+    const tzh = tzOffsetOf(env);
+    const u = new URL(request.url);
+    const days = Math.min(90, Math.max(1, parseInt(u.searchParams.get("days") ?? "30", 10)));
+    const start = startOfLocalDayOffsetIso(tzh, -(days - 1)), end = startOfLocalDayOffsetIso(tzh, 1);
+    const entries = await db.listActivity(uid, start, end);
+    const total = entries.reduce((s, a) => s + a.kcal, 0);
+    const week = await db.listActivity(uid, startOfLocalDayOffsetIso(tzh, -6), end);
+    const weekTotal = week.reduce((s, a) => s + a.kcal, 0);
+    return json({ entries: entries.reverse(), total, count: entries.length, weekTotal, weekCount: week.length });
+  }
   const actDel = path.match(/^\/api\/health\/activity\/(\d+)$/);
   if (actDel && request.method === "DELETE") {
     await db.deleteActivity(parseInt(actDel[1], 10), uid);

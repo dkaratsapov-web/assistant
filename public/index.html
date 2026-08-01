@@ -470,11 +470,11 @@
           h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 2px 4px"><b style="font-size:13px">${label}</b><span style="color:var(--muted);font-size:12px">${sub} ккал</span></div><div class="card">${items.map(foodRow).join("")}</div>`;
         });
         if (!anyMeal) h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
-        // Активность
+        // Тренировки / активность
         const act = d.activity || { entries: [], burned: 0 };
-        h += `<div class="section-title">Активность</div><div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center"><div><b>🔥 −${act.burned} ккал</b> <span style="color:var(--muted);font-size:12px">баланс ${d.balance >= 0 ? "+" : ""}${d.balance} ккал</span></div>${today ? `<button class="btn sm" onclick="openActivity()">＋ активность</button>` : ""}</div>
-            ${act.entries.map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">${esc(a.title)}</span><span style="color:var(--muted)">−${a.kcal}${today ? ` <button class="btn ghost" onclick="delActivity(${a.id})">✕</button>` : ""}</span></div>`).join("")}
+        h += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center"><span>Мои тренировки</span><span onclick="openWorkouts()" style="color:var(--muted);font-size:12px;font-weight:600;cursor:pointer">Все →</span></div><div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center"><div><b>🔥 −${act.burned} ккал</b> <span style="color:var(--muted);font-size:12px">сегодня · баланс ${d.balance >= 0 ? "+" : ""}${d.balance}</span></div>${today ? `<button class="btn sm" onclick="openActivity()">＋ тренировка</button>` : ""}</div>
+            ${act.entries.length ? act.entries.map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">🏋️ ${esc(a.title)}</span><span style="color:var(--muted)">−${a.kcal}${today ? ` <button class="btn ghost" onclick="delActivity(${a.id})">✕</button>` : ""}</span></div>`).join("") : `<div style="color:var(--muted);padding:6px 2px;font-size:12px">Сегодня тренировок нет. Скажи «пробежка 30 минут» или добавь кнопкой.</div>`}
           </div>`;
         // Самочувствие
         const wb = d.wellbeing || {};
@@ -561,8 +561,10 @@
       closeSheet(); if (tab === "health") renderHealth();
     };
     window.delHealthNote = async (id) => { haptic(); try { await api(`/health/note/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); };
-    window.openActivity = () => {
-      openSheet(`<h3>Активность</h3>
+    let activityReturn = "";
+    window.openActivity = (from) => {
+      activityReturn = from || "";
+      openSheet(`<h3>Тренировка / активность</h3>
         <div class="field"><label>Что делал — Сара оценит калории</label><input id="a-title" placeholder="напр. бег 30 минут / силовая" autocomplete="off"></div>
         <div class="field"><label>или калории вручную</label><input id="a-kcal" type="number" inputmode="numeric" placeholder="ккал (необязательно)"></div>
         <div class="field"><label>или шаги</label><input id="a-steps" type="number" inputmode="numeric" placeholder="шаги (необязательно)"></div>
@@ -575,9 +577,27 @@
       const btn = $("a-save"); if (btn) { btn.disabled = true; btn.textContent = "Оцениваю…"; }
       try { await api("/health/activity", { method: "POST", body: JSON.stringify({ title, kcal, steps }) }); }
       catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Добавить"; } return tg.showAlert("Ошибка"); }
-      closeSheet(); if (tab === "health") renderHealth();
+      closeSheet();
+      if (activityReturn === "workouts") openWorkouts();
+      else if (tab === "health") renderHealth();
+      activityReturn = "";
     };
     window.delActivity = async (id) => { haptic(); try { await api(`/health/activity/${id}`, { method: "DELETE" }); } catch (e) {} if (tab === "health") renderHealth(); };
+    window.openWorkouts = async () => {
+      openSheet(`<h3>🏋️ Мои тренировки</h3><button class="btn primary" style="width:100%;margin-bottom:10px" onclick="openActivity('workouts')">＋ добавить тренировку</button><div id="wk-body"><div class="loading">Загрузка…</div></div>`);
+      try {
+        const d = await api("/health/workouts?days=30");
+        const groups = {};
+        d.entries.forEach((a) => { const k = new Date(a.ts).toLocaleDateString("ru-RU", { day: "2-digit", month: "long" }); (groups[k] = groups[k] || []).push(a); });
+        let h = `<div class="card" style="display:flex;padding:6px;margin-bottom:8px"><div style="flex:1;text-align:center;padding:8px"><div style="font-size:18px;font-weight:800">${d.weekCount}</div><div style="font-size:11px;color:var(--muted)">за неделю</div></div><div style="flex:1;text-align:center;padding:8px;border-left:1px solid var(--border)"><div style="font-size:18px;font-weight:800">−${d.weekTotal}</div><div style="font-size:11px;color:var(--muted)">ккал/нед</div></div><div style="flex:1;text-align:center;padding:8px;border-left:1px solid var(--border)"><div style="font-size:18px;font-weight:800">${d.count}</div><div style="font-size:11px;color:var(--muted)">за 30 дн</div></div></div>`;
+        if (!d.entries.length) h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Пока нет тренировок. Добавь первую 💪</div></div>`;
+        else Object.keys(groups).forEach((k) => {
+          h += `<div class="section-title">${k}</div><div class="card">` + groups[k].map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px"><span style="min-width:0">🏋️ ${esc(a.title)}</span><span style="color:var(--muted)">−${a.kcal} <button class="btn ghost" onclick="delWorkout(${a.id})">✕</button></span></div>`).join("") + `</div>`;
+        });
+        setHTML("wk-body", h);
+      } catch (e) { setHTML("wk-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
+    };
+    window.delWorkout = async (id) => { haptic(); try { await api(`/health/activity/${id}`, { method: "DELETE" }); } catch (e) {} openWorkouts(); if (tab === "health") renderHealthCard(); };
     window.logSleep = () => {
       openSheet(`<h3>Сон</h3><div class="field"><label>Сколько часов спал</label><input id="sl-h" type="number" inputmode="decimal" placeholder="напр. 7.5"></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveSleep()">Сохранить</button></div>`);
       setTimeout(() => { const i = $("sl-h"); if (i) i.focus(); }, 150);
