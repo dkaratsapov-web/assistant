@@ -619,18 +619,16 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   // --- Свободный текст: шаги FSM, заметки, кнопки меню, ИИ ---
   // Голосовые сообщения: распознаём речь и создаём задачу (или отвечаем в режиме ИИ)
   // Фото еды → оценка калорий/БЖУ и запись в дневник
-  bot.on("message:photo", async (ctx) => {
+  // Общая обработка фото еды (для сжатых фото и изображений, присланных «как файл»)
+  async function handleFoodPhoto(ctx: MyContext, fileId: string, mediaType: string, caption: string) {
     if (!env.ANTHROPIC_API_KEY) { await ctx.reply("ИИ не настроен."); return; }
     const status = await ctx.reply("📷 Оцениваю блюдо по фото…");
     const done = async (t: string) => { try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, t, HTML); } catch { await ctx.reply(t, HTML); } };
     try {
-      const photos = ctx.message.photo;
-      const largest = photos[photos.length - 1];
-      const file = await ctx.api.getFile(largest.file_id);
+      const file = await ctx.api.getFile(fileId);
       if (!file.file_path) throw new Error("нет файла");
       const buf = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
-      const caption = ctx.message.caption ?? "";
-      const n = await estimateNutritionFromImage(env.ANTHROPIC_API_KEY, bytesToBase64(buf), "image/jpeg", caption);
+      const n = await estimateNutritionFromImage(env.ANTHROPIC_API_KEY, bytesToBase64(buf), mediaType, caption);
       if (!n) { await done("Не смогла распознать еду на фото 🤔 Опиши текстом — например «съел борщ с хлебом»."); return; }
       const tz = Number(env.TZ_OFFSET ?? 3) || 3;
       const meal = mealFromText(caption) || mealByHour(new Date(Date.now() + tz * 3600_000).getUTCHours());
@@ -640,6 +638,24 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     } catch (e) {
       await done("⚠️ Не удалось обработать фото: " + escapeHtml((e as Error).message));
     }
+  }
+
+  bot.on("message:photo", async (ctx) => {
+    const photos = ctx.message.photo;
+    const largest = photos[photos.length - 1];
+    await handleFoodPhoto(ctx, largest.file_id, "image/jpeg", ctx.message.caption ?? "");
+  });
+
+  // Фото еды, присланное «как файл» (без сжатия) → тот же разбор калорий
+  bot.on("message:document", async (ctx) => {
+    const doc = ctx.message.document;
+    const mt = (doc.mime_type || "").toLowerCase();
+    const supported = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!supported.includes(mt)) {
+      await ctx.reply("Это не изображение. Пришли фото еды (можно «как файл»), и я посчитаю калории. Документы пока не разбираю.");
+      return;
+    }
+    await handleFoodPhoto(ctx, doc.file_id, mt, ctx.message.caption ?? "");
   });
 
   bot.on("message:voice", async (ctx) => {
