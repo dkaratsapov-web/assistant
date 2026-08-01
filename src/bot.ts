@@ -2,7 +2,7 @@ import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
 import { askAI, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
 import { buildDocx } from "./docx";
 import { buildNutritionSummary } from "./reports";
-import { editSite, applyLastSiteEdit, siteConfigured } from "./site";
+import { editSite, revertLastSiteEdit, siteConfigured } from "./site";
 import { tryPerformCommand } from "./intent";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { transcribeVoice } from "./speech";
@@ -421,9 +421,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     if (!req) { await ctx.reply("Использование: /site <что изменить на сайте>\nПример: /site поменяй заголовок на главной на «Ремонт за 1 день»"); return; }
     await makeSiteEdit(ctx, req);
   });
-  bot.command("site_apply", async (ctx) => {
+  bot.command("site_undo", async (ctx) => {
     if (ctx.from!.id !== ownerId) return;
-    try { const r = await applyLastSiteEdit(env, db); await ctx.reply(`✅ Опубликовано: PR #${r.prNumber} влит. Авто‑деплой запустится сам.`); }
+    try { const r = await revertLastSiteEdit(env, db); await ctx.reply(`↩️ Откатил правку файла ${escapeHtml(r.file)}. Автодеплой вернёт прежнюю версию.`); }
     catch (e) { await ctx.reply("⚠️ " + (e as Error).message); }
   });
   bot.command("telemost", async (ctx) => {
@@ -796,7 +796,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     const status = await ctx.reply("🛠 Готовлю правку сайта…");
     try {
       const r = await editSite(env, db, req);
-      await ctx.api.editMessageText(ctx.chat!.id, status.message_id, `🛠 Правка готова: <code>${escapeHtml(r.file)}</code>\nПроверь diff: ${r.prUrl}\n\nОпубликовать — нажми Merge на GitHub или напиши «опубликуй сайт».`, HTML);
+      await ctx.api.editMessageText(ctx.chat!.id, status.message_id, `✅ Опубликовал правку в <code>${escapeHtml(r.file)}</code> — автодеплой запущен.\nКоммит: ${r.commitUrl}\n\nЕсли что‑то не так — напиши «откати сайт».`, HTML);
     } catch (e) {
       try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, "⚠️ " + escapeHtml((e as Error).message)); } catch { await ctx.reply("⚠️ " + (e as Error).message); }
     }
@@ -906,9 +906,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
         return;
       }
-      // Публикация правки сайта
-      if (/(опубликуй|примени|влей|замерж|смерж)[^.]{0,20}(сайт|правк|pr)/i.test(text)) {
-        if (ctx.from!.id === ownerId) { try { const r = await applyLastSiteEdit(env, db); await ctx.reply(`✅ Опубликовано: PR #${r.prNumber} влит.`); } catch (e) { await ctx.reply("⚠️ " + (e as Error).message); } return; }
+      // Откат последней правки сайта
+      if (/(откат|отмени|верни)[^.]{0,20}(сайт|правк)/i.test(text)) {
+        if (ctx.from!.id === ownerId) { try { const r = await revertLastSiteEdit(env, db); await ctx.reply(`↩️ Откатил правку ${r.file}.`); } catch (e) { await ctx.reply("⚠️ " + (e as Error).message); } return; }
       }
       // Правка сайта
       if (/(на сайте|на сайт\b|мой сайт|на лендинге|на странице сайта)/i.test(text) && /(помен|измен|добав|обнов|замен|исправ|удали|напиши|сдел|постав|перепиш)/i.test(text)) {

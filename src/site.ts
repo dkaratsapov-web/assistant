@@ -49,7 +49,7 @@ export function siteConfigured(env: Env): boolean {
  * Вносит правку по запросу: выбирает файл, генерирует новое содержимое, создаёт ветку + PR.
  * Возвращает ссылку на PR и путь файла. Ничего не публикует до merge.
  */
-export async function editSite(env: Env, db: DB, request: string): Promise<{ prUrl: string; prNumber: number; file: string }> {
+export async function editSite(env: Env, db: DB, request: string): Promise<{ commitUrl: string; file: string; branch: string }> {
   if (!siteConfigured(env)) throw new Error("Сайт не подключён (нужны GITHUB_TOKEN и SITE_REPO)");
   const repo = env.SITE_REPO!;
   const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
@@ -94,38 +94,29 @@ export async function editSite(env: Env, db: DB, request: string): Promise<{ prU
   let next = raw.replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/i, "").trim();
   if (!next || next === content.trim()) throw new Error("ИИ не внёс изменений — переформулируй запрос");
 
-  // 5) ветка + коммит + PR
-  const branch = `sara/edit-${baseSha.slice(0, 6)}-${Math.abs(hash(request + file)) % 100000}`;
-  try {
-    await gh(env, `/repos/${repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }) });
-  } catch (e) {
-    // ветка могла существовать — продолжаем
-  }
-  await gh(env, `/repos/${repo}/contents/${encodeURIComponent(file).replace(/%2F/g, "/")}`, {
+  // 5) коммит прямо в ветку деплоя → автодеплой опубликует. Старое содержимое сохраняем для отката.
+  const put = await gh(env, `/repos/${repo}/contents/${encodeURIComponent(file).replace(/%2F/g, "/")}`, {
     method: "PUT",
-    body: JSON.stringify({ message: `Sara: правка ${file} — ${request.slice(0, 60)}`, content: b64encode(next), branch, sha: cur.sha }),
+    body: JSON.stringify({ message: `Sara: ${request.slice(0, 64)}`, content: b64encode(next), branch: base, sha: cur.sha }),
   });
-  const pr = await gh(env, `/repos/${repo}/pulls`, {
-    method: "POST",
-    body: JSON.stringify({ title: `Sara: ${request.slice(0, 70)}`, head: branch, base, body: `Автоправка по запросу: «${request}».\nФайл: \`${file}\`.\n\nПроверь diff и нажми Merge, чтобы опубликовать.` }),
-  });
-  await db.setSetting("site_last_pr", String(pr.number));
-  return { prUrl: pr.html_url, prNumber: pr.number, file };
+  await db.setSetting("site_undo", JSON.stringify({ file, content, ts: put.commit?.sha || "" }));
+  return { commitUrl: put.commit?.html_url || `https://github.com/${repo}/commits/${base}`, file, branch: base };
 }
 
-/** Слить последний PR (опубликовать). */
-export async function applyLastSiteEdit(env: Env, db: DB): Promise<{ merged: boolean; prNumber: number }> {
+/** Откатить последнюю правку сайта (вернуть прежнее содержимое файла) — тоже через автодеплой. */
+export async function revertLastSiteEdit(env: Env, db: DB): Promise<{ file: string; commitUrl: string }> {
   if (!siteConfigured(env)) throw new Error("Сайт не подключён");
   const repo = env.SITE_REPO!;
-  const n = parseInt((await db.getSetting("site_last_pr")) ?? "", 10);
-  if (!n) throw new Error("Нет ожидающих правок для публикации");
-  await gh(env, `/repos/${repo}/pulls/${n}/merge`, { method: "PUT", body: JSON.stringify({ merge_method: "squash" }) });
-  await db.setSetting("site_last_pr", "");
-  return { merged: true, prNumber: n };
-}
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
+  const raw = await db.getSetting("site_undo");
+  if (!raw) throw new Error("Нет правок для отката");
+  const undo = JSON.parse(raw) as { file: string; content: string };
+  const repoInfo = await gh(env, `/repos/${repo}`);
+  const base = env.SITE_BRANCH || repoInfo.default_branch || "main";
+  const cur = await gh(env, `/repos/${repo}/contents/${encodeURIComponent(undo.file).replace(/%2F/g, "/")}?ref=${base}`);
+  const put = await gh(env, `/repos/${repo}/contents/${encodeURIComponent(undo.file).replace(/%2F/g, "/")}`, {
+    method: "PUT",
+    body: JSON.stringify({ message: `Sara: откат правки ${undo.file}`, content: b64encode(undo.content), branch: base, sha: cur.sha }),
+  });
+  await db.setSetting("site_undo", "");
+  return { file: undo.file, commitUrl: put.commit?.html_url || `https://github.com/${repo}/commits/${base}` };
 }
