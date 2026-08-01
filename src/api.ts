@@ -577,11 +577,33 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
+  // GET /api/clients/{id} — полная карточка клиента
+  const clGet = path.match(/^\/api\/clients\/(\d+)$/);
+  if (clGet && request.method === "GET") {
+    const id = parseInt(clGet[1], 10);
+    const c = await db.getClient(id);
+    if (!c) return json({ error: "not_found" }, 404);
+    const tasks = await db.listTasks({ clientId: id, statuses: [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED] });
+    const events = await db.listEventsByClient(uid, id, 20);
+    const counts = { open: 0, in_progress: 0, done: 0, failed: 0 } as Record<string, number>;
+    tasks.forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
+    return json({
+      client: {
+        id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget,
+        pay_amount: c.pay_amount, pay_due: c.pay_due, metrika_counter: c.metrika_counter, direct_login: c.direct_login,
+        notes: c.notes, created_at: c.created_at,
+      },
+      counts,
+      tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, due_at: t.due_at, done_at: t.done_at, priority: t.priority })),
+      events: events.map((e) => ({ id: e.id, title: e.title, starts_at: e.starts_at, location: e.location })),
+    });
+  }
+
   // POST /api/clients/{id} — редактировать клиента
   const clEdit = path.match(/^\/api\/clients\/(\d+)$/);
   if (clEdit && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string; metrika_counter?: string; direct_login?: string };
-    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string } = {};
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string; metrika_counter?: string; direct_login?: string; notes?: string };
+    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string; notes?: string } = {};
     if (body.name !== undefined) {
       const n = body.name.trim();
       if (!n) return json({ error: "empty_name" }, 400);
@@ -593,6 +615,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.pay_due !== undefined) fields.payDue = body.pay_due;
     if (body.metrika_counter !== undefined) fields.metrikaCounter = body.metrika_counter;
     if (body.direct_login !== undefined) fields.directLogin = body.direct_login;
+    if (body.notes !== undefined) fields.notes = body.notes;
     await db.updateClient(parseInt(clEdit[1], 10), fields);
     return json({ ok: true });
   }

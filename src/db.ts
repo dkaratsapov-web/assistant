@@ -112,7 +112,7 @@ export class DB {
   /** Частичное обновление клиента. */
   async updateClient(
     id: number,
-    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string }
+    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string; notes?: string }
   ): Promise<void> {
     await this.ensureSchema();
     const sets: string[] = [];
@@ -124,6 +124,7 @@ export class DB {
     if (fields.payDue !== undefined) { sets.push("pay_due = ?"); binds.push(fields.payDue); }
     if (fields.metrikaCounter !== undefined) { sets.push("metrika_counter = ?"); binds.push(fields.metrikaCounter); }
     if (fields.directLogin !== undefined) { sets.push("direct_login = ?"); binds.push(fields.directLogin); }
+    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
     if (!sets.length) return;
     binds.push(id);
     await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
@@ -344,6 +345,16 @@ export class DB {
 
   async deleteEvent(id: number, userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  }
+
+  /** Встречи клиента (последние + будущие). */
+  async listEventsByClient(userId: number, clientId: number, limit = 20): Promise<Event[]> {
+    await this.ensureSchema();
+    const { results } = await this.d1
+      .prepare("SELECT * FROM events WHERE user_id = ? AND client_id = ? ORDER BY starts_at DESC LIMIT ?")
+      .bind(userId, clientId, limit)
+      .all<Event>();
+    return results ?? [];
   }
 
   /** Поиск ближайшей встречи по названию (для «отмени встречу …» голосом). */

@@ -828,7 +828,7 @@
         if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Нажми «+» или скажи Саре: «добавь клиента …»."); return; }
         el.innerHTML = clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
-          return `<div class="card item"><div class="top"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div></div>
+          return `<div class="card item"><div class="top" onclick="openClientCard(${c.id})" style="cursor:pointer"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div><span style="color:var(--muted)">›</span></div>
             <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
             <div class="actions">
               ${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
@@ -1128,6 +1128,33 @@
       await api(`/events/${id}`, { method: "POST", body: JSON.stringify({ title, at, location: $("f-loc").value, notes: $("f-notes").value, client_id: $("f-eclient") && $("f-eclient").value ? +$("f-eclient").value : null }) });
       closeSheet(); renderCalendar();
     };
+
+    /* Полная карточка клиента */
+    window.openClientCard = async (id) => {
+      openSheet(`<h3>Карточка клиента</h3><div id="cc-body"><div class="loading">Загрузка…</div></div>`);
+      try {
+        const d = await api(`/clients/${id}`);
+        const c = d.client, cnt = d.counts || {};
+        const PLAT = { direct: "Директ", google: "Google Ads", tg: "TG Ads", vk: "VK", avito: "Авито", site: "Сайт" };
+        const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
+        const STAGE = { open: "Неразобранное", in_progress: "В работе", done: "Выполнено", failed: "Не выполнено" };
+        let h = `<div style="font-size:20px;font-weight:800;margin-bottom:6px">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div>`;
+        h += `<div class="meta" style="margin-bottom:10px">${plats ? `<span class="pill">${esc(plats)}</span>` : ""}${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.metrika_counter ? `<span class="pill">Метрика ${esc(c.metrika_counter)}</span>` : ""}${c.direct_login ? `<span class="pill">Директ ${esc(c.direct_login)}</span>` : ""}</div>`;
+        h += `<div class="actions" style="margin-top:0">${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}<button class="btn" onclick="editClient(${c.id})">Изменить</button><button class="btn" onclick="toggleClient(${c.id},'${c.status === "active" ? "paused" : "active"}')">${c.status === "active" ? "Пауза" : "Вернуть"}</button></div>`;
+        h += `<div class="section-title">Задачи · ${d.tasks.length}</div>`;
+        h += `<div class="meta" style="margin-bottom:8px"><span class="pill">Неразобр. ${cnt.open || 0}</span><span class="pill">В работе ${cnt.in_progress || 0}</span><span class="pill">Готово ${cnt.done || 0}</span><span class="pill">Не вып. ${cnt.failed || 0}</span></div>`;
+        h += d.tasks.length
+          ? `<div class="card">` + d.tasks.map((t) => { const due = fmtDue(t.due_at); return `<div class="agenda-item"><div class="dot ${t.status === "done" ? "" : "strong"}"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${STAGE[t.status] || t.status}${due.txt ? " · " + due.txt : ""}</div></div></div>`; }).join("") + `</div>`
+          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Задач нет</div></div>`;
+        h += `<div class="section-title">Встречи</div>`;
+        h += d.events.length
+          ? `<div class="card">` + d.events.map((e) => `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">${fmtEv(e.starts_at)}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`).join("") + `</div>`
+          : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Встреч нет</div></div>`;
+        h += `<div class="section-title">Заметки</div><div class="field"><textarea id="cc-notes" placeholder="Заметки по клиенту…">${esc(c.notes || "")}</textarea></div><button class="btn sm" onclick="saveClientNotes(${c.id})">Сохранить заметку</button>`;
+        setHTML("cc-body", h);
+      } catch (e) { setHTML("cc-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
+    };
+    window.saveClientNotes = async (id) => { try { await api(`/clients/${id}`, { method: "POST", body: JSON.stringify({ notes: $("cc-notes").value }) }); tg.showAlert("Заметка сохранена"); } catch (e) { tg.showAlert("Ошибка"); } };
 
     /* Клиенты */
     function clientSheet(title, c, saveCall) {
