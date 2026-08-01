@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --ink:#0f1115; --muted:#667085; --line:#e6e8ec; --soft:#f6f7f9; --green:#1f9d57; --red:#d64545; --blue:#2563eb; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--ink); font-size: 12px; line-height: 1.5; }
+  .page { padding: 34px 40px; }
+  .cover { min-height: 300px; background: linear-gradient(135deg,#0f1115,#26303f); color:#fff; border-radius: 20px; padding: 44px; display:flex; flex-direction:column; justify-content:center; margin-bottom: 8px; }
+  .cover h1 { font-size: 42px; letter-spacing:-.03em; line-height:1.05; }
+  .cover .sub { color:#c9d2dd; font-size:15px; margin-top:16px; max-width:640px; }
+  .cover .tag { display:inline-block; margin-top:24px; background:rgba(255,255,255,.14); padding:8px 15px; border-radius:999px; font-size:12px; width:max-content; }
+  h2 { font-size:19px; letter-spacing:-.02em; margin:30px 0 6px; }
+  h2 .em { color:var(--muted); font-weight:600; font-size:13px; }
+  .lead { color:var(--muted); margin-bottom:12px; max-width:680px; }
+  .feature { break-inside: avoid; border:1px solid var(--line); border-radius:16px; padding:18px 20px; margin:12px 0; }
+  .feature h3 { font-size:15px; margin-bottom:6px; }
+  .feature .what { margin-bottom:10px; }
+  .ex { background:var(--soft); border-left:3px solid var(--blue); border-radius:8px; padding:9px 12px; margin:8px 0; font-style:italic; }
+  .ex b { font-style:normal; }
+  .cmp { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+  .cmp .col { border-radius:10px; padding:10px 12px; }
+  .was { background:#fdf0f0; border:1px solid #f6d5d5; }
+  .now { background:#eefaf2; border:1px solid #cdeed9; }
+  .col .lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; margin-bottom:4px; }
+  .was .lbl { color:var(--red); } .now .lbl { color:var(--green); }
+  ul { margin:4px 0 0 16px; } li { margin:2px 0; }
+  .benefit { margin-top:8px; }
+  .benefit b { color:var(--green); }
+  table { width:100%; border-collapse:collapse; margin-top:8px; font-size:11.5px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; background:#eef1f4; margin:2px 4px 2px 0; }
+  .muted { color:var(--muted); }
+  .kpis { display:flex; gap:10px; margin:14px 0; }
+  .kpi { flex:1; background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:13px; text-align:center; }
+  .kpi .n { font-size:19px; font-weight:800; } .kpi .l { color:var(--muted); font-size:10.5px; margin-top:3px; }
+  .foot { margin-top:26px; color:var(--muted); font-size:10.5px; border-top:1px solid var(--line); padding-top:12px; }
+  .sec-intro { background:var(--soft); border-radius:14px; padding:16px 18px; margin:10px 0 4px; }
+</style></head>
+<body>
+<div class="page">
+
+  <div class="cover">
+    <h1>Assistant Sara</h1>
+    <div class="sub">Персональный AI‑ассистент в Telegram для предпринимателей, маркетологов и самозанятых. Управляет делами, клиентами, документами и здоровьем — голосом, текстом и по фото. Одно окно вместо пяти приложений.</div>
+    <div class="tag">Бот + Mini App · Claude + Yandex SpeechKit · Cloudflare</div>
+  </div>
+
+  <h2>Проблема, которую решаем</h2>
+  <div class="sec-intro">
+    Предприниматель живёт в хаосе вкладок: задачи в одном приложении, клиенты в таблице, отчёты в Метрике, переписка в Telegram, а питание и здоровье — вообще нигде. На переключение и рутину уходит 1–2 часа в день. <b>Sara собирает всё в Telegram и берёт рутину на себя</b> — понимает обычную речь, а не команды.
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="n">5→1</div><div class="l">приложений в одном</div></div>
+    <div class="kpi"><div class="n">−1–2 ч</div><div class="l">рутины в день</div></div>
+    <div class="kpi"><div class="n">голос/фото</div><div class="l">ввод без рук</div></div>
+    <div class="kpi"><div class="n">0 ₽</div><div class="l">частые команды*</div></div>
+  </div>
+  <p class="muted">* частые команды разбираются локально и не тратят ИИ — себестоимость минимальна.</p>
+
+  <h2>Один день: Павел vs Даниил</h2>
+  <p class="lead">Два маркетолога с одинаковой нагрузкой — 8 клиентов. Разница только в том, что у Даниила есть Sara.</p>
+  <div class="feature" style="border:none;padding:0">
+  <div class="cmp">
+    <div class="col was"><div class="lbl">Павел — без ассистента</div>
+      <ul>
+        <li><b>9:00</b> — 40 мин вспоминает, что горит: задачи в заметках и голове, часть забыл</li>
+        <li><b>11:00</b> — вручную собирает отчёт клиенту из Метрики (~40 мин)</li>
+        <li><b>13:00</b> — пропустил дедлайн: напоминания не было, клиент недоволен</li>
+        <li><b>15:00</b> — пишет КП с нуля (~1 час)</li>
+        <li><b>18:00</b> — не помнит, когда платит клиент и кто должен</li>
+        <li><b>19:00</b> — «поел ли я нормально?» — не считал, не до того</li>
+      </ul>
+      <div style="margin-top:6px"><b style="color:var(--red)">Итог дня:</b> ~2 часа на рутину, 2 потерянные задачи, стресс и работа «в бизнесе».</div>
+    </div>
+    <div class="col now"><div class="lbl">Даниил — с Sara</div>
+      <ul>
+        <li><b>9:00</b> — утренний брифинг пришёл сам: что сегодня, что просрочено</li>
+        <li><b>по пути</b> — голосом завёл 3 задачи и встречу с клиентом (10 сек)</li>
+        <li><b>11:00</b> — «отчёт по клиенту Ромашка» → готовый Word за 10 сек</li>
+        <li><b>дедлайны и встречи</b> — Sara напомнила сама, ничего не потеряно</li>
+        <li><b>15:00</b> — «сделай КП по Директу» → документ .docx за 10 сек</li>
+        <li><b>обед</b> — фото тарелки → калории записаны автоматически</li>
+      </ul>
+      <div style="margin-top:6px"><b style="color:var(--green)">Итог дня:</b> Sara закрыла ~70% рутины, +1.5–2 часа освободилось на жизнь и брейншторм идей по проектам.</div>
+    </div>
+  </div>
+  </div>
+  <div class="sec-intro"><b>Суть:</b> Павел тонет в операционке и работает «в бизнесе». Даниил работает «над бизнесом» — Sara держит рутину, а он вкладывает высвободившееся время в стратегию, новые проекты и себя.</div>
+
+  <h2>1. Сара — AI‑ассистент <span class="em">ядро продукта</span></h2>
+  <p class="lead">Не бот с кнопками, а собеседник: понимает естественную речь и голос, отвечает на любые вопросы и сам заводит записи.</p>
+  <div class="feature">
+    <h3>Естественные команды голосом и текстом</h3>
+    <div class="what">Говоришь как человеку — Сара понимает намерение и выполняет.</div>
+    <div class="ex"><b>Пример:</b> «Напомни завтра в 15 позвонить в ДиАвто и добавь встречу с ними в четверг» → появятся задача и встреча, привязанные к клиенту.</div>
+    <div class="cmp">
+      <div class="col was"><div class="lbl">Было</div>Открыть таск‑менеджер, создать задачу, выбрать дату, потом календарь, создать встречу — 5–7 тапов на каждую.</div>
+      <div class="col now"><div class="lbl">Стало</div>Одна фраза голосом на ходу — всё создано и связано.</div>
+    </div>
+    <div class="benefit"><b>Польза:</b> экономит время и не даёт делам «выпадать из головы».</div>
+  </div>
+  <div class="feature">
+    <h3>Отвечает на любой вопрос + генерит контент</h3>
+    <div class="ex"><b>Пример:</b> «Составь контент‑план на неделю для стоматологии» или «Переведи и сделай вежливее это письмо».</div>
+    <div class="benefit"><b>Сравнение:</b> обычные боты‑планировщики так не умеют — это уровень ChatGPT, встроенный прямо в рабочий инструмент.</div>
+  </div>
+
+  <h2>2. Задачи — воронка вместо списка</h2>
+  <div class="feature">
+    <h3>Пайплайн: Неразобранное → В работе → Выполнено / Не выполнено</h3>
+    <div class="what">Задачи движутся по этапам, дедлайны подсвечены цветом, у каждой виден проект/клиент.</div>
+    <div class="ex"><b>Пример:</b> дедлайн через 40 минут горит 🔴 красным, завтрашний — 🟡 жёлтым, на неделе — 🟢 зелёным. Сразу видно, за что хвататься.</div>
+    <div class="cmp">
+      <div class="col was"><div class="lbl">Было</div>Плоский список дел — непонятно, что горит и на какой стадии.</div>
+      <div class="col now"><div class="lbl">Стало</div>Канбан‑воронка с приоритетами и цветовой срочностью.</div>
+    </div>
+    <div class="benefit"><b>Польза:</b> ничего не теряется, видно узкие места по клиентам.</div>
+  </div>
+
+  <h2>3. Календарь и встречи</h2>
+  <div class="feature">
+    <h3>Список и месяц, встречи + задачи, авто‑ссылка на созвон</h3>
+    <div class="ex"><b>Пример:</b> «Добавь встречу с ДиАвто завтра в 15 с Телемостом» → событие с готовой ссылкой на видеозвонок, привязано к клиенту.</div>
+    <div class="benefit"><b>Сравнение:</b> заменяет связку «календарь + отдельно создавать ссылку Zoom/Телемост» — всё за одну фразу.</div>
+  </div>
+
+  <h2>4. Клиенты — мини‑CRM с карточкой</h2>
+  <div class="feature">
+    <h3>Полная карточка: история задач, встречи, деньги, заметки</h3>
+    <div class="what">По каждому клиенту: площадки, рекламный бюджет, сумма и дедлайн оплаты ведения, счётчик Метрики, вся история задач по стадиям, встречи и заметки.</div>
+    <div class="ex"><b>Пример:</b> открыл «ДиАвто69» — видно: 3 задачи выполнено, 1 в работе, ближайший созвон, ведение 17 500 ₽, оплата до 10 числа.</div>
+    <div class="cmp">
+      <div class="col was"><div class="lbl">Было</div>Клиенты в Excel/заметках, история переписки и задач разрознена.</div>
+      <div class="col now"><div class="lbl">Стало</div>Единая карточка — вся история и деньги по клиенту в одном месте.</div>
+    </div>
+    <div class="benefit"><b>Польза:</b> перед звонком за 5 секунд поднимаешь весь контекст; видно, кто сколько должен и когда.</div>
+  </div>
+
+  <h2>5. Отчёты и документы</h2>
+  <div class="feature">
+    <h3>Отчёты Яндекс Метрики + генерация КП/договоров в Word</h3>
+    <div class="ex"><b>Пример:</b> «Отчёт по клиенту Ромашка» → визиты, посетители, отказы, источники + готовый Word‑файл. «Сделай КП по настройке Директа» → документ .docx за 10 секунд.</div>
+    <div class="cmp">
+      <div class="col was"><div class="lbl">Было</div>Зайти в Метрику, выгрузить, оформить вручную; КП писать с нуля — 30–60 минут.</div>
+      <div class="col now"><div class="lbl">Стало</div>Одна команда — готовый отчёт и документ.</div>
+    </div>
+    <div class="benefit"><b>Польза:</b> экономит часы на рутинной отчётности для клиентов.</div>
+  </div>
+
+  <h2>6. Здоровье — крючок для широкой аудитории</h2>
+  <p class="lead">Отдельный сильный модуль, который делает продукт нужным каждый день, а не только по работе.</p>
+  <div class="feature">
+    <h3>Калории по фото и голосом, вода, вес, БЖУ‑цели</h3>
+    <div class="ex"><b>Пример:</b> сфоткал тарелку → Сара распознала блюдо и записала калории и БЖУ в нужный приём пищи. «Выпил стакан воды» → +250 мл.</div>
+    <div class="cmp">
+      <div class="col was"><div class="lbl">Было (MyFitnessPal и т.п.)</div>Искать продукт в базе, вводить граммы вручную, отдельное приложение, англоинтерфейс/платно.</div>
+      <div class="col now"><div class="lbl">Стало</div>Фото или фраза в Telegram — за 3 секунды, по‑русски.</div>
+    </div>
+    <div class="benefit"><b>Польза:</b> порог ведения дневника минимальный → люди реально им пользуются.</div>
+  </div>
+  <div class="feature">
+    <h3>Календарь БАДов/фармы, активность, сон, сводка тренеру</h3>
+    <div class="ex"><b>Пример:</b> курс «Витамин D, 9:00» — напоминание по времени и чек‑лист приёма с адхеренсом за неделю. «Сводка по питанию за вчера» → готовый текст для пересылки тренеру.</div>
+    <div class="benefit"><b>Польза:</b> закрывает нишу трекеров привычек/питания и удерживает пользователя ежедневно (retention).</div>
+  </div>
+
+  <h2>7. Умные напоминания</h2>
+  <div class="feature">
+    <h3>Гибкие уведомления под каждого пользователя</h3>
+    <div class="what">Утренний брифинг в свой час, дедлайны, встречи, дни рождения, вода по интервалу, приёмы пищи, приём БАДов.</div>
+    <div class="benefit"><b>Польза:</b> ассистент сам напоминает о важном — не нужно держать в голове.</div>
+  </div>
+
+  <h2>Экономика и надёжность</h2>
+  <table>
+    <tr><th>Аспект</th><th>Как сделано</th><th>Что это даёт</th></tr>
+    <tr><td>Себестоимость</td><td>частые команды — локально (0 токенов), распознавание на дешёвой модели, кеш промптов</td><td>маржа ~95% на подписчика</td></tr>
+    <tr><td>Инфраструктура</td><td>Cloudflare Workers + D1, планировщик, авто‑миграции</td><td>дёшево масштабируется, без своих серверов</td></tr>
+    <tr><td>Качество</td><td>автотесты интерфейса перед релизами</td><td>меньше багов у пользователя</td></tr>
+  </table>
+
+  <h2>Монетизация — сравнение с рынком</h2>
+  <table>
+    <tr><th>Тариф</th><th>Цена</th><th>Аналоги на рынке</th></tr>
+    <tr><td>Фрилансер</td><td>490–1 490 ₽/мес</td><td>дешевле связки «таск‑бот + AI‑подписка + трекер питания» по отдельности</td></tr>
+    <tr><td>Про</td><td>1 490–3 500 ₽/мес</td><td>уровень amoCRM (499–1 499 ₽/чел) + функции AI и отчётов сверху</td></tr>
+    <tr><td>Команда / whitelabel</td><td>3 000–9 000 ₽/мес · внедрение 50–250 тыс ₽</td><td>для агентств под своим брендом</td></tr>
+  </table>
+  <p class="muted" style="margin-top:8px">Экономика: 100 платящих × 1 490 ₽ ≈ 149 000 ₽/мес при копеечной себестоимости. Модель — гибрид: подписка + внедрение. Оплата: Telegram Stars / ЮKassa.</p>
+
+  <h2>Сильные и слабые стороны</h2>
+  <div class="cmp">
+    <div class="col now"><div class="lbl">Преимущества</div><ul><li>Всё в Telegram, низкий порог входа</li><li>Голос + фото + текст</li><li>Интеграции под РФ (Метрика, Телемост, Директ — в работе)</li><li>Высокая маржа, быстрая разработка</li></ul></div>
+    <div class="col was"><div class="lbl">Ограничения (честно)</div><ul><li>Instagram/TikTok аналитика ограничена (Meta в РФ)</li><li>Чек НПД в «Мой налог» — нужен партнёр ФНС/банк</li><li>Нужны мультиарендность и биллинг для массовой продажи</li><li>Зависимость от API Anthropic/Yandex</li></ul></div>
+  </div>
+
+  <h2>Дорожная карта</h2>
+  <span class="pill">Мультиарендность + биллинг (Stars)</span><span class="pill">Онбординг без участия</span><span class="pill">Отчёты Яндекс Директ</span><span class="pill">Аудит соцсетей: точки роста</span><span class="pill">Финансы лайт</span><span class="pill">Лендинг с тарифами</span>
+
+  <div class="foot">Assistant Sara — презентация для оценки продукта. Продукт активно дорабатывается; рыночные цифры ориентировочные. © 2026</div>
+</div>
+</body></html>
