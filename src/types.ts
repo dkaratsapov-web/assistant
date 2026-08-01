@@ -22,6 +22,10 @@ export interface Env {
   // Интеграция Яндекс Телемост (видеовстречи)
   TELEMOST_CLIENT_ID?: string;     // секрет: Client ID OAuth-приложения
   TELEMOST_CLIENT_SECRET?: string; // секрет: Client Secret
+  // Правки сайта в GitHub
+  GITHUB_TOKEN?: string;   // секрет: PAT с доступом к репозиторию сайта
+  SITE_REPO?: string;      // "owner/name"
+  SITE_BRANCH?: string;    // ветка (по умолчанию — default_branch репо)
 }
 
 export const ROLE_OWNER = "owner";

@@ -2,6 +2,7 @@ import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
 import { askAI, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
 import { buildDocx } from "./docx";
 import { buildNutritionSummary } from "./reports";
+import { editSite, applyLastSiteEdit, siteConfigured } from "./site";
 import { tryPerformCommand } from "./intent";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { transcribeVoice } from "./speech";
@@ -415,6 +416,16 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     if (!client) { await ctx.reply(`Клиент «${name}» не найден.`); return; }
     await sendMetrikaReport(ctx, client);
   });
+  bot.command("site", async (ctx) => {
+    const req = ctx.match.trim();
+    if (!req) { await ctx.reply("Использование: /site <что изменить на сайте>\nПример: /site поменяй заголовок на главной на «Ремонт за 1 день»"); return; }
+    await makeSiteEdit(ctx, req);
+  });
+  bot.command("site_apply", async (ctx) => {
+    if (ctx.from!.id !== ownerId) return;
+    try { const r = await applyLastSiteEdit(env, db); await ctx.reply(`✅ Опубликовано: PR #${r.prNumber} влит. Авто‑деплой запустится сам.`); }
+    catch (e) { await ctx.reply("⚠️ " + (e as Error).message); }
+  });
   bot.command("telemost", async (ctx) => {
     if (ctx.from!.id !== ownerId) return;
     const code = ctx.match.trim();
@@ -778,6 +789,18 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|\bкп\b|договор|бриф|отч[её]т в ворд)/i;
+
+  async function makeSiteEdit(ctx: MyContext, req: string) {
+    if (ctx.from!.id !== ownerId) return;
+    if (!siteConfigured(env)) { await ctx.reply("Правки сайта не настроены. Добавь секреты GITHUB_TOKEN и SITE_REPO (owner/name)."); return; }
+    const status = await ctx.reply("🛠 Готовлю правку сайта…");
+    try {
+      const r = await editSite(env, db, req);
+      await ctx.api.editMessageText(ctx.chat!.id, status.message_id, `🛠 Правка готова: <code>${escapeHtml(r.file)}</code>\nПроверь diff: ${r.prUrl}\n\nОпубликовать — нажми Merge на GitHub или напиши «опубликуй сайт».`, HTML);
+    } catch (e) {
+      try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, "⚠️ " + escapeHtml((e as Error).message)); } catch { await ctx.reply("⚠️ " + (e as Error).message); }
+    }
+  }
   const REPORT_RE = /(отч[её]т|статистик|метрик|посещаемост|трафик|сколько.*(визит|посет))/i;
 
   function metrikaReportText(name: string, r: MetrikaReport, date1: string, date2: string): { tg: string; body: string } {
@@ -882,6 +905,14 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         await db.clearState(ctx.from!.id);
         await ctx.reply("Вышел из режима ИИ. Меню внизу 👇", { reply_markup: mainMenu(origin) });
         return;
+      }
+      // Публикация правки сайта
+      if (/(опубликуй|примени|влей|замерж|смерж)[^.]{0,20}(сайт|правк|pr)/i.test(text)) {
+        if (ctx.from!.id === ownerId) { try { const r = await applyLastSiteEdit(env, db); await ctx.reply(`✅ Опубликовано: PR #${r.prNumber} влит.`); } catch (e) { await ctx.reply("⚠️ " + (e as Error).message); } return; }
+      }
+      // Правка сайта
+      if (/(на сайте|на сайт\b|мой сайт|на лендинге|на странице сайта)/i.test(text) && /(помен|измен|добав|обнов|замен|исправ|удали|напиши|сдел|постав|перепиш)/i.test(text)) {
+        return makeSiteEdit(ctx, text);
       }
       // Сводка по питанию (для тренера)
       if (/(сводк|отч[её]т)[^.]{0,25}(пита|еде|калор)|питани[ея]\s+за\s+(вчера|сегодня)|тренеру/i.test(text)) {
