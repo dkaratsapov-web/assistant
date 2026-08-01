@@ -1,5 +1,5 @@
 import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
-import { askAI, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
+import { askAI, askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
 import { buildDocx } from "./docx";
 import { buildPptx, Slide } from "./pptx";
 import { buildNutritionSummary } from "./reports";
@@ -783,7 +783,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return;
     }
     const thinking = await ctx.reply("💭 Думаю…");
-    const answer = await askAI(env.ANTHROPIC_API_KEY, prompt, env.ANTHROPIC_MODEL ?? DEFAULT_MODEL);
+    const pctx = await db.profileContext(ctx.from!.id);
+    const msgs: ChatMessage[] = pctx ? [{ role: "system", text: pctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
+    const answer = await askAIChat(env.ANTHROPIC_API_KEY, msgs, env.ANTHROPIC_MODEL ?? DEFAULT_MODEL);
     try {
       await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id);
     } catch {}

@@ -6,6 +6,8 @@ import {
   FoodEntry,
   NotifSettings,
   Note,
+  Profile,
+  EMPTY_PROFILE,
   SupplementRow,
   ROLE_OWNER,
   Task,
@@ -559,6 +561,54 @@ export class DB {
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind(key, value)
       .run();
+  }
+
+  // ---------- Личный профиль пользователя ----------
+  async getProfile(userId: number): Promise<Profile> {
+    const raw = await this.getSetting(`profile:${userId}`);
+    if (!raw) return { ...EMPTY_PROFILE };
+    try {
+      return { ...EMPTY_PROFILE, ...(JSON.parse(raw) as Partial<Profile>) };
+    } catch {
+      return { ...EMPTY_PROFILE };
+    }
+  }
+
+  async setProfile(userId: number, p: Profile): Promise<void> {
+    await this.setSetting(`profile:${userId}`, JSON.stringify(p));
+  }
+
+  /**
+   * Компактная сводка профиля (+ актуальный вес) для подстановки в промпты ИИ.
+   * Пустая строка, если профиль не заполнен.
+   */
+  async profileContext(userId: number): Promise<string> {
+    const p = await this.getProfile(userId);
+    const weights = await this.listWeights(userId, 1);
+    const parts: string[] = [];
+    if (p.name) parts.push(`имя: ${p.name}`);
+    const sexRu = p.sex === "m" ? "мужской" : p.sex === "f" ? "женский" : "";
+    if (sexRu) parts.push(`пол: ${sexRu}`);
+    if (p.birth_year > 1900) parts.push(`возраст: ${new Date().getUTCFullYear() - p.birth_year}`);
+    if (p.height_cm) parts.push(`рост: ${p.height_cm} см`);
+    if (weights[0]) parts.push(`текущий вес: ${weights[0].kg} кг`);
+    const actRu: Record<string, string> = { low: "низкая (сидячий образ жизни)", medium: "средняя", high: "высокая (активные тренировки)" };
+    if (actRu[p.activity]) parts.push(`активность: ${actRu[p.activity]}`);
+    const goalRu: Record<string, string> = { lose: "снижение веса", keep: "поддержание формы", gain: "набор массы" };
+    if (goalRu[p.goal]) parts.push(`цель: ${goalRu[p.goal]}`);
+    if (p.target_weight) parts.push(`целевой вес: ${p.target_weight} кг`);
+    if (p.diet) parts.push(`тип питания: ${p.diet}`);
+    if (p.allergies) parts.push(`аллергии/непереносимость (СТРОГО исключать): ${p.allergies}`);
+    if (p.dislikes) parts.push(`не ест / не любит: ${p.dislikes}`);
+    if (p.likes) parts.push(`любит / предпочитает: ${p.likes}`);
+    if (p.conditions) parts.push(`здоровье / ограничения: ${p.conditions}`);
+    if (p.about) parts.push(`о себе: ${p.about}`);
+    if (!parts.length) return "";
+    return (
+      "Личный профиль пользователя — обязательно учитывай при персональных задачах " +
+      "(меню, рацион, тренировки, советы по здоровью и т.п.). Аллергии и непереносимость исключай полностью. " +
+      "Данные: " + parts.join("; ") + "."
+    );
   }
 
   // ---------- БАДы / фарма (курсы приёма) ----------

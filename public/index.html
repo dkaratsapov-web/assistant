@@ -444,6 +444,7 @@
             <div style="font-weight:800;letter-spacing:-.02em">${label}</div>
             <button class="icon-btn" onclick="healthNav(1)" ${today ? "disabled style=opacity:.3" : ""}>›</button></div>`;
         if (today && streakTxt) h += `<div style="text-align:center;margin-bottom:10px;color:var(--muted);font-size:13px">${streakTxt}</div>`;
+        if (today) h += `<button class="btn" style="width:100%;margin-bottom:8px" onclick="openProfile()">👤 Мой профиль — для точных меню и советов</button>`;
         // КБЖУ
         const remain = kc.goal - kc.consumed;
         const mbar = (v, g) => bar(g ? v / g * 100 : 0);
@@ -935,6 +936,67 @@
       };
       try { await api("/notifications", { method: "POST", body: JSON.stringify(body) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
       closeSheet(); tg.showAlert("Настройки уведомлений сохранены");
+    };
+
+    /* ---------- Личный профиль ---------- */
+    window.openProfile = async () => {
+      openSheet(`<h3>Мой профиль</h3><div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Сара опирается на эти данные при подборе меню, тренировок и советов. Всё по желанию.</div><div id="prof-body"><div class="loading">Загрузка…</div></div>`);
+      try {
+        const { profile: p, suggested } = await api("/profile");
+        const opt = (v, cur, label) => `<option value="${v}" ${cur === v ? "selected" : ""}>${label}</option>`;
+        const yr = new Date().getFullYear();
+        let h = `<div class="card" style="padding:12px">
+          <div class="field"><label>Имя</label><input id="p-name" value="${esc(p.name)}" placeholder="как к тебе обращаться"></div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Пол</label><select id="p-sex">${opt("", p.sex, "—")}${opt("m", p.sex, "Мужской")}${opt("f", p.sex, "Женский")}</select></div>
+            <div class="field" style="flex:1"><label>Год рождения</label><input id="p-birth" type="number" inputmode="numeric" min="1900" max="${yr}" value="${p.birth_year || ""}" placeholder="напр. 1990"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Рост, см</label><input id="p-height" type="number" inputmode="numeric" value="${p.height_cm || ""}" placeholder="напр. 180"></div>
+            <div class="field" style="flex:1"><label>Целевой вес, кг</label><input id="p-target" type="number" inputmode="decimal" value="${p.target_weight || ""}" placeholder="напр. 75"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Активность</label><select id="p-activity">${opt("", p.activity, "—")}${opt("low", p.activity, "Низкая")}${opt("medium", p.activity, "Средняя")}${opt("high", p.activity, "Высокая")}</select></div>
+            <div class="field" style="flex:1"><label>Цель</label><select id="p-goal">${opt("", p.goal, "—")}${opt("lose", p.goal, "Снижение веса")}${opt("keep", p.goal, "Поддержание")}${opt("gain", p.goal, "Набор массы")}</select></div>
+          </div>
+        </div>
+        <div class="card" style="padding:12px;margin-top:8px">
+          <div class="field"><label>Тип питания</label><input id="p-diet" value="${esc(p.diet)}" placeholder="обычное, вегетарианец, кето, без свинины…"></div>
+          <div class="field"><label>Аллергии / непереносимость</label><input id="p-allergies" value="${esc(p.allergies)}" placeholder="напр. орехи, лактоза — их Сара исключит"></div>
+          <div class="field"><label>Не ем / не люблю</label><input id="p-dislikes" value="${esc(p.dislikes)}" placeholder="напр. рыба, грибы"></div>
+          <div class="field"><label>Люблю / предпочитаю</label><input id="p-likes" value="${esc(p.likes)}" placeholder="напр. курица, гречка, творог"></div>
+          <div class="field"><label>Здоровье / ограничения</label><input id="p-conditions" value="${esc(p.conditions)}" placeholder="напр. гастрит, повышенный сахар"></div>
+          <div class="field" style="margin-bottom:0"><label>О себе (для Сары)</label><textarea id="p-about" rows="3" placeholder="что ещё важно знать: режим дня, профессия, цели…">${esc(p.about)}</textarea></div>
+        </div>
+        <div id="prof-suggest">${suggestBox(suggested)}</div>
+        <div class="actions" style="margin-top:12px"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveProfile()">Сохранить</button></div>`;
+        setHTML("prof-body", h);
+      } catch (e) { setHTML("prof-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`); }
+    };
+    function suggestBox(s) {
+      if (!s) return `<div style="color:var(--muted);font-size:12px;margin:10px 2px 0">Заполни пол, год рождения, рост и вес — и я рассчитаю рекомендуемую норму калорий.</div>`;
+      return `<div class="card" style="padding:12px;margin-top:8px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div><b>Рекомендуемая норма</b><div style="font-size:12px;color:var(--muted);margin-top:2px">${s.kcal} ккал · Б ${s.protein} · Ж ${s.fat} · У ${s.carbs} г</div></div>
+        <button class="btn sm" onclick='applySuggested(${JSON.stringify(s)})'>Применить как цели</button></div></div>`;
+    }
+    window.applySuggested = async (s) => {
+      try { await api("/health/goals", { method: "POST", body: JSON.stringify({ kcal: s.kcal, protein: s.protein, fat: s.fat, carbs: s.carbs, water: 0 }) }); }
+      catch (e) { return tg.showAlert("Не вышло применить"); }
+      tg.showAlert("Цели по калориям обновлены"); if (tab === "health") renderHealth(); if (tab === "home") renderHealthCard();
+    };
+    window.saveProfile = async () => {
+      const val = (id) => { const el = $(id); return el ? el.value : ""; };
+      const body = {
+        name: val("p-name"), sex: val("p-sex"), birth_year: +val("p-birth") || 0, height_cm: +val("p-height") || 0,
+        target_weight: parseFloat((val("p-target") || "").replace(",", ".")) || 0,
+        activity: val("p-activity"), goal: val("p-goal"),
+        diet: val("p-diet"), allergies: val("p-allergies"), dislikes: val("p-dislikes"),
+        likes: val("p-likes"), conditions: val("p-conditions"), about: val("p-about"),
+      };
+      let res;
+      try { res = await api("/profile", { method: "POST", body: JSON.stringify(body) }); } catch (e) { return tg.showAlert("Ошибка сохранения"); }
+      if (res && res.suggested) { setHTML("prof-suggest", suggestBox(res.suggested)); tg.showAlert("Профиль сохранён. Рассчитала норму калорий — можно применить."); }
+      else { closeSheet(); tg.showAlert("Профиль сохранён"); }
     };
 
     /* ---------- ИИ-чат ---------- */

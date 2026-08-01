@@ -7,6 +7,8 @@ import { buildNutritionSummary } from "./reports";
 import {
   Env,
   NotifSettings,
+  Profile,
+  EMPTY_PROFILE,
   ROLE_OWNER,
   ROLE_PENDING,
   SCOPE_PERSONAL,
@@ -62,6 +64,26 @@ export async function validateInitData(
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+
+/**
+ * Рекомендуемая суточная калорийность и БЖУ по профилю (Миффлин–Сан Жеор).
+ * Возвращает null, если данных недостаточно (нет веса/роста/возраста/пола).
+ */
+function suggestKcal(p: Profile, weightKg: number | null): { kcal: number; protein: number; fat: number; carbs: number } | null {
+  const w = weightKg ?? p.target_weight;
+  const age = p.birth_year > 1900 ? new Date().getUTCFullYear() - p.birth_year : 0;
+  if (!w || !p.height_cm || !age || (p.sex !== "m" && p.sex !== "f")) return null;
+  const bmr = 10 * w + 6.25 * p.height_cm - 5 * age + (p.sex === "m" ? 5 : -161);
+  const factor = p.activity === "high" ? 1.725 : p.activity === "medium" ? 1.45 : 1.2;
+  let kcal = bmr * factor;
+  if (p.goal === "lose") kcal *= 0.85;
+  else if (p.goal === "gain") kcal *= 1.1;
+  kcal = Math.round(kcal / 10) * 10;
+  const protein = Math.round((kcal * 0.3) / 4);
+  const fat = Math.round((kcal * 0.3) / 9);
+  const carbs = Math.round((kcal * 0.4) / 4);
+  return { kcal, protein, fat, carbs };
+}
 
 /** Обрабатывает /api/* с проверкой доступа. */
 export async function handleApi(request: Request, env: Env): Promise<Response> {
@@ -200,6 +222,41 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   // ---------- Здоровье: питание и вода ----------
+  if (path === "/api/profile" && request.method === "GET") {
+    const profile = await db.getProfile(uid);
+    const weights = await db.listWeights(uid, 1);
+    const weight = weights[0]?.kg ?? null;
+    return json({ profile, weight, suggested: suggestKcal(profile, weight) });
+  }
+
+  if (path === "/api/profile" && request.method === "POST") {
+    const body = (await request.json()) as Partial<Profile>;
+    const s = (v: unknown, max = 400) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+    const num = (v: unknown, min: number, max: number) => {
+      const n = Math.round(+(v as number) || 0);
+      return n >= min && n <= max ? n : 0;
+    };
+    const profile: Profile = {
+      ...EMPTY_PROFILE,
+      name: s(body.name, 80),
+      sex: body.sex === "m" || body.sex === "f" ? body.sex : "",
+      birth_year: num(body.birth_year, 1900, new Date().getUTCFullYear()),
+      height_cm: num(body.height_cm, 50, 260),
+      activity: ["low", "medium", "high"].includes(body.activity as string) ? (body.activity as string) : "",
+      goal: ["lose", "keep", "gain"].includes(body.goal as string) ? (body.goal as string) : "",
+      target_weight: num(body.target_weight, 0, 500),
+      diet: s(body.diet, 200),
+      allergies: s(body.allergies, 300),
+      dislikes: s(body.dislikes, 300),
+      likes: s(body.likes, 300),
+      conditions: s(body.conditions, 300),
+      about: s(body.about, 800),
+    };
+    await db.setProfile(uid, profile);
+    const weights = await db.listWeights(uid, 1);
+    return json({ ok: true, suggested: suggestKcal(profile, weights[0]?.kg ?? null) });
+  }
+
   if (path === "/api/health" && request.method === "GET") {
     const tzh = tzOffsetOf(env);
     const u = new URL(request.url);
@@ -306,8 +363,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       (weights[0] ? `Вес: ${weights[0].kg} кг. ` : "") +
       `Съедено: ${entries.map((e) => e.title).join(", ") || "ничего не записано"}. ` +
       `Дай короткую (3-5 пунктов) практичную рекомендацию по питанию и воде на остаток дня. Дружелюбно, по-русски, без воды и дисклеймеров.`;
+    const ctx = await db.profileContext(uid);
+    const msgs: ChatMessage[] = ctx ? [{ role: "system", text: ctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
     try {
-      const advice = await askAIChat(env.ANTHROPIC_API_KEY, [{ role: "user", text: prompt }], DEFAULT_MODEL);
+      const advice = await askAIChat(env.ANTHROPIC_API_KEY, msgs, DEFAULT_MODEL);
       return json({ advice });
     } catch (e) {
       return json({ error: "advice_failed", message: (e as Error).message }, 502);
@@ -425,8 +484,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       `Составь меню на день под цель ${kcalGoal} ккал (белки ${pGoal} г, жиры ${fGoal} г, углеводы ${cGoal} г). ` +
       `Четыре приёма: завтрак, обед, ужин, перекус — для каждого укажи блюда и примерные калории, в конце итог по калориям. ` +
       `Простые доступные продукты, по-русски, компактно, без вступлений и дисклеймеров.`;
+    const ctx = await db.profileContext(uid);
+    const msgs: ChatMessage[] = ctx ? [{ role: "system", text: ctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
     try {
-      const menu = await askAIChat(env.ANTHROPIC_API_KEY, [{ role: "user", text: prompt }], DEFAULT_MODEL);
+      const menu = await askAIChat(env.ANTHROPIC_API_KEY, msgs, DEFAULT_MODEL);
       return json({ menu });
     } catch (e) {
       return json({ error: "menu_failed", message: (e as Error).message }, 502);
@@ -688,7 +749,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     } else {
       // 2) Обычный диалог с историей
       const history = await db.listAiMessages(uid, 20);
+      const ctx = await db.profileContext(uid);
       const msgs: ChatMessage[] = [
+        ...(ctx ? [{ role: "system" as const, text: ctx }] : []),
         ...history
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),

@@ -159,6 +159,28 @@ export interface FoodEntry {
   meal: string; // breakfast | lunch | dinner | snack | ""
 }
 
+/** Личный профиль пользователя — ИИ опирается на него в меню, тренировках, советах и др. */
+export interface Profile {
+  name: string;
+  sex: string;          // "m" | "f" | ""
+  birth_year: number;   // 0 — не указан
+  height_cm: number;    // 0 — не указан
+  activity: string;     // "low" | "medium" | "high" | ""
+  goal: string;         // "lose" | "keep" | "gain" | ""
+  target_weight: number;// 0 — не указан
+  diet: string;         // тип питания (вегетарианец, кето, без свинины…)
+  allergies: string;    // аллергии/непереносимость — ИСКЛЮЧАТЬ
+  dislikes: string;     // не ест / не любит
+  likes: string;        // любит / предпочитает
+  conditions: string;   // здоровье/ограничения (гастрит, диабет…)
+  about: string;        // свободная заметка о себе для ИИ
+}
+
+export const EMPTY_PROFILE: Profile = {
+  name: "", sex: "", birth_year: 0, height_cm: 0, activity: "", goal: "",
+  target_weight: 0, diet: "", allergies: "", dislikes: "", likes: "", conditions: "", about: "",
+};
+
 export interface Contact {
   id: number;
   user_id: number;
