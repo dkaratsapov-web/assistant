@@ -1,0 +1,6 @@
+# Интерфейс Mini App не кешируем: webview Telegram и MAX иначе показывают
+# вчерашнюю версию приложения после деплоя.
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate

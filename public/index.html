@@ -1405,7 +1405,12 @@
           </div>
           <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-bottom:10px">${note ? esc(note) : ""}</div>
           <button class="btn primary" style="width:100%" onclick="submitLoginCode()">Войти</button>
+          <div id="login-build" style="color:var(--muted);font-size:11px;margin-top:10px;opacity:.7"></div>
         </div>`;
+      fetch("/version", { cache: "no-store" })
+        .then((r) => r.text())
+        .then((v) => { const el = $("login-build"); if (el) el.textContent = "сборка " + v; })
+        .catch(() => {});
       const input = $("login-code");
       if (input) {
         input.focus();

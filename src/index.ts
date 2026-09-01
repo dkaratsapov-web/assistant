@@ -11,6 +11,9 @@ import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIs
 
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
+/** Метка сборки: видна на /version — по ней сразу ясно, какая версия сейчас в проде. */
+const BUILD = "2026-09-01 max-login";
+
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
   { command: "app", description: "Открыть приложение (доска задач)" },
@@ -217,10 +220,21 @@ export default {
     if (url.pathname === "/telemost/auth") return handleTelemostAuth(request, env, origin);
     if (url.pathname === "/telemost/callback") return handleTelemostCallback(request, env, origin);
     if (url.pathname === "/health") return new Response("ok");
+    if (url.pathname === "/version") {
+      return new Response(BUILD, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+    }
     if (url.pathname.startsWith("/api/")) return handleApi(request, env);
 
-    // Всё остальное — статика Mini App (index.html и т.д.)
-    return env.ASSETS.fetch(request);
+    // Всё остальное — статика Mini App (index.html и т.д.).
+    // HTML отдаём без кеша: webview Telegram и MAX иначе держат старую версию
+    // приложения и после деплоя показывают вчерашний экран.
+    const asset = await env.ASSETS.fetch(request);
+    if ((asset.headers.get("content-type") ?? "").includes("text/html")) {
+      const headers = new Headers(asset.headers);
+      headers.set("cache-control", "no-cache, no-store, must-revalidate");
+      return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+    }
+    return asset;
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
