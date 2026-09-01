@@ -233,7 +233,17 @@
     const MAX_KEY = "sara-max-session";
     const MAX_SESSION = (() => {
       try {
-        const t = new URLSearchParams(location.search).get("max");
+        // 1) токен в ссылке из чата, 2) стартовый параметр мини-приложения MAX,
+        // 3) сохранённый с прошлого входа
+        const q = new URLSearchParams(location.search);
+        let t = q.get("max") || q.get("startapp") || "";
+        if (!t) {
+          const bridges = [window.WebApp, window.MAX, window.maxWebApp];
+          for (const b of bridges) {
+            const p = b && (b.initDataUnsafe?.start_param || b.startParam);
+            if (p) { t = String(p); break; }
+          }
+        }
         if (t) {
           localStorage.setItem(MAX_KEY, t);
           history.replaceState(null, "", location.pathname); // прячем токен из адресной строки
@@ -1353,8 +1363,15 @@
         $("greeting").textContent = `${hi}${name ? ", " + name : ""}`;
         $("subtitle").textContent = me.role === "owner" ? "Личный ассистент" : me.role === "member" ? "Команда" : "Клиент";
       } catch (e) {
-        $("subtitle").textContent = "Нет доступа";
-        view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
+        const m = String(e.message || e);
+        if (m === "unauthorized") {
+          // Открыли по прямой ссылке (например, кнопкой мини-приложения в MAX) — нужен вход
+          $("subtitle").textContent = "Нужен вход";
+          view.innerHTML = emptyBox("Нужен вход", "Открой чат с Сарой и отправь команду /app — бот пришлёт персональную ссылку. Дальше приложение будет открываться сразу.");
+        } else {
+          $("subtitle").textContent = "Нет доступа";
+          view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
+        }
         return;
       }
       renderTab("home"); updateBack();
