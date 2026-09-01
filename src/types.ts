@@ -21,6 +21,7 @@ export interface Env {
   MAX_WEBHOOK_SECRET?: string; // секрет: проверка заголовка X-Max-Bot-Api-Secret
   MAX_OWNER_ID?: string;       // user_id владельца в MAX (приватный режим)
   MAX_API_URL?: string;        // базовый хост, по умолчанию https://platform-api.max.ru
+  MAX_APP_NAME?: string;       // публичное имя мини-приложения в MAX (кнопка «Открыть» внутри мессенджера)
   // Интеграция Яндекс Телемост (видеовстречи)
   TELEMOST_CLIENT_ID?: string;     // секрет: Client ID OAuth-приложения
   TELEMOST_CLIENT_SECRET?: string; // секрет: Client Secret
@@ -59,11 +60,13 @@ export const PLATFORMS: Record<string, string> = {
 };
 
 export interface User {
-  user_id: number;
+  user_id: number;          // внутренний id: Telegram-id либо MAX_UID_BASE + id в MAX
   username: string | null;
   full_name: string | null;
   role: string;
   created_at: string;
+  channel?: string;         // tg | max
+  ext_id?: number | null;   // настоящий id пользователя в его мессенджере
 }
 
 export interface Client {

@@ -219,11 +219,32 @@
   <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
 
   <script>
-    const tg = window.Telegram.WebApp;
+    // Приложение открывается и в Telegram, и по ссылке из MAX (там объекта Telegram нет) —
+    // подставляем заглушку с теми же методами, чтобы код ниже не расходился на две ветки.
+    const tg = (window.Telegram && window.Telegram.WebApp) || {
+      ready() {}, expand() {}, initData: "", initDataUnsafe: {},
+      setHeaderColor() {}, setBackgroundColor() {}, HapticFeedback: { impactOccurred() {} },
+    };
     tg.ready(); tg.expand();
     // На мобильном Telegram перехватывает вертикальный свайп и мешает вводу в поля — отключаем
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
     const INIT = tg.initData || "";
+    // Токен сессии из MAX: приходит в ссылке (?max=…) и запоминается на устройстве
+    const MAX_KEY = "sara-max-session";
+    const MAX_SESSION = (() => {
+      try {
+        const t = new URLSearchParams(location.search).get("max");
+        if (t) {
+          localStorage.setItem(MAX_KEY, t);
+          history.replaceState(null, "", location.pathname); // прячем токен из адресной строки
+          return t;
+        }
+        return localStorage.getItem(MAX_KEY) || "";
+      } catch (e) {
+        return "";
+      }
+    })();
+    const AUTH_HEADERS = { "X-Telegram-Init-Data": INIT, ...(MAX_SESSION ? { "X-Max-Session": MAX_SESSION } : {}) };
     const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
 
     const $ = (id) => document.getElementById(id);
@@ -267,7 +288,7 @@
     async function api(path, opts = {}) {
       const res = await fetch("/api" + path, {
         ...opts,
-        headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": INIT, ...(opts.headers || {}) },
+        headers: { "Content-Type": "application/json", ...AUTH_HEADERS, ...(opts.headers || {}) },
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.status); }
       return res.json();
@@ -1073,7 +1094,7 @@
       if (!bytes || bytes.byteLength < 1600) return;
       const input = $("ai-input"); if (input) input.placeholder = "Распознаю…";
       try {
-        const res = await fetch("/api/voice", { method: "POST", headers: { "X-Telegram-Init-Data": INIT }, body: bytes });
+        const res = await fetch("/api/voice", { method: "POST", headers: AUTH_HEADERS, body: bytes });
         const d = await res.json().catch(() => ({}));
         if (input) input.placeholder = "Сообщение Саре…";
         if (res.ok && d.text) aiSend(d.text);

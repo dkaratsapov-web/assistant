@@ -1,37 +1,52 @@
 /**
  * Обработчик обновлений MAX Bot API. Переиспользует ту же бизнес-логику и БД (D1),
- * что и Telegram-бот: задачи, дайджест, ИИ (YandexGPT).
+ * что и Telegram-бот: задачи, встречи, клиенты, заметки, здоровье, ИИ (YandexGPT).
  *
- * На старте канал работает в режиме одного владельца (MAX_OWNER_ID). Данные общие
- * с Telegram: действия владельца в MAX пишутся под тем же OWNER_ID, поэтому список
- * задач и календарь одинаковы в обоих мессенджерах. Мультиарендность и роли для
- * MAX добавим на этапе подписок.
+ * Аккаунты MAX независимы от Telegram: пользователь получает внутренний uid из
+ * своего диапазона (см. ids.ts), поэтому у него собственные задачи, календарь и
+ * здоровье. Исключение — владелец: если задан MAX_OWNER_ID, его сообщения пишутся
+ * под OWNER_ID, чтобы данные владельца в обоих мессенджерах оставались общими.
+ *
+ * Доступ такой же, как в Telegram: новый пользователь попадает в `pending`,
+ * владелец подтверждает роль кнопкой.
  */
-import { aiConfig, askAI } from "../ai";
+import { aiConfig, askAIChat, ChatMessage } from "../ai";
 import { DB } from "../db";
+import { tryPerformCommand } from "../intent";
 import { buildDigest } from "../reports";
+import { transcribeVoice } from "../speech";
 import {
   Env,
+  ROLE_CLIENT,
+  ROLE_MEMBER,
+  ROLE_OWNER,
+  ROLE_PENDING,
   SCOPE_WORK,
   TASK_DONE,
   TASK_IN_PROGRESS,
   TASK_OPEN,
   TASK_STATUS_LABELS,
+  User,
 } from "../types";
 import { formatDue, parseDue, tzOffsetOf } from "../utils";
+import { CHANNEL_MAX, maxUid } from "./ids";
 import { MaxButton, MaxClient, MaxUpdate } from "./client";
 
-const HELP = `🤖 Sara — команды в MAX:
+const HELP = `🤖 Сара — команды в MAX:
 
 /tasks — активные задачи
 /addtask <текст> — новая задача (пример: /addtask Позвонить клиенту завтра 15:00)
 /digest — сводка на сегодня
-/ai <запрос> — спросить ИИ по маркетингу
+/app — открыть приложение (задачи, календарь, здоровье)
+/ai <запрос> — спросить ИИ
 /help — помощь
 
+Можно просто писать словами: «напомни завтра отправить отчёт», «встреча с клиентом
+в пятницу в 15:00», «съел борщ», «выпил 300 мл». Голосовые тоже понимаю.
 Быстрая заметка — сообщение, начатое с «!».`;
 
-function mainMenu(appUrl?: string): MaxButton[][] {
+/** Меню бота. Ссылка на приложение выдаётся персонально — её собирает handleMaxUpdate. */
+function mainMenu(appButtons: MaxButton[]): MaxButton[][] {
   const rows: MaxButton[][] = [
     [
       { type: "callback", text: "✅ Задачи", payload: "menu:tasks" },
@@ -39,7 +54,7 @@ function mainMenu(appUrl?: string): MaxButton[][] {
     ],
     [{ type: "callback", text: "🤖 Спросить ИИ", payload: "menu:ai" }],
   ];
-  if (appUrl) rows.push([{ type: "link", text: "📲 Открыть приложение", url: appUrl }]);
+  if (appButtons.length) rows.push(appButtons);
   return rows;
 }
 
@@ -52,30 +67,49 @@ function taskButtons(id: number): MaxButton[][] {
   ];
 }
 
+/** Кнопки подтверждения доступа — приходят владельцу. */
+function accessButtons(maxId: number): MaxButton[][] {
+  return [
+    [
+      { type: "callback", text: "✅ В команду", payload: `access:member:${maxId}` },
+      { type: "callback", text: "👤 Клиент", payload: `access:client:${maxId}` },
+    ],
+    [{ type: "callback", text: "🚫 Отказать", payload: `access:reject:${maxId}` }],
+  ];
+}
+
 /** Извлекает унифицированные поля из разных типов апдейтов MAX. */
 function extract(update: MaxUpdate): {
   senderId?: number;
   chatId?: number;
   text?: string;
+  name?: string;
+  username?: string;
+  audioUrl?: string;
   callbackId?: string;
   callbackPayload?: string;
 } {
   if (update.update_type === "bot_started") {
-    return { senderId: update.user?.user_id, chatId: update.chat_id };
+    return { senderId: update.user?.user_id, chatId: update.chat_id, name: update.user?.name, username: update.user?.username };
   }
   if (update.update_type === "message_callback") {
     return {
       senderId: update.callback?.user?.user_id,
       chatId: update.message?.recipient?.chat_id,
+      name: update.callback?.user?.name,
+      username: update.callback?.user?.username,
       callbackId: update.callback?.callback_id,
       callbackPayload: update.callback?.payload,
     };
   }
-  // message_created и прочие с message
+  const audio = (update.message?.body?.attachments ?? []).find((a) => a.type === "audio");
   return {
     senderId: update.message?.sender?.user_id,
     chatId: update.message?.recipient?.chat_id,
     text: update.message?.body?.text,
+    name: update.message?.sender?.name,
+    username: update.message?.sender?.username,
+    audioUrl: audio?.payload?.url,
   };
 }
 
@@ -84,9 +118,10 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
   const db = new DB(env.DB);
   const tz = tzOffsetOf(env);
+  const ai = aiConfig(env);
 
-  const { senderId, chatId, text, callbackId, callbackPayload } = extract(update);
-  if (!chatId && !senderId) return;
+  const { senderId, chatId, text, name, username, audioUrl, callbackId, callbackPayload } = extract(update);
+  if (!senderId && !chatId) return;
   const reply = (t: string, kb?: MaxButton[][]) =>
     client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, t, kb);
 
@@ -95,26 +130,82 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     if (callbackId) await client.answerCallback(callbackId).catch(() => {});
     return void (await reply(`Твой MAX user_id: ${senderId}`).catch(() => {}));
   }
+  if (!senderId) return;
 
-  // Доступ: пока только владелец (общие данные с Telegram под OWNER_ID)
+  // ---------- Пользователь и доступ ----------
   const ownerMax = parseInt(env.MAX_OWNER_ID ?? "0", 10);
-  if (!ownerMax || senderId !== ownerMax) {
+  const isOwnerMax = !!ownerMax && senderId === ownerMax;
+  // Владелец в MAX работает с данными владельца Telegram, остальные — со своими
+  const uid = isOwnerMax ? parseInt(env.OWNER_ID, 10) : maxUid(senderId);
+
+  let user: User;
+  if (isOwnerMax) {
+    await db.ensureOwner(uid);
+    user = (await db.getUser(uid))!;
+  } else {
+    user = await db.ensureChannelUser(uid, CHANNEL_MAX, senderId, username ?? null, name ?? null);
+  }
+
+  const isOwner = user.role === ROLE_OWNER;
+
+  // Заявка на доступ: новичок ждёт подтверждения владельца
+  if (user.role === ROLE_PENDING) {
     if (callbackId) await client.answerCallback(callbackId).catch(() => {});
-    await reply("🔒 Доступ ограничен. Бот сейчас работает в приватном режиме.").catch(() => {});
+    if (!ownerMax) {
+      await reply("🔒 Бот ещё не настроен: не задан владелец (MAX_OWNER_ID). Подтвердить доступ пока некому.").catch(() => {});
+      return;
+    }
+    await reply("⏳ Заявка на доступ отправлена владельцу. Как только подтвердит — всё заработает.").catch(() => {});
+    {
+      const who = [name, username ? `@${username}` : "", `id ${senderId}`].filter(Boolean).join(" · ");
+      await client
+        .sendMessage({ userId: ownerMax }, `🔐 Запрос доступа в MAX:\n${who}`, accessButtons(senderId))
+        .catch(() => {});
+    }
     return;
   }
-  const owner = parseInt(env.OWNER_ID, 10); // эффективный владелец данных
+
+  /** Кнопки открытия Mini App: персональная ссылка с токеном сессии. */
+  async function appButtons(): Promise<MaxButton[]> {
+    if (!appUrl) return [];
+    const token = await db.webSessionFor(uid);
+    const link = `${appUrl}?max=${token}`;
+    const buttons: MaxButton[] = [];
+    // Если мини-приложение зарегистрировано в кабинете MAX — открываем внутри мессенджера
+    if (env.MAX_APP_NAME) buttons.push({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });
+    buttons.push({ type: "link", text: buttons.length ? "🔗 В браузере" : "📲 Открыть приложение", url: link });
+    return buttons;
+  }
 
   // ===== Callback-кнопки =====
   if (callbackPayload) {
     if (callbackId) await client.answerCallback(callbackId).catch(() => {});
-    const [action, arg] = callbackPayload.split(":");
+    const [action, arg, arg2] = callbackPayload.split(":");
+
+    if (action === "access") {
+      if (!isOwner) return;
+      const targetMax = parseInt(arg2, 10);
+      const targetUid = maxUid(targetMax);
+      if (arg === "reject") {
+        await db.deleteUser(targetUid);
+        await reply("🚫 Отказано в доступе.");
+        await client.sendMessage({ userId: targetMax }, "🚫 Владелец отклонил заявку на доступ.").catch(() => {});
+        return;
+      }
+      const role = arg === "client" ? ROLE_CLIENT : ROLE_MEMBER;
+      await db.setRole(targetUid, role);
+      await reply(`✅ Доступ выдан (${role === ROLE_CLIENT ? "клиент" : "команда"}).`);
+      await client
+        .sendMessage({ userId: targetMax }, "✅ Доступ открыт! Напиши /help или просто скажи, что нужно сделать.", mainMenu(await appButtons()))
+        .catch(() => {});
+      return;
+    }
     if (action === "menu") {
       if (arg === "tasks") return listTasks();
       if (arg === "digest") return sendDigest();
       if (arg === "ai") {
-        await db.setState(senderId!, { step: "ai_mode" });
-        return void (await reply("🤖 Режим ИИ включён. Спрашивай по маркетингу. Выход — «стоп»."));
+        await db.setState(uid, { step: "ai_mode" });
+        return void (await reply("🤖 Режим ИИ включён. Спрашивай что угодно. Выход — «стоп»."));
       }
       if (arg === "help") return void (await reply(HELP));
     }
@@ -132,31 +223,43 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   // ===== bot_started =====
   if (update.update_type === "bot_started") {
     return void (await reply(
-      "👋 Привет! Я Sara — твой ИИ-ассистент.\nВыбери действие или напиши /help.",
-      mainMenu(appUrl)
+      "👋 Привет! Я Сара — твой ИИ-ассистент.\nСтавь задачи словами или голосом, а приложение откроет календарь, клиентов и здоровье.",
+      mainMenu(await appButtons())
     ));
   }
 
-  const raw = (text ?? "").trim();
+  // ===== Голосовое сообщение =====
+  let raw = (text ?? "").trim();
+  if (!raw && audioUrl) {
+    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) {
+      return void (await reply("Голосовой ввод не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
+    }
+    try {
+      const audio = await (await fetch(audioUrl)).arrayBuffer();
+      raw = (await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio)).trim();
+    } catch (e) {
+      return void (await reply(`⚠️ Не удалось распознать голос: ${(e as Error).message}`));
+    }
+    if (!raw) return void (await reply("🤷 Не расслышала. Попробуй записать ещё раз, поближе к микрофону."));
+    await reply(`🎤 «${raw}»`);
+  }
   if (!raw) return;
   const low = raw.toLowerCase();
 
-  // Режим ИИ (FSM по senderId — не пересекается с Telegram)
-  const state = await db.getState(senderId!);
-  if (state.step === "ai_mode") {
-    if (low === "стоп" || low === "/stop") {
-      await db.clearState(senderId!);
-      return void (await reply("Вышел из режима ИИ.", mainMenu(appUrl)));
-    }
-    return replyAI(raw);
+  // Режим ИИ (FSM по внутреннему uid)
+  const state = await db.getState(uid);
+  const aiMode = state.step === "ai_mode";
+  if (aiMode && (low === "стоп" || low === "/stop")) {
+    await db.clearState(uid);
+    return void (await reply("Вышла из режима ИИ.", mainMenu(await appButtons())));
   }
 
   // Быстрая заметка
   if (raw.startsWith("!")) {
     const noteText = raw.slice(1).trim();
     if (noteText) {
-      await db.addNote(owner, noteText);
-      return void (await reply("📝 Заметка сохранена."));
+      const id = await db.addNote(uid, noteText);
+      return void (await reply(`📝 Заметка сохранена (#${id}).`));
     }
   }
 
@@ -166,42 +269,47 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   switch (cmd.toLowerCase()) {
     case "/start":
     case "начать":
-      return void (await reply("👋 Sara на связи. Выбери действие:", mainMenu(appUrl)));
+      return void (await reply("👋 Сара на связи. Выбери действие:", mainMenu(await appButtons())));
     case "/help":
       return void (await reply(HELP));
+    case "/app": {
+      const buttons = await appButtons();
+      if (!buttons.length) return void (await reply("Адрес приложения не определён."));
+      return void (await reply("📲 Приложение: задачи, календарь, клиенты и здоровье.", [buttons]));
+    }
+    case "/stop":
+      await db.clearState(uid);
+      return void (await reply("Ок, вышла из режима ИИ.", mainMenu(await appButtons())));
     case "/tasks":
       return listTasks();
     case "/digest":
       return sendDigest();
+    case "/users":
+      return listUsers();
     case "/addtask": {
       if (!argText) return void (await reply("Напиши текст задачи: /addtask <что сделать> [когда]"));
       const dueAt = parseDue(argText, tz);
-      const id = await db.addTask({
-        title: argText,
-        creatorId: owner,
-        assigneeId: owner,
-        scope: SCOPE_WORK,
-        dueAt,
-      });
-      return void (await reply(
-        `✅ Задача #${id} создана.${dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : ""}`,
-        taskButtons(id)
-      ));
+      const id = await db.addTask({ title: argText, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt });
+      return void (await reply(`✅ Задача #${id} создана.${dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : ""}`, taskButtons(id)));
     }
     case "/ai": {
       if (!argText) {
-        await db.setState(senderId!, { step: "ai_mode" });
-        return void (await reply("🤖 Режим ИИ включён. Спрашивай по маркетингу. Выход — «стоп»."));
+        await db.setState(uid, { step: "ai_mode" });
+        return void (await reply("🤖 Режим ИИ включён. Спрашивай что угодно. Выход — «стоп»."));
       }
       return replyAI(argText);
     }
-    default:
-      return void (await reply("Не понял команду. Открой меню или /help.", mainMenu(appUrl)));
+    default: {
+      // Свободный текст: сначала пробуем выполнить команду, иначе отвечает Сара
+      const action = await tryPerformCommand(env, db, uid, raw, false);
+      if (action) return void (await reply(action));
+      return replyAI(raw);
+    }
   }
 
   // ===== helpers =====
   async function listTasks() {
-    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: null });
+    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: isOwner ? null : uid });
     if (!tasks.length) return void (await reply("Активных задач нет. Добавь: /addtask <текст>"));
     await reply(`📋 Активные задачи: ${tasks.length}`);
     for (const t of tasks.slice(0, 15)) {
@@ -212,17 +320,34 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   }
 
   async function sendDigest() {
-    const text = await buildDigest(db, owner, "owner", tz);
-    await reply(text);
+    await reply(await buildDigest(db, uid, user.role, tz));
+  }
+
+  async function listUsers() {
+    if (!isOwner) return void (await reply("Команда доступна владельцу."));
+    const users = await db.listUsers();
+    const lines = users.map((u) => {
+      const who = u.full_name || u.username || String(u.ext_id ?? u.user_id);
+      return `${u.role === ROLE_OWNER ? "👑" : u.role === ROLE_MEMBER ? "🧑‍💻" : u.role === ROLE_CLIENT ? "👤" : "⏳"} ${who} — ${u.role} (${u.channel ?? "tg"})`;
+    });
+    return void (await reply(lines.length ? `Пользователи:\n${lines.join("\n")}` : "Пользователей нет."));
   }
 
   async function replyAI(prompt: string) {
-    const ai = aiConfig(env);
-    if (!ai) {
-      return void (await reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
-    }
+    if (!ai) return void (await reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
     await reply("💭 Думаю…");
-    const answer = await askAI(ai, prompt);
+    const history = await db.listAiMessages(uid, 20);
+    const pctx = await db.profileContext(uid);
+    const msgs: ChatMessage[] = [
+      ...(pctx ? [{ role: "system" as const, text: pctx }] : []),
+      ...history
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
+      { role: "user", text: prompt },
+    ];
+    const answer = await askAIChat(ai, msgs);
+    await db.addAiMessage(uid, "user", prompt);
+    await db.addAiMessage(uid, "assistant", answer);
     // MAX ограничивает длину сообщения — режем на части
     for (let i = 0; i < answer.length; i += 3800) await reply(answer.slice(i, i + 3800));
   }

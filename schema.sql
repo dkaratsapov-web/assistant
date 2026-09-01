@@ -2,11 +2,13 @@
 -- Применяется: npm run db:init (или вставкой в консоль D1).
 
 CREATE TABLE IF NOT EXISTS users (
-  user_id    INTEGER PRIMARY KEY,
+  user_id    INTEGER PRIMARY KEY,              -- Telegram-id либо 10^12 + id пользователя MAX
   username   TEXT,
   full_name  TEXT,
   role       TEXT NOT NULL DEFAULT 'pending',   -- owner | member | client | pending
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  channel    TEXT DEFAULT 'tg',                 -- tg | max
+  ext_id     INTEGER                            -- настоящий id пользователя в его мессенджере
 );
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -196,3 +198,12 @@ CREATE INDEX IF NOT EXISTS idx_weight_user ON weight_log(user_id, ts);
 CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id, ts);
 CREATE INDEX IF NOT EXISTS idx_supp_user ON supplement(user_id, active);
 CREATE INDEX IF NOT EXISTS idx_supplog_user ON supplement_log(user_id, date);
+
+-- Сессии Mini App для каналов без подписи initData (MAX): бот выдаёт токен ссылкой
+CREATE TABLE IF NOT EXISTS web_session (
+  token      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_web_session_user ON web_session(user_id);

@@ -15,10 +15,18 @@ export interface MaxUser {
   is_bot?: boolean;
 }
 
+/** Вложение сообщения MAX (нужны ссылка на файл и тип). */
+export interface MaxAttachment {
+  type: string; // image | video | audio | file | sticker | contact | share | location | inline_keyboard
+  payload?: { url?: string; token?: string; photo_id?: number };
+  filename?: string;
+  size?: number;
+}
+
 export interface MaxMessage {
   sender?: MaxUser;
   recipient?: { chat_id?: number; chat_type?: string; user_id?: number };
-  body?: { mid?: string; seq?: number; text?: string };
+  body?: { mid?: string; seq?: number; text?: string; attachments?: MaxAttachment[] };
   timestamp?: number;
 }
 
@@ -36,10 +44,12 @@ export interface MaxUpdate {
 
 /** Кнопка inline-клавиатуры. */
 export interface MaxButton {
-  type: "callback" | "link";
+  type: "callback" | "link" | "open_app";
   text: string;
-  payload?: string; // для callback
-  url?: string; // для link
+  payload?: string;  // для callback (и стартовый параметр для open_app)
+  url?: string;      // для link
+  web_app?: string;  // для open_app: публичное имя или адрес мини-приложения
+  contact_id?: number; // для open_app: id бота, к которому привязано мини-приложение
 }
 
 const DEFAULT_API = "https://platform-api.max.ru";

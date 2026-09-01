@@ -4,8 +4,9 @@ import { DB } from "./db";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
+import { CHANNEL_MAX } from "./max/ids";
 import { buildDigest } from "./reports";
-import { Env, ROLE_MEMBER, ROLE_OWNER } from "./types";
+import { Env, ROLE_MEMBER, ROLE_OWNER, User } from "./types";
 import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
@@ -32,6 +33,21 @@ async function tgSend(token: string, chatId: number, text: string): Promise<void
   });
 }
 
+/**
+ * Напоминание пользователю в его мессенджер: Telegram или MAX.
+ * У пользователей MAX внутренний user_id виртуальный, поэтому пишем на ext_id
+ * через MAX Bot API (и снимаем HTML-разметку — MAX её не понимает).
+ */
+async function notify(env: Env, user: User, text: string): Promise<void> {
+  if ((user.channel ?? "tg") === CHANNEL_MAX) {
+    if (!env.MAX_BOT_TOKEN || !user.ext_id) return;
+    const plain = text.replace(/<[^>]+>/g, "");
+    await new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL).sendMessage({ userId: user.ext_id }, plain);
+    return;
+  }
+  await tgSend(env.BOT_TOKEN, user.user_id, text);
+}
+
 /** Напоминания пить воду: с учётом окна, интервала и дневной цели пользователя. */
 async function runWaterReminders(env: Env, db: DB, tz: number): Promise<void> {
   const nowMs = Date.now();
@@ -47,7 +63,7 @@ async function runWaterReminders(env: Env, db: DB, tz: number): Promise<void> {
       const goal = parseInt((await db.getSetting(`hwater:${u.user_id}`)) ?? "", 10) || 2000;
       const total = await db.waterTotal(u.user_id, startOfLocalDayIso(tz), startOfLocalDayOffsetIso(tz, 1));
       if (total >= goal) continue; // цель достигнута — не беспокоим
-      await tgSend(env.BOT_TOKEN, u.user_id, `💧 Пора попить воды.\nСегодня: ${(total / 1000).toFixed(1)} / ${(goal / 1000).toFixed(1)} л`);
+      await notify(env, u, `💧 Пора попить воды.\nСегодня: ${(total / 1000).toFixed(1)} / ${(goal / 1000).toFixed(1)} л`);
       await db.setSetting(`water_last:${u.user_id}`, String(nowMs));
     } catch (e) {
       console.error("water reminder failed", u.user_id, e);
@@ -57,6 +73,11 @@ async function runWaterReminders(env: Env, db: DB, tz: number): Promise<void> {
 
 /** Напоминания о приёме БАДов/фармы по времени курса. */
 async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<void> {
+  const userCache = new Map<number, User | null>();
+  const userOf = async (id: number) => {
+    if (!userCache.has(id)) userCache.set(id, await db.getUser(id));
+    return userCache.get(id) ?? null;
+  };
   const now = new Date(Date.now() + tz * 3600_000);
   const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
   const today = new Date(Date.parse(startOfLocalDayIso(tz)) + tz * 3600_000).toISOString().slice(0, 10);
@@ -72,7 +93,9 @@ async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<voi
         const diff = nowMin - (hh * 60 + mm);
         if (diff < 0 || diff >= 5) continue; // попадаем в 5-минутное окно один раз
         if (await db.supTaken(c.user_id, c.id, today, slot)) continue;
-        await tgSend(env.BOT_TOKEN, c.user_id, `💊 Время принять: <b>${c.name}</b>${c.dose ? ` (${c.dose})` : ""}\nОтметь: Здоровье → 💊 БАДы.`);
+        const u = await userOf(c.user_id);
+        if (!u) continue;
+        await notify(env, u, `💊 Время принять: <b>${c.name}</b>${c.dose ? ` (${c.dose})` : ""}\nОтметь: Здоровье → 💊 БАДы.`);
       }
     } catch (e) {
       console.error("supp reminder failed", c.id, e);
@@ -203,7 +226,12 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const db = new DB(env.DB);
     const tz = tzOffsetOf(env);
-    // настройки уведомлений читаем один раз на пользователя за прогон крона
+    // настройки уведомлений и записи пользователей читаем один раз на пользователя за прогон крона
+    const userCache = new Map<number, User | null>();
+    const userOf = async (id: number) => {
+      if (!userCache.has(id)) userCache.set(id, await db.getUser(id));
+      return userCache.get(id) ?? null;
+    };
     const notifCache = new Map<number, Awaited<ReturnType<DB["getNotif"]>>>();
     const notifOf = async (uid: number) => {
       let n = notifCache.get(uid);
@@ -222,7 +250,8 @@ export default {
         try {
           const notif = await notifOf(recipient);
           if (!notif.tasks.on) { await db.markReminded(t.id); continue; }
-          await tgSend(env.BOT_TOKEN, recipient, `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
+          const u = await userOf(recipient);
+          if (u) await notify(env, u, `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
           await db.markReminded(t.id);
         } catch (e) {
           console.error("reminder failed", t.id, e);
@@ -234,7 +263,8 @@ export default {
         try {
           const notif = await notifOf(ev.user_id);
           if (!notif.events.on) { await db.markEventReminded(ev.id); continue; }
-          await tgSend(env.BOT_TOKEN, ev.user_id, `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`);
+          const u = await userOf(ev.user_id);
+          if (u) await notify(env, u, `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`);
           await db.markEventReminded(ev.id);
         } catch (e) {
           console.error("event reminder failed", ev.id, e);
@@ -257,7 +287,9 @@ export default {
         try {
           const notif = await notifOf(c.user_id);
           if (!notif.birthdays.on || notif.morning.hour !== localHour) continue;
-          await tgSend(env.BOT_TOKEN, c.user_id, `🎂 Сегодня день рождения: <b>${c.name}</b>!\nНе забудь поздравить 🎉${c.phone ? `\n📞 ${c.phone}` : ""}`);
+          const u = await userOf(c.user_id);
+          if (!u) continue;
+          await notify(env, u, `🎂 Сегодня день рождения: <b>${c.name}</b>!\nНе забудь поздравить 🎉${c.phone ? `\n📞 ${c.phone}` : ""}`);
           await db.markBirthdayReminded(c.id, year);
         } catch (e) {
           console.error("birthday reminder failed", c.id, e);
@@ -272,7 +304,7 @@ export default {
           const notif = await notifOf(u.user_id);
           if (notif.morning.on && notif.morning.hour === localHour) {
             const text = await buildDigest(db, u.user_id, u.role, tz);
-            await tgSend(env.BOT_TOKEN, u.user_id, "☀️ Доброе утро!\n\n" + text);
+            await notify(env, u, "☀️ Доброе утро!\n\n" + text);
           }
           if (notif.meals.on) {
             const slot = notif.meals.breakfast === localHour ? "breakfast" : notif.meals.lunch === localHour ? "lunch" : notif.meals.dinner === localHour ? "dinner" : null;
@@ -280,7 +312,7 @@ export default {
               const food = await db.listFood(u.user_id, start, end);
               if (!food.some((f) => (f.meal || "") === slot)) {
                 const ru = { breakfast: "завтрак", lunch: "обед", dinner: "ужин" }[slot];
-                await tgSend(env.BOT_TOKEN, u.user_id, `🍽 Не забудь записать ${ru} — просто скажи «съел…» или пришли фото блюда.`);
+                await notify(env, u, `🍽 Не забудь записать ${ru} — просто скажи «съел…» или пришли фото блюда.`);
               }
             }
           }

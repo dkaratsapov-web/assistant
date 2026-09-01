@@ -93,12 +93,19 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const tz = tzOffsetOf(env);
   const ai = aiConfig(env);
 
-  const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
-  const tgUser = await validateInitData(initData, env.BOT_TOKEN);
-  if (!tgUser) return json({ error: "unauthorized" }, 401);
+  // Два способа входа: подпись Telegram initData либо токен сессии, выданный ботом
+  // в другом канале (MAX) — там подписи Telegram нет.
+  const tgUser = await validateInitData(request.headers.get("X-Telegram-Init-Data") ?? "", env.BOT_TOKEN);
+  let authUid: number | null = null;
+  if (tgUser) {
+    if (tgUser.id === parseInt(env.OWNER_ID, 10)) await db.ensureOwner(tgUser.id);
+    authUid = tgUser.id;
+  } else {
+    authUid = await db.webSessionUid(request.headers.get("X-Max-Session") ?? "");
+  }
+  if (!authUid) return json({ error: "unauthorized" }, 401);
 
-  if (tgUser.id === parseInt(env.OWNER_ID, 10)) await db.ensureOwner(tgUser.id);
-  const user = await db.getUser(tgUser.id);
+  const user = await db.getUser(authUid);
   if (!user || user.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
 
   const isOwner = user.role === ROLE_OWNER;
@@ -106,7 +113,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
-    return json({ user_id: uid, role: user.role, telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+    return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
   }
 
   // ---------- БАДы / фарма ----------

@@ -10,6 +10,7 @@ import {
   EMPTY_PROFILE,
   SupplementRow,
   ROLE_OWNER,
+  ROLE_PENDING,
   Task,
   TASK_DONE,
   TASK_IN_PROGRESS,
@@ -24,7 +25,7 @@ const nowIso = () => new Date().toISOString();
  * на каждый запрос, и поля экземпляра заставляли гонять DDL при каждом обращении.
  * Изолят Worker'а живёт между запросами, поэтому CREATE TABLE / ALTER выполняются один раз.
  */
-const ready = { schema: false, ai: false, settings: false, supp: false, health: false };
+const ready = { schema: false, ai: false, settings: false, supp: false, health: false, web: false };
 
 export class DB {
   constructor(private d1: D1Database) {}
@@ -68,6 +69,83 @@ export class DB {
 
   async deleteUser(userId: number): Promise<void> {
     await this.d1.prepare("DELETE FROM users WHERE user_id = ?").bind(userId).run();
+  }
+
+  /**
+   * Пользователь из внешнего канала (MAX): заводит запись при первом обращении.
+   * `userId` — внутренний виртуальный id (см. maxUid в src/max/ids.ts), `extId` — настоящий id в канале.
+   * Новый пользователь получает роль `pending` — доступ подтверждает владелец.
+   */
+  async ensureChannelUser(
+    userId: number,
+    channel: string,
+    extId: number,
+    username: string | null,
+    fullName: string | null,
+    roleIfNew = ROLE_PENDING
+  ): Promise<User> {
+    await this.ensureSchema();
+    await this.d1
+      .prepare(
+        `INSERT INTO users (user_id, username, full_name, role, created_at, channel, ext_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           username = COALESCE(excluded.username, users.username),
+           full_name = COALESCE(excluded.full_name, users.full_name),
+           channel = excluded.channel,
+           ext_id = excluded.ext_id`
+      )
+      .bind(userId, username, fullName, roleIfNew, nowIso(), channel, extId)
+      .run();
+    return (await this.getUser(userId))!;
+  }
+
+  // ---------- Веб-сессии Mini App (для каналов без подписи initData, напр. MAX) ----------
+  private async ensureWeb(): Promise<void> {
+    if (ready.web) return;
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS web_session (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
+      .run();
+    ready.web = true;
+  }
+
+  /** Выдаёт токен доступа к Mini App для пользователя канала. */
+  async createWebSession(userId: number, ttlDays = 30): Promise<string> {
+    await this.ensureWeb();
+    const token = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const expires = new Date(Date.now() + ttlDays * 86400_000).toISOString();
+    await this.d1
+      .prepare("INSERT INTO web_session (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+      .bind(token, userId, expires, nowIso())
+      .run();
+    // подчищаем протухшие, чтобы таблица не росла
+    await this.d1.prepare("DELETE FROM web_session WHERE expires_at < ?").bind(nowIso()).run();
+    return token;
+  }
+
+  /**
+   * Действующий токен пользователя или новый, если подходящего нет.
+   * Иначе каждое меню плодило бы новую сессию.
+   */
+  async webSessionFor(userId: number, ttlDays = 30): Promise<string> {
+    await this.ensureWeb();
+    const soon = new Date(Date.now() + 86400_000).toISOString(); // годен ещё хотя бы сутки
+    const row = await this.d1
+      .prepare("SELECT token FROM web_session WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1")
+      .bind(userId, soon)
+      .first<{ token: string }>();
+    return row ? row.token : this.createWebSession(userId, ttlDays);
+  }
+
+  /** Возвращает user_id по токену Mini App или null (нет токена / протух). */
+  async webSessionUid(token: string): Promise<number | null> {
+    if (!token) return null;
+    await this.ensureWeb();
+    const row = await this.d1
+      .prepare("SELECT user_id FROM web_session WHERE token = ? AND expires_at > ?")
+      .bind(token, nowIso())
+      .first<{ user_id: number }>();
+    return row ? row.user_id : null;
   }
 
   async listUsers(role?: string): Promise<User[]> {
@@ -151,6 +229,9 @@ export class DB {
       "ALTER TABLE clients ADD COLUMN direct_login TEXT DEFAULT ''",
       "ALTER TABLE contacts ADD COLUMN tags TEXT DEFAULT ''",
       "ALTER TABLE events ADD COLUMN client_id INTEGER",
+      // канал, из которого пришёл пользователь (tg | max), и его настоящий id в этом канале
+      "ALTER TABLE users ADD COLUMN channel TEXT DEFAULT 'tg'",
+      "ALTER TABLE users ADD COLUMN ext_id INTEGER",
     ];
     for (const sql of alters) {
       try {
