@@ -1,4 +1,21 @@
-/** ИИ-помощник: запрос к YandexGPT (Yandex Cloud Foundation Models API) через fetch. */
+/**
+ * ИИ-помощник: Yandex Foundation Models (YandexGPT) через fetch.
+ *
+ * Текст  — POST https://llm.api.cloud.yandex.net/foundationModels/v1/completion
+ * Фото   — OpenAI-совместимый эндпоинт /v1/chat/completions (нужна мультимодальная
+ *          модель из Model Gallery, задаётся переменной YANDEX_VISION_MODEL).
+ *
+ * Авторизация — тот же API-ключ сервисного аккаунта, что и у SpeechKit
+ * (YANDEX_API_KEY + YANDEX_FOLDER_ID), роль `ai.languageModels.user`.
+ */
+import { Env } from "./types";
+
+const COMPLETION_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion";
+const OPENAI_URL = "https://llm.api.cloud.yandex.net/v1/chat/completions";
+
+/** Модели по умолчанию (переопределяются переменными окружения). */
+export const DEFAULT_MODEL = "yandexgpt/latest";
+export const ROUTER_MODEL = "yandexgpt-lite/latest";
 
 const SYSTEM_PROMPT = `Ты — Сара, персональный ИИ-ассистент владельца (маркетолога). \
 Ты полноценный помощник: ведёшь задачи, встречи (календарь), дни рождения и клиентов, \
@@ -22,14 +39,41 @@ const SYSTEM_PROMPT = `Ты — Сара, персональный ИИ-асси
 - Варианты объявлений давай пронумерованными.
 - Без воды. Формат — обычный текст, без Markdown-таблиц. Списки — через тире или цифры.`;
 
-interface AnthropicResponse {
-  content?: { type: string; text?: string }[];
-  error?: { message?: string };
+/** Настройки доступа к YandexGPT — собираются из окружения один раз на запрос. */
+export interface AiConfig {
+  apiKey: string;
+  folderId: string;
+  model: string;       // основная модель (диалог, тексты, документы)
+  router: string;      // дешёвая модель для служебных задач (разбор команд, калории)
+  vision: string;      // мультимодальная модель для фото; "" — фото выключены
 }
 
-export const DEFAULT_MODEL = "claude-sonnet-5";
-// Дешёвая модель для служебных задач (распознавание команд, парсинг) — экономит расход
-export const ROUTER_MODEL = "claude-haiku-4-5-20251001";
+/** Возвращает конфигурацию ИИ или null, если ключ/каталог не заданы. */
+export function aiConfig(env: Env): AiConfig | null {
+  if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return null;
+  return {
+    apiKey: env.YANDEX_API_KEY,
+    folderId: env.YANDEX_FOLDER_ID,
+    model: env.YANDEX_GPT_MODEL || DEFAULT_MODEL,
+    router: env.YANDEX_GPT_ROUTER_MODEL || ROUTER_MODEL,
+    vision: env.YANDEX_VISION_MODEL || "",
+  };
+}
+
+/** Полный URI модели: короткое имя дополняется каталогом, готовый `gpt://…` берётся как есть. */
+function modelUri(cfg: AiConfig, model: string): string {
+  return model.includes("://") ? model : `gpt://${cfg.folderId}/${model}`;
+}
+
+interface YandexResponse {
+  result?: {
+    alternatives?: { message?: { role?: string; text?: string }; status?: string }[];
+  };
+  // формат ошибки Yandex Cloud
+  error?: { message?: string };
+  message?: string;
+  code?: number;
+}
 
 /** Роль сообщения в диалоге. */
 export interface ChatMessage {
@@ -38,63 +82,71 @@ export interface ChatMessage {
 }
 
 /**
- * Низкоуровневый вызов Claude (Anthropic Messages API).
- * system-сообщения выносятся отдельно; первый (большой статичный) промпт кешируется
- * (prompt caching) — это резко снижает расход на повторных запросах.
+ * Низкоуровневый вызов YandexGPT. Сообщения передаются как есть (включая system).
+ * Возвращает текст ответа либо понятное сообщение об ошибке (бот не должен падать).
  */
 async function complete(
-  apiKey: string,
+  cfg: AiConfig,
   messages: ChatMessage[],
   model: string,
-  maxTokens = 1500
+  opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<string> {
   try {
-    const systemMsgs = messages.filter((m) => m.role === "system");
-    const system = systemMsgs.map((m, i) =>
-      i === 0
-        ? { type: "text", text: m.text, cache_control: { type: "ephemeral" } }
-        : { type: "text", text: m.text }
-    );
-    const msgs = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({ role: m.role, content: m.text }));
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(COMPLETION_URL, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        Authorization: `Api-Key ${cfg.apiKey}`,
+        "x-folder-id": cfg.folderId,
       },
-      // temperature намеренно не передаём: модели Claude 5 его не принимают
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: msgs }),
+      body: JSON.stringify({
+        modelUri: modelUri(cfg, model),
+        completionOptions: {
+          stream: false,
+          temperature: opts.temperature ?? 0.6,
+          maxTokens: String(opts.maxTokens ?? 2000),
+        },
+        messages,
+      }),
     });
 
-    const data = (await res.json()) as AnthropicResponse;
+    const data = (await res.json()) as YandexResponse;
     if (!res.ok) {
-      return `⚠️ Ошибка ИИ (${res.status}): ${data.error?.message ?? "неизвестная"}`;
+      return `⚠️ Ошибка ИИ (${res.status}): ${data.error?.message ?? data.message ?? "неизвестная"}`;
     }
-    const text = (data.content ?? [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
+    const text = (data.result?.alternatives ?? [])
+      .map((a) => a.message?.text ?? "")
       .join("\n")
       .trim();
     return text || "ИИ вернул пустой ответ, попробуй переформулировать.";
   } catch (e) {
-    return `⚠️ Не удалось связаться с ИИ: ${(e as Error).message}`;
+    return `⚠️ Не удалось связаться с YandexGPT: ${(e as Error).message}`;
   }
 }
 
 /**
- * Многоходовой диалог с Claude (с историей переписки). System-промпт ассистента
+ * Многоходовой диалог с YandexGPT (с историей переписки). System-промпт ассистента
  * добавляется автоматически.
  */
-export function askAIChat(apiKey: string, messages: ChatMessage[], model = DEFAULT_MODEL): Promise<string> {
-  return complete(apiKey, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], model);
+export function askAIChat(cfg: AiConfig, messages: ChatMessage[]): Promise<string> {
+  return complete(cfg, [{ role: "system", text: SYSTEM_PROMPT }, ...messages], cfg.model);
 }
 
-/** Однократный запрос к Claude (обёртка над askAIChat). */
-export function askAI(apiKey: string, prompt: string, model = DEFAULT_MODEL): Promise<string> {
-  return askAIChat(apiKey, [{ role: "user", text: prompt }], model);
+/** Однократный запрос к YandexGPT (обёртка над askAIChat). */
+export function askAI(cfg: AiConfig, prompt: string): Promise<string> {
+  return askAIChat(cfg, [{ role: "user", text: prompt }]);
+}
+
+/** Вырезает JSON-объект из ответа модели (на случай code-fence или лишнего текста). */
+function extractJson(raw: string): any | null {
+  const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "");
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
 }
 
 /** Извлечённая из текста задача. */
@@ -183,32 +235,18 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 Отвечай ТОЛЬКО одной строкой JSON, без markdown, без \`\`\`, без пояснений.`;
 
 /** Определяет намерение (действие или обычный вопрос). Возвращает null при ошибке разбора. */
-export async function routeAssistant(
-  apiKey: string,
-  text: string,
-  nowStr: string,
-  model = ROUTER_MODEL
-): Promise<AssistantIntent | null> {
+export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string): Promise<AssistantIntent | null> {
   const raw = await complete(
-    apiKey,
+    cfg,
     [
-      { role: "system", text: ROUTER_SYSTEM }, // статичный — кешируется
-      { role: "system", text: `Сейчас: ${nowStr}.` },
+      { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model,
-    400
+    cfg.router,
+    { maxTokens: 400, temperature: 0 }
   );
-  const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "");
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    const obj = JSON.parse(match[0]) as AssistantIntent;
-    if (!obj || !obj.action) return null;
-    return obj;
-  } catch {
-    return null;
-  }
+  const obj = extractJson(raw) as AssistantIntent | null;
+  return obj && obj.action ? obj : null;
 }
 
 export interface Nutrition {
@@ -224,119 +262,123 @@ const NUTRITION_SYSTEM = `Ты — нутрициолог. По описанию
 {"title":"кратко что съедено","kcal":целое,"protein":целое,"fat":целое,"carbs":целое}. \
 kcal — ккал всей еды; protein/fat/carbs — граммы. Только реалистичные числа. Только JSON.`;
 
+/** Приводит ответ модели к Nutrition. */
+function toNutrition(o: any, fallbackTitle: string): Nutrition {
+  return {
+    title: String(o.title || fallbackTitle).slice(0, 120),
+    kcal: Math.max(0, Math.round(+o.kcal || 0)),
+    protein: Math.max(0, Math.round(+o.protein || 0)),
+    fat: Math.max(0, Math.round(+o.fat || 0)),
+    carbs: Math.max(0, Math.round(+o.carbs || 0)),
+  };
+}
+
 /** Оценивает калории и БЖУ по описанию еды. Возвращает null при ошибке. */
-export async function estimateNutrition(apiKey: string, text: string, model = ROUTER_MODEL): Promise<Nutrition | null> {
+export async function estimateNutrition(cfg: AiConfig, text: string): Promise<Nutrition | null> {
   const raw = await complete(
-    apiKey,
+    cfg,
     [
       { role: "system", text: NUTRITION_SYSTEM },
       { role: "user", text },
     ],
-    model,
-    200
+    cfg.router,
+    { maxTokens: 200, temperature: 0 }
   );
-  const match = raw.replace(/```json/gi, "").replace(/```/g, "").match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    const o = JSON.parse(match[0]);
-    return {
-      title: String(o.title || text).slice(0, 120),
-      kcal: Math.max(0, Math.round(+o.kcal || 0)),
-      protein: Math.max(0, Math.round(+o.protein || 0)),
-      fat: Math.max(0, Math.round(+o.fat || 0)),
-      carbs: Math.max(0, Math.round(+o.carbs || 0)),
-    };
-  } catch {
-    return null;
-  }
+  const o = extractJson(raw);
+  return o ? toNutrition(o, text) : null;
 }
 
 /** Оценивает сожжённые ккал по описанию активности. Возвращает число или null. */
-export async function estimateBurn(apiKey: string, text: string, model = ROUTER_MODEL): Promise<number | null> {
+export async function estimateBurn(cfg: AiConfig, text: string): Promise<number | null> {
   const raw = await complete(
-    apiKey,
+    cfg,
     [
       { role: "system", text: "Оцени, сколько примерно килокалорий сжигает описанная физическая активность (для взрослого ~75 кг). Ответь СТРОГО одним целым числом — только ккал, без слов." },
       { role: "user", text },
     ],
-    model,
-    20
+    cfg.router,
+    { maxTokens: 20, temperature: 0 }
   );
   const m = raw.match(/\d+/);
   return m ? Math.min(5000, parseInt(m[0], 10)) : null;
 }
 
-/** Оценивает калории/БЖУ по ФОТО еды. Возвращает null при ошибке. */
+/** Поддерживается ли разбор фото (задана мультимодальная модель). */
+export function visionEnabled(cfg: AiConfig | null): boolean {
+  return !!cfg?.vision;
+}
+
+interface OpenAiResponse {
+  choices?: { message?: { content?: string } }[];
+  error?: { message?: string };
+}
+
+/**
+ * Оценивает калории/БЖУ по ФОТО еды через OpenAI-совместимый эндпоинт AI Studio.
+ * Требует мультимодальной модели (YANDEX_VISION_MODEL); без неё возвращает null.
+ */
 export async function estimateNutritionFromImage(
-  apiKey: string,
+  cfg: AiConfig,
   base64: string,
   mediaType: string,
-  caption = "",
-  model = DEFAULT_MODEL
+  caption = ""
 ): Promise<Nutrition | null> {
+  if (!cfg.vision) return null;
   try {
-    const content = [
-      { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-      { type: "text", text: (caption ? `Подпись пользователя: "${caption}". ` : "") + "На фото — еда. Определи блюдо и оцени калорийность и БЖУ ВСЕЙ порции на фото." },
-    ];
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(OPENAI_URL, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Api-Key ${cfg.apiKey}`,
+        "x-folder-id": cfg.folderId,
+      },
       body: JSON.stringify({
-        model,
+        model: modelUri(cfg, cfg.vision),
         max_tokens: 250,
-        system: [{ type: "text", text: NUTRITION_SYSTEM }],
-        messages: [{ role: "user", content }],
+        temperature: 0,
+        messages: [
+          { role: "system", content: NUTRITION_SYSTEM },
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64}` } },
+              {
+                type: "text",
+                text:
+                  (caption ? `Подпись пользователя: "${caption}". ` : "") +
+                  "На фото — еда. Определи блюдо и оцени калорийность и БЖУ ВСЕЙ порции на фото.",
+              },
+            ],
+          },
+        ],
       }),
     });
-    const data = (await res.json()) as AnthropicResponse;
     if (!res.ok) return null;
-    const text = (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
-    const m = text.replace(/```json/gi, "").replace(/```/g, "").match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const o = JSON.parse(m[0]);
-    return {
-      title: String(o.title || caption || "Блюдо с фото").slice(0, 120),
-      kcal: Math.max(0, Math.round(+o.kcal || 0)),
-      protein: Math.max(0, Math.round(+o.protein || 0)),
-      fat: Math.max(0, Math.round(+o.fat || 0)),
-      carbs: Math.max(0, Math.round(+o.carbs || 0)),
-    };
+    const data = (await res.json()) as OpenAiResponse;
+    const o = extractJson(data.choices?.[0]?.message?.content ?? "");
+    return o ? toNutrition(o, caption || "Блюдо с фото") : null;
   } catch {
     return null;
   }
 }
 
 /** Пытается извлечь задачу из произвольного текста (напр. распознанного голоса). */
-export async function parseTaskFromText(
-  apiKey: string,
-  text: string,
-  nowStr: string,
-  model = ROUTER_MODEL
-): Promise<ParsedTask | null> {
+export async function parseTaskFromText(cfg: AiConfig, text: string, nowStr: string): Promise<ParsedTask | null> {
   const raw = await complete(
-    apiKey,
+    cfg,
     [
-      { role: "system", text: TASK_PARSE_SYSTEM }, // статичный — кешируется
-      { role: "system", text: `Сейчас: ${nowStr}.` },
+      { role: "system", text: `${TASK_PARSE_SYSTEM}\nСейчас: ${nowStr}.` },
       { role: "user", text },
     ],
-    model,
-    300
+    cfg.router,
+    { maxTokens: 300, temperature: 0 }
   );
-  // Вырезаем JSON из ответа (на случай code-fence или лишнего текста)
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    const obj = JSON.parse(match[0]) as Partial<ParsedTask>;
-    const title = (obj.title ?? "").toString().trim();
-    if (!title) return null;
-    return {
-      title,
-      due: (obj.due ?? "").toString().trim(),
-      scope: obj.scope === "personal" ? "personal" : "work",
-    };
-  } catch {
-    return null;
-  }
+  const obj = extractJson(raw) as Partial<ParsedTask> | null;
+  const title = (obj?.title ?? "").toString().trim();
+  if (!title) return null;
+  return {
+    title,
+    due: (obj?.due ?? "").toString().trim(),
+    scope: obj?.scope === "personal" ? "personal" : "work",
+  };
 }

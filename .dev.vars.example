@@ -5,8 +5,9 @@ BOT_TOKEN=123456:ABC-DEF...
 OWNER_ID=123456789
 # Любая длинная случайная строка — защищает webhook (придумай сам)
 WEBHOOK_SECRET=change-me-to-a-long-random-string
-# ИИ — Claude (без него ИИ выключен)
-ANTHROPIC_API_KEY=
-# Голос — Yandex SpeechKit (роль ai.speechkit-stt.user)
+# ИИ (YandexGPT) и голос (SpeechKit) — один API-ключ сервисного аккаунта Yandex Cloud.
+# Роли сервисному аккаунту: ai.languageModels.user (ИИ) и ai.speechkit-stt.user (голос).
 YANDEX_API_KEY=
 YANDEX_FOLDER_ID=
+# Мультимодальная модель для распознавания еды по фото (Model Gallery). Пусто — фото выключены.
+YANDEX_VISION_MODEL=

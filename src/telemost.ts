@@ -16,14 +16,24 @@ const METRIKA_URL = "https://api-metrika.yandex.net/stat/v1/data";
 const SCOPE = "telemost-api:conferences.create metrika:read";
 const VERIF_URI = "https://oauth.yandex.ru/verification_code";
 
+/**
+ * Антифальсификационный токен для OAuth-параметра `state`: производная от WEBHOOK_SECRET,
+ * сам секрет в URL не попадает. Колбэк принимает код, только если state совпал.
+ */
+export async function telemostState(secret: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`telemost:${secret}`));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
 /** URL для одноразового входа владельца. Если redirectUri не задан — Яндекс покажет код подтверждения. */
-export function telemostAuthUrl(clientId: string, redirectUri?: string): string {
+export function telemostAuthUrl(clientId: string, redirectUri?: string, state?: string): string {
   const p = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     scope: SCOPE,
     redirect_uri: redirectUri || VERIF_URI,
   });
+  if (state) p.set("state", state);
   return `${AUTH_URL}?${p.toString()}`;
 }
 

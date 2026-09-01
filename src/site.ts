@@ -1,12 +1,15 @@
 /**
  * Правки сайта в GitHub‑репозитории по запросу (текст/голос).
- * Безопасный поток: Сара находит нужный файл, ИИ вносит изменение, создаётся ветка + Pull Request
- * (превью с diff). Публикация — только после подтверждения (merge), которое запускает авто‑деплой.
+ * Поток: Сара выбирает нужный файл, ИИ переписывает его целиком, изменение коммитится
+ * ПРЯМО в ветку деплоя — автодеплой публикует правку сразу. Прежнее содержимое файла
+ * сохраняется в settings (`site_undo`), поэтому последнюю правку можно откатить одной
+ * командой («откати сайт» / /site_undo). Глубина отката — одна правка.
  *
- * Требуются секреты: GITHUB_TOKEN (PAT с доступом к репо), SITE_REPO = "owner/name".
+ * Требуются секреты: GITHUB_TOKEN (PAT с доступом к репо), SITE_REPO = "owner/name",
+ * а также ключ YandexGPT (YANDEX_API_KEY + YANDEX_FOLDER_ID).
  * Необязательно: SITE_BRANCH (по умолчанию — ветка по умолчанию репозитория).
  */
-import { askAI, DEFAULT_MODEL } from "./ai";
+import { aiConfig, askAI } from "./ai";
 import { DB } from "./db";
 import { Env } from "./types";
 
@@ -42,17 +45,18 @@ async function gh(env: Env, path: string, init: RequestInit = {}): Promise<any> 
 }
 
 export function siteConfigured(env: Env): boolean {
-  return !!(env.GITHUB_TOKEN && env.SITE_REPO && env.ANTHROPIC_API_KEY);
+  return !!(env.GITHUB_TOKEN && env.SITE_REPO && env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID);
 }
 
 /**
- * Вносит правку по запросу: выбирает файл, генерирует новое содержимое, создаёт ветку + PR.
- * Возвращает ссылку на PR и путь файла. Ничего не публикует до merge.
+ * Вносит правку по запросу: выбирает файл, генерирует новое содержимое и коммитит его
+ * в ветку деплоя (правка публикуется автодеплоем сразу). Прежнее содержимое кладём в
+ * `site_undo` — для отката через revertLastSiteEdit(). Возвращает ссылку на коммит и путь файла.
  */
 export async function editSite(env: Env, db: DB, request: string): Promise<{ commitUrl: string; file: string; branch: string }> {
   if (!siteConfigured(env)) throw new Error("Сайт не подключён (нужны GITHUB_TOKEN и SITE_REPO)");
   const repo = env.SITE_REPO!;
-  const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
+  const ai = aiConfig(env)!;
 
   const repoInfo = await gh(env, `/repos/${repo}`);
   const base = env.SITE_BRANCH || repoInfo.default_branch || "main";
@@ -71,9 +75,8 @@ export async function editSite(env: Env, db: DB, request: string): Promise<{ com
   let file = files[0];
   if (files.length > 1) {
     const pick = await askAI(
-      env.ANTHROPIC_API_KEY!,
-      `Файлы сайта:\n${files.join("\n")}\n\nЗапрос: "${request}"\nВыбери ОДИН файл, который нужно изменить. Ответь ТОЛЬКО путём из списка, без пояснений.`,
-      model
+      ai,
+      `Файлы сайта:\n${files.join("\n")}\n\nЗапрос: "${request}"\nВыбери ОДИН файл, который нужно изменить. Ответь ТОЛЬКО путём из списка, без пояснений.`
     );
     const cand = pick.trim().split(/\s|\n/)[0].replace(/[`"']/g, "");
     if (files.includes(cand)) file = cand;
@@ -87,9 +90,8 @@ export async function editSite(env: Env, db: DB, request: string): Promise<{ com
 
   // 4) новое содержимое
   const raw = await askAI(
-    env.ANTHROPIC_API_KEY!,
-    `Ты редактируешь файл сайта \`${file}\`. Текущее содержимое:\n\n${content}\n\n---\nЗадача: ${request}\n\nВерни ПОЛНОЕ новое содержимое файла целиком (только код файла), сохрани стиль и структуру, не добавляй пояснений и markdown-ограждений.`,
-    model
+    ai,
+    `Ты редактируешь файл сайта \`${file}\`. Текущее содержимое:\n\n${content}\n\n---\nЗадача: ${request}\n\nВерни ПОЛНОЕ новое содержимое файла целиком (только код файла), сохрани стиль и структуру, не добавляй пояснений и markdown-ограждений.`
   );
   let next = raw.replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/i, "").trim();
   if (!next || next === content.trim()) throw new Error("ИИ не внёс изменений — переформулируй запрос");

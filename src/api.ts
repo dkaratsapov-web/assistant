@@ -1,7 +1,7 @@
-import { askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutrition, estimateBurn } from "./ai";
+import { aiConfig, askAIChat, ChatMessage, estimateNutrition, estimateBurn } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
-import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, metrikaStats } from "./telemost";
+import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
 import { transcribeVoice } from "./speech";
 import { buildNutritionSummary } from "./reports";
 import {
@@ -91,6 +91,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const tz = tzOffsetOf(env);
+  const ai = aiConfig(env);
 
   const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
   const tgUser = await validateInitData(initData, env.BOT_TOKEN);
@@ -345,7 +346,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/health/advice" && request.method === "POST") {
-    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+    if (!ai) return json({ error: "ai_not_configured" }, 400);
     const tzh = tzOffsetOf(env);
     const start = startOfLocalDayIso(tzh), end = startOfLocalDayOffsetIso(tzh, 1);
     const entries = await db.listFood(uid, start, end);
@@ -366,7 +367,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const ctx = await db.profileContext(uid);
     const msgs: ChatMessage[] = ctx ? [{ role: "system", text: ctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
     try {
-      const advice = await askAIChat(env.ANTHROPIC_API_KEY, msgs, DEFAULT_MODEL);
+      const advice = await askAIChat(ai, msgs);
       return json({ advice });
     } catch (e) {
       return json({ error: "advice_failed", message: (e as Error).message }, 502);
@@ -381,8 +382,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.kcal != null) {
       n = { title, kcal: Math.max(0, Math.round(+body.kcal || 0)), protein: Math.max(0, Math.round(+(body.protein ?? 0))), fat: Math.max(0, Math.round(+(body.fat ?? 0))), carbs: Math.max(0, Math.round(+(body.carbs ?? 0))) };
     } else {
-      if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
-      const est = await estimateNutrition(env.ANTHROPIC_API_KEY, title);
+      if (!ai) return json({ error: "ai_not_configured" }, 400);
+      const est = await estimateNutrition(ai, title);
       if (!est) return json({ error: "estimate_failed" }, 502);
       n = est;
     }
@@ -425,7 +426,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     let kcal = 0;
     if (b.steps != null && +b.steps > 0) { const st = Math.round(+b.steps); title = title || `Шаги: ${st}`; kcal = Math.round(st * 0.04); }
     else if (b.kcal != null) { kcal = Math.max(0, Math.round(+b.kcal || 0)); }
-    else if (title && env.ANTHROPIC_API_KEY) { kcal = (await estimateBurn(env.ANTHROPIC_API_KEY, title)) ?? 0; }
+    else if (title && ai) { kcal = (await estimateBurn(ai, title)) ?? 0; }
     if (!title) return json({ error: "empty" }, 400);
     const type = (b.type ?? "").slice(0, 30);
     const duration = Math.max(0, Math.round(+(b.duration ?? 0) || 0));
@@ -475,7 +476,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/health/menu" && request.method === "POST") {
-    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+    if (!ai) return json({ error: "ai_not_configured" }, 400);
     const kcalGoal = parseInt((await db.getSetting(`hkcal:${uid}`)) ?? "", 10) || 2000;
     const pGoal = parseInt((await db.getSetting(`hprot:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 4);
     const fGoal = parseInt((await db.getSetting(`hfat:${uid}`)) ?? "", 10) || Math.round((kcalGoal * 0.3) / 9);
@@ -487,7 +488,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const ctx = await db.profileContext(uid);
     const msgs: ChatMessage[] = ctx ? [{ role: "system", text: ctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
     try {
-      const menu = await askAIChat(env.ANTHROPIC_API_KEY, msgs, DEFAULT_MODEL);
+      const menu = await askAIChat(ai, msgs);
       return json({ menu });
     } catch (e) {
       return json({ error: "menu_failed", message: (e as Error).message }, 502);
@@ -534,7 +535,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (path === "/api/telemost/auth-url" && request.method === "GET") {
     if (user.role !== ROLE_OWNER) return json({ error: "forbidden" }, 403);
     if (!env.TELEMOST_CLIENT_ID) return json({ error: "no_client_id" }, 400);
-    return json({ url: telemostAuthUrl(env.TELEMOST_CLIENT_ID) });
+    return json({ url: telemostAuthUrl(env.TELEMOST_CLIENT_ID, undefined, await telemostState(env.WEBHOOK_SECRET)) });
   }
 
   // POST /api/telemost/connect {code} — обменять код на токены (owner)
@@ -728,9 +729,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
-  // POST /api/ai — диалог с ИИ (Claude); история хранится на сервере
+  // POST /api/ai — диалог с ИИ (YandexGPT); история хранится на сервере
   if (path === "/api/ai" && request.method === "POST") {
-    if (!env.ANTHROPIC_API_KEY) return json({ error: "ai_not_configured" }, 400);
+    if (!ai) return json({ error: "ai_not_configured" }, 400);
     const body = (await request.json()) as { messages?: { role?: string; content?: string }[]; prompt?: string };
     let userText = typeof body.prompt === "string" ? body.prompt.trim() : "";
     if (!userText && Array.isArray(body.messages)) {
@@ -738,8 +739,6 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       userText = (last?.content ?? "").trim();
     }
     if (!userText) return json({ error: "empty" }, 400);
-
-    const model = env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
 
     // 1) Команда (создать задачу/встречу/контакт) или обычный вопрос?
     let reply: string;
@@ -757,7 +756,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           .map((m) => ({ role: m.role as "user" | "assistant", text: m.content })),
         { role: "user", text: userText },
       ];
-      reply = await askAIChat(env.ANTHROPIC_API_KEY, msgs, model);
+      reply = await askAIChat(ai, msgs);
     }
     // Сохраняем в кеш (даже если это сообщение об ошибке — чтобы диалог был честным)
     await db.addAiMessage(uid, "user", userText);

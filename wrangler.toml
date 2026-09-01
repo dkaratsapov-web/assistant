@@ -19,8 +19,11 @@ crons = ["*/5 * * * *", "0 * * * *"]
 
 [vars]
 # Несекретные настройки. Секретами задаются: BOT_TOKEN, OWNER_ID, WEBHOOK_SECRET,
-# ANTHROPIC_API_KEY (ИИ), YANDEX_API_KEY + YANDEX_FOLDER_ID (голос). См. README.
-ANTHROPIC_MODEL = "claude-sonnet-5"  # модель ИИ Claude
-# YANDEX_FOLDER_ID = "..."           # каталог Yandex Cloud для SpeechKit (можно секретом)
+# YANDEX_API_KEY (ИИ + голос). См. README.
+YANDEX_GPT_MODEL = "yandexgpt/latest"             # основная модель (диалог, тексты, документы)
+YANDEX_GPT_ROUTER_MODEL = "yandexgpt-lite/latest" # дешёвая модель: разбор команд, калории
+# YANDEX_VISION_MODEL = "gpt://<folder>/<vlm>"    # мультимодальная модель для фото еды (Model Gallery)
+# YANDEX_FOLDER_ID = "..."                        # каталог Yandex Cloud (можно секретом)
+# BOT_USERNAME = "my_assistant_bot"               # ник бота без @ (для команд вида /tasks@bot)
 TZ_OFFSET = "3"       # смещение часового пояса от UTC (Москва = 3)
 DIGEST_HOUR = "9"     # час утреннего дайджеста по местному времени

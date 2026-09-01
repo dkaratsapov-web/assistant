@@ -1,0 +1,37 @@
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;width:500px;height:500px;overflow:hidden;background:#6a4fee}
+svg{display:block;position:fixed;top:0;left:0;width:500px;height:500px}
+</style></head><body>
+<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5B4BE8"/>
+      <stop offset="55%" stop-color="#7B57F0"/>
+      <stop offset="100%" stop-color="#37C2CC"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#170F3D" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+
+  <rect width="500" height="500" fill="url(#bg)"/>
+  <rect width="500" height="500" fill="url(#sheen)"/>
+
+  <!-- облачко диалога с хвостиком -->
+  <g filter="url(#soft)">
+    <path d="M136 116h228c26.5 0 48 21.5 48 48v152c0 26.5-21.5 48-48 48H248l-64 46c-9 6.5-21 0-21-11v-35h-27c-26.5 0-48-21.5-48-48V164c0-26.5 21.5-48 48-48z" fill="#ffffff"/>
+  </g>
+
+  <!-- монограмма S -->
+  <text x="250" y="291" font-family="'DejaVu Sans','Liberation Sans',Arial,Helvetica,sans-serif"
+        font-size="168" font-weight="700" fill="#5B4BE8" text-anchor="middle" letter-spacing="-2">S</text>
+
+  <!-- искры -->
+  <path d="M404 74l12.5 32.5L449 119l-32.5 12.5L404 164l-12.5-32.5L359 119l32.5-12.5z" fill="#FFD25A"/>
+  <path d="M446 178l6.5 17 17 6.5-17 6.5-6.5 17-6.5-17-17-6.5 17-6.5z" fill="#FFD25A" opacity="0.9"/>
+</svg>
+</body></html>

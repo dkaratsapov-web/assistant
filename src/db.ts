@@ -19,6 +19,13 @@ import {
 
 const nowIso = () => new Date().toISOString();
 
+/**
+ * Флаги «схема уже проверена» — на уровне модуля, а не экземпляра: DB создаётся заново
+ * на каждый запрос, и поля экземпляра заставляли гонять DDL при каждом обращении.
+ * Изолят Worker'а живёт между запросами, поэтому CREATE TABLE / ALTER выполняются один раз.
+ */
+const ready = { schema: false, ai: false, settings: false, supp: false, health: false };
+
 export class DB {
   constructor(private d1: D1Database) {}
 
@@ -134,9 +141,8 @@ export class DB {
   }
 
   /** Безопасная авто-миграция: добавляет колонку done_at, если базу создавали из старой схемы. */
-  private schemaReady = false;
   private async ensureSchema(): Promise<void> {
-    if (this.schemaReady) return;
+    if (ready.schema) return;
     const alters = [
       "ALTER TABLE tasks ADD COLUMN done_at TEXT",
       "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
@@ -153,7 +159,7 @@ export class DB {
         // колонка уже есть — игнорируем
       }
     }
-    this.schemaReady = true;
+    ready.schema = true;
   }
 
   // ---------- Задачи ----------
@@ -500,9 +506,8 @@ export class DB {
   }
 
   // ---------- История диалога с ИИ (кеш переписки) ----------
-  private aiReady = false;
   private async ensureAiTable(): Promise<void> {
-    if (this.aiReady) return;
+    if (ready.ai) return;
     await this.d1
       .prepare(
         `CREATE TABLE IF NOT EXISTS ai_messages (
@@ -515,7 +520,7 @@ export class DB {
       )
       .run();
     await this.d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_messages(user_id, id)").run();
-    this.aiReady = true;
+    ready.ai = true;
   }
 
   async addAiMessage(userId: number, role: "user" | "assistant", content: string): Promise<void> {
@@ -542,11 +547,10 @@ export class DB {
   }
 
   // ---------- Настройки (ключ-значение): интеграции, токены и т.п. ----------
-  private setReady = false;
   private async ensureSettings(): Promise<void> {
-    if (this.setReady) return;
+    if (ready.settings) return;
     await this.d1.prepare("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)").run();
-    this.setReady = true;
+    ready.settings = true;
   }
 
   async getSetting(key: string): Promise<string | null> {
@@ -612,9 +616,8 @@ export class DB {
   }
 
   // ---------- БАДы / фарма (курсы приёма) ----------
-  private suppReady = false;
   private async ensureSupp(): Promise<void> {
-    if (this.suppReady) return;
+    if (ready.supp) return;
     await this.d1
       .prepare(
         "CREATE TABLE IF NOT EXISTS supplement (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, dose TEXT DEFAULT '', times TEXT DEFAULT '[]', start_date TEXT DEFAULT '', days INTEGER DEFAULT 0, notes TEXT DEFAULT '', active INTEGER DEFAULT 1, created_at TEXT NOT NULL)"
@@ -623,7 +626,7 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS supplement_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, sup_id INTEGER NOT NULL, date TEXT NOT NULL, slot TEXT NOT NULL, created_at TEXT NOT NULL)")
       .run();
-    this.suppReady = true;
+    ready.supp = true;
   }
 
   async addSupplement(userId: number, s: { name: string; dose?: string; times?: string[]; startDate?: string; days?: number; notes?: string }): Promise<number> {
@@ -737,9 +740,8 @@ export class DB {
   }
 
   // ---------- Здоровье: питание и вода ----------
-  private healthReady = false;
   private async ensureHealth(): Promise<void> {
-    if (this.healthReady) return;
+    if (ready.health) return;
     await this.d1
       .prepare(
         "CREATE TABLE IF NOT EXISTS food_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, ts TEXT NOT NULL, title TEXT NOT NULL, kcal INTEGER DEFAULT 0, protein INTEGER DEFAULT 0, fat INTEGER DEFAULT 0, carbs INTEGER DEFAULT 0)"
@@ -768,7 +770,7 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS wellbeing (user_id INTEGER NOT NULL, date TEXT NOT NULL, sleep REAL, mood TEXT, PRIMARY KEY (user_id, date))")
       .run();
-    this.healthReady = true;
+    ready.health = true;
   }
 
   async addActivity(userId: number, title: string, kcal: number, type = "", durationMin = 0): Promise<number> {

@@ -3,7 +3,7 @@
  * и создаёт запись в БД. Используется и в Mini App (/api/ai), и в боте (текст/голос),
  * чтобы поведение было одинаковым.
  */
-import { AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
+import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
 import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
@@ -153,7 +153,7 @@ const ACTION_RE = /(добав|запланир|напомн|созда|запи
 
 /**
  * Локальный разбор частых команд БЕЗ обращения к ИИ (экономия расхода).
- * Возвращает намерение для однозначных шаблонов без дат, иначе null (тогда — Claude).
+ * Возвращает намерение для однозначных шаблонов без дат, иначе null (тогда — YandexGPT).
  */
 export function localRoute(text: string): AssistantIntent | null {
   const t = text.trim();
@@ -190,6 +190,7 @@ export async function tryPerformCommand(
   forceTask = false
 ): Promise<string | null> {
   const tz = tzOffsetOf(env);
+  const ai = aiConfig(env);
   const dayStart = startOfLocalDayIso(tz);
   const dayEnd = startOfLocalDayOffsetIso(tz, 1);
 
@@ -244,8 +245,8 @@ export async function tryPerformCommand(
     if (n >= 1 && n <= 21) { await db.setSetting(`wgoal:${uid}`, String(n)); return `🎯 Цель: ${n} трениров${n === 1 ? "ка" : n < 5 ? "ки" : "ок"} в неделю.`; }
   }
   // Тренировка/активность
-  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед|заняти|кардио|силов|растяж|планк)/i.test(text) && env.ANTHROPIC_API_KEY) {
-    const kc = (await estimateBurn(env.ANTHROPIC_API_KEY, text)) ?? 0;
+  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед|заняти|кардио|силов|растяж|планк)/i.test(text) && ai) {
+    const kc = (await estimateBurn(ai, text)) ?? 0;
     let dur = 0;
     let dm;
     if ((dm = text.match(/(\d{1,3})\s*(?:мин|минут)/i))) dur = parseInt(dm[1], 10);
@@ -281,8 +282,8 @@ export async function tryPerformCommand(
   const notOtherEntity = !/(встреч|созвон|задач|клиент|напомни|перезвон|позвон|заплан)/i.test(text);
   const looksLikeFood = notOtherEntity && (FOOD_RE.test(text) || (hasMealWord && /(добав|запиш|плюс|учти|засчита|занеси|внеси)/i.test(text)));
   if (looksLikeFood) {
-    if (!env.ANTHROPIC_API_KEY) return null;
-    const n = await estimateNutrition(env.ANTHROPIC_API_KEY, text);
+    if (!ai) return null;
+    const n = await estimateNutrition(ai, text);
     if (n) {
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       const meal = mealFromText(text) || mealByHour(localHour);
@@ -298,16 +299,16 @@ export async function tryPerformCommand(
     if (a) return a;
   }
 
-  if (!env.ANTHROPIC_API_KEY) return null;
+  if (!ai) return null;
   const now = nowContext(tz);
 
-  // 1) Иначе — распознавание команды на дешёвой модели (ROUTER_MODEL)
-  const intent = await routeAssistant(env.ANTHROPIC_API_KEY, text, now);
+  // 1) Иначе — распознавание команды на дешёвой модели (yandexgpt-lite)
+  const intent = await routeAssistant(ai, text, now);
   let action = await performIntent(intent, db, uid, tz);
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {
-    const p = await parseTaskFromText(env.ANTHROPIC_API_KEY, text, now);
+    const p = await parseTaskFromText(ai, text, now);
     const title = (p?.title || text).trim();
     if (title) {
       const dueAt = p?.due ? resolveWhen(p.due, tz, 10) : resolveWhen(text, tz, 10);

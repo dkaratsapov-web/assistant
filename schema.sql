@@ -97,3 +97,102 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_messages(user_id, id);
+
+-- ---------------------------------------------------------------------------
+-- Ниже — таблицы, которые бот умеет создавать сам при первом обращении
+-- (CREATE TABLE IF NOT EXISTS в src/db.ts). Держим их и здесь, чтобы схему
+-- можно было развернуть целиком одной командой и видеть структуру базы.
+-- ---------------------------------------------------------------------------
+
+-- Ключ-значение: токены интеграций, цели по калориям/воде, служебные отметки
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Дневник питания
+CREATE TABLE IF NOT EXISTS food_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  ts      TEXT NOT NULL,
+  title   TEXT NOT NULL,
+  kcal    INTEGER DEFAULT 0,
+  protein INTEGER DEFAULT 0,
+  fat     INTEGER DEFAULT 0,
+  carbs   INTEGER DEFAULT 0,
+  meal    TEXT DEFAULT ''      -- breakfast | lunch | dinner | snack | ''
+);
+
+-- Вода (мл за приём)
+CREATE TABLE IF NOT EXISTS water_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  ts      TEXT NOT NULL,
+  ml      INTEGER NOT NULL
+);
+
+-- Вес
+CREATE TABLE IF NOT EXISTS weight_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  ts      TEXT NOT NULL,
+  kg      REAL NOT NULL
+);
+
+-- Заметки по здоровью (самочувствие, симптомы)
+CREATE TABLE IF NOT EXISTS health_note (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  ts      TEXT NOT NULL,
+  text    TEXT NOT NULL
+);
+
+-- Тренировки и активность
+CREATE TABLE IF NOT EXISTS activity_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL,
+  ts           TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  kcal         INTEGER DEFAULT 0,
+  type         TEXT DEFAULT '',      -- кардио | силовая | растяжка | другое
+  duration_min INTEGER DEFAULT 0
+);
+
+-- Сон и настроение (одна запись на день)
+CREATE TABLE IF NOT EXISTS wellbeing (
+  user_id INTEGER NOT NULL,
+  date    TEXT NOT NULL,             -- YYYY-MM-DD (местная дата)
+  sleep   REAL,
+  mood    TEXT,
+  PRIMARY KEY (user_id, date)
+);
+
+-- Курсы БАДов/фармы и отметки приёма
+CREATE TABLE IF NOT EXISTS supplement (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  dose       TEXT DEFAULT '',
+  times      TEXT DEFAULT '[]',      -- JSON-массив "HH:MM"
+  start_date TEXT DEFAULT '',
+  days       INTEGER DEFAULT 0,      -- 0 = бессрочно
+  notes      TEXT DEFAULT '',
+  active     INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS supplement_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  sup_id     INTEGER NOT NULL,
+  date       TEXT NOT NULL,
+  slot       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_food_user ON food_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_water_user ON water_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_weight_user ON weight_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_supp_user ON supplement(user_id, active);
+CREATE INDEX IF NOT EXISTS idx_supplog_user ON supplement_log(user_id, date);

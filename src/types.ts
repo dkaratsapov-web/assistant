@@ -6,12 +6,14 @@ export interface Env {
   BOT_TOKEN: string;
   OWNER_ID: string;
   WEBHOOK_SECRET: string;
-  // ИИ-«мозги»: Claude (Anthropic)
-  ANTHROPIC_API_KEY?: string; // секрет
-  ANTHROPIC_MODEL?: string;   // напр. "claude-sonnet-5"
-  // Распознавание речи: Yandex SpeechKit
-  YANDEX_API_KEY?: string;    // секрет: API-ключ сервисного аккаунта
-  YANDEX_FOLDER_ID?: string;  // идентификатор каталога Yandex Cloud
+  BOT_USERNAME?: string;  // ник бота без @ (нужен grammy для разбора команд вида /tasks@bot)
+  BOT_NAME?: string;      // отображаемое имя бота
+  // ИИ-«мозги» и голос — Yandex Cloud (YandexGPT + SpeechKit), один API-ключ на оба сервиса
+  YANDEX_API_KEY?: string;         // секрет: API-ключ сервисного аккаунта
+  YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
+  YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"
+  YANDEX_GPT_ROUTER_MODEL?: string;// дешёвая модель для разбора команд, по умолчанию "yandexgpt-lite/latest"
+  YANDEX_VISION_MODEL?: string;    // мультимодальная модель для фото еды; пусто — разбор фото выключен
   TZ_OFFSET?: string;
   DIGEST_HOUR?: string;
   // Канал MAX (мессенджер MAX)

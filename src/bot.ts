@@ -1,5 +1,5 @@
 import { Bot, Context, InlineKeyboard, InputFile, Keyboard } from "grammy";
-import { askAI, askAIChat, ChatMessage, DEFAULT_MODEL, estimateNutritionFromImage } from "./ai";
+import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutritionFromImage, visionEnabled } from "./ai";
 import { buildDocx } from "./docx";
 import { buildPptx, Slide } from "./pptx";
 import { buildNutritionSummary } from "./reports";
@@ -152,8 +152,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   const botInfo = {
     id: botId,
     is_bot: true as const,
-    first_name: "Assistant",
-    username: "assistant_bot",
+    first_name: env.BOT_NAME || "Assistant",
+    username: env.BOT_USERNAME || "assistant_bot",
     can_join_groups: false,
     can_read_all_group_messages: false,
     supports_inline_queries: false,
@@ -166,6 +166,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   };
   const bot = new Bot<MyContext>(env.BOT_TOKEN, { botInfo });
   const db = new DB(env.DB);
+  const ai = aiConfig(env);
   const ownerId = parseInt(env.OWNER_ID, 10);
   const tz = tzOffsetOf(env);
 
@@ -621,14 +622,18 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   // Фото еды → оценка калорий/БЖУ и запись в дневник
   // Общая обработка фото еды (для сжатых фото и изображений, присланных «как файл»)
   async function handleFoodPhoto(ctx: MyContext, fileId: string, mediaType: string, caption: string) {
-    if (!env.ANTHROPIC_API_KEY) { await ctx.reply("ИИ не настроен."); return; }
+    if (!ai) { await ctx.reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."); return; }
+    if (!visionEnabled(ai)) {
+      await ctx.reply("Разбор фото пока не подключён (нужна мультимодальная модель — переменная YANDEX_VISION_MODEL).\nОпиши блюдо текстом или голосом — посчитаю калории: например «съел борщ с хлебом».");
+      return;
+    }
     const status = await ctx.reply("📷 Оцениваю блюдо по фото…");
     const done = async (t: string) => { try { await ctx.api.editMessageText(ctx.chat!.id, status.message_id, t, HTML); } catch { await ctx.reply(t, HTML); } };
     try {
       const file = await ctx.api.getFile(fileId);
       if (!file.file_path) throw new Error("нет файла");
       const buf = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
-      const n = await estimateNutritionFromImage(env.ANTHROPIC_API_KEY, bytesToBase64(buf), mediaType, caption);
+      const n = await estimateNutritionFromImage(ai, bytesToBase64(buf), mediaType, caption);
       if (!n) { await done("Не смогла распознать еду на фото 🤔 Опиши текстом — например «съел борщ с хлебом»."); return; }
       const tz = Number(env.TZ_OFFSET ?? 3) || 3;
       const meal = mealFromText(caption) || mealByHour(new Date(Date.now() + tz * 3600_000).getUTCHours());
@@ -739,8 +744,8 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       }
       case BTN_HELP: return ctx.reply(HELP_TEXT, HTML);
       case BTN_AI: {
-        if (!env.ANTHROPIC_API_KEY) {
-          await ctx.reply("ИИ-помощник не настроен. Добавь ANTHROPIC_API_KEY, чтобы включить.");
+        if (!ai) {
+          await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
           return;
         }
         await db.setState(ctx.from!.id, { step: "ai_mode" });
@@ -749,8 +754,19 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         );
         return;
       }
-      default:
-        await ctx.reply("Не понял. Открой меню кнопками или /help.");
+      default: {
+        // Свободный текст вне режима ИИ: сначала пробуем выполнить команду, иначе отвечает Сара
+        const action = await tryPerformCommand(env, db, ctx.from!.id, text, false);
+        if (action) {
+          await ctx.reply(action);
+          return;
+        }
+        if (!ai) {
+          await ctx.reply("Не понял. Открой меню кнопками или /help.");
+          return;
+        }
+        return replyAI(ctx, text);
+      }
     }
   });
 
@@ -770,22 +786,24 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return;
     }
     await ctx.reply(`📋 Активные задачи: ${tasks.length}`);
+    // имена клиентов достаём одним запросом, а не по клиенту на задачу
+    const names = new Map((await db.listClients()).map((c) => [c.id, c.name]));
     for (const t of tasks.slice(0, 12)) {
-      const client = t.client_id ? await db.getClient(t.client_id) : null;
-      await ctx.reply(taskLine(t, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(t.id, t.status) });
+      const client = t.client_id ? names.get(t.client_id) ?? null : null;
+      await ctx.reply(taskLine(t, client, tz), { ...HTML, reply_markup: taskActions(t.id, t.status) });
     }
     if (tasks.length > 12) await ctx.reply(`…и ещё ${tasks.length - 12}. Полный список — в приложении «📲».`);
   }
 
   async function replyAI(ctx: MyContext, prompt: string) {
-    if (!env.ANTHROPIC_API_KEY) {
-      await ctx.reply("ИИ-помощник не настроен. Добавь ANTHROPIC_API_KEY, чтобы включить.");
+    if (!ai) {
+      await ctx.reply("ИИ-помощник не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы включить.");
       return;
     }
     const thinking = await ctx.reply("💭 Думаю…");
     const pctx = await db.profileContext(ctx.from!.id);
     const msgs: ChatMessage[] = pctx ? [{ role: "system", text: pctx }, { role: "user", text: prompt }] : [{ role: "user", text: prompt }];
-    const answer = await askAIChat(env.ANTHROPIC_API_KEY, msgs, env.ANTHROPIC_MODEL ?? DEFAULT_MODEL);
+    const answer = await askAIChat(ai, msgs);
     try {
       await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id);
     } catch {}
@@ -793,17 +811,16 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   }
 
   async function makeAndSendDoc(ctx: MyContext, request: string) {
-    if (!env.ANTHROPIC_API_KEY) {
-      await ctx.reply("ИИ не настроен. Добавь ANTHROPIC_API_KEY, чтобы формировать документы.");
+    if (!ai) {
+      await ctx.reply("ИИ не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы формировать документы.");
       return;
     }
     const thinking = await ctx.reply("📝 Готовлю документ…");
     const content = await askAI(
-      env.ANTHROPIC_API_KEY,
+      ai,
       `Составь готовый деловой документ по запросу: "${request}". ` +
         `Первая строка — краткий заголовок документа. Далее — содержание. ` +
-        `Обычный текст (без markdown-разметки, без ** и #), абзацы — с новой строки.`,
-      env.ANTHROPIC_MODEL ?? DEFAULT_MODEL
+        `Обычный текст (без markdown-разметки, без ** и #), абзацы — с новой строки.`
     );
     try { await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id); } catch {}
     if (content.startsWith("⚠️")) { await ctx.reply(content); return; }
@@ -819,20 +836,19 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   const PRESO_RE = /(презентаци|слайд|pptx|powerpoint|power point|питч[- ]?дек|pitch)/i;
 
   async function makeAndSendPresentation(ctx: MyContext, request: string) {
-    if (!env.ANTHROPIC_API_KEY) {
-      await ctx.reply("ИИ не настроен. Добавь ANTHROPIC_API_KEY, чтобы формировать презентации.");
+    if (!ai) {
+      await ctx.reply("ИИ не настроен. Добавь YANDEX_API_KEY и YANDEX_FOLDER_ID, чтобы формировать презентации.");
       return;
     }
     const thinking = await ctx.reply("📊 Собираю презентацию…");
     const raw = await askAI(
-      env.ANTHROPIC_API_KEY,
+      ai,
       `Составь структуру презентации по запросу: "${request}".\n` +
         `Верни СТРОГО JSON-массив слайдов, без markdown и пояснений. Формат:\n` +
         `[{"title":"Заголовок титульного слайда","subtitle":"подзаголовок"},` +
         `{"title":"Заголовок слайда","bullets":["пункт 1","пункт 2","пункт 3"]}]\n` +
         `Первый элемент — титульный (title + subtitle). Далее 5–9 содержательных слайдов ` +
-        `(title + 3–6 коротких пунктов bullets). Пиши по-русски, по делу, без воды.`,
-      env.ANTHROPIC_MODEL ?? DEFAULT_MODEL
+        `(title + 3–6 коротких пунктов bullets). Пиши по-русски, по делу, без воды.`
     );
     try { await ctx.api.deleteMessage(ctx.chat!.id, thinking.message_id); } catch {}
     let slides: Slide[] = [];

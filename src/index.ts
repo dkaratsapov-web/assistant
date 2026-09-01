@@ -1,7 +1,7 @@
 import { handleApi } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
-import { telemostAuthUrl, telemostExchangeCode } from "./telemost";
+import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
 import { buildDigest } from "./reports";
@@ -136,19 +136,25 @@ async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx:
 }
 
 /** Одноразовое подключение Телемоста: редирект на OAuth Яндекса. */
-function handleTelemostAuth(request: Request, env: Env, origin: string): Response {
+async function handleTelemostAuth(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
   if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
     return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
   }
   if (!env.TELEMOST_CLIENT_ID) return new Response("TELEMOST_CLIENT_ID не задан", { status: 400 });
-  // Без своего redirect: Яндекс покажет код подтверждения — его нужно прислать боту командой /telemost <код>
-  return Response.redirect(telemostAuthUrl(env.TELEMOST_CLIENT_ID), 302);
+  // Без своего redirect: Яндекс покажет код подтверждения — его нужно прислать боту командой /telemost <код>.
+  // state нужен, если у OAuth-приложения задан redirect на /telemost/callback: колбэк примет код только со своим state.
+  return Response.redirect(telemostAuthUrl(env.TELEMOST_CLIENT_ID, undefined, await telemostState(env.WEBHOOK_SECRET)), 302);
 }
 
 /** Колбэк OAuth Телемоста: меняем code на токены и сохраняем. */
 async function handleTelemostCallback(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
+  // Колбэк открыт наружу, поэтому принимаем код только со своим state — иначе чужой
+  // токен перезапишет сохранённый (CSRF).
+  if (url.searchParams.get("state") !== (await telemostState(env.WEBHOOK_SECRET))) {
+    return new Response("forbidden: неверный state", { status: 403 });
+  }
   const code = url.searchParams.get("code");
   if (!code) return new Response(`Ошибка авторизации: ${url.searchParams.get("error") ?? "нет кода"}`, { status: 400 });
   const db = new DB(env.DB);
@@ -197,6 +203,16 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const db = new DB(env.DB);
     const tz = tzOffsetOf(env);
+    // настройки уведомлений читаем один раз на пользователя за прогон крона
+    const notifCache = new Map<number, Awaited<ReturnType<DB["getNotif"]>>>();
+    const notifOf = async (uid: number) => {
+      let n = notifCache.get(uid);
+      if (!n) {
+        n = await db.getNotif(uid);
+        notifCache.set(uid, n);
+      }
+      return n;
+    };
 
     if (event.cron === "*/5 * * * *") {
       // Напоминания о наступивших дедлайнах задач (если включено у получателя)
@@ -204,7 +220,7 @@ export default {
       for (const t of tasks) {
         const recipient = t.assignee_id ?? t.creator_id;
         try {
-          const notif = await db.getNotif(recipient);
+          const notif = await notifOf(recipient);
           if (!notif.tasks.on) { await db.markReminded(t.id); continue; }
           await tgSend(env.BOT_TOKEN, recipient, `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
           await db.markReminded(t.id);
@@ -216,7 +232,7 @@ export default {
       const events = await db.eventsDueForReminder(new Date().toISOString());
       for (const ev of events) {
         try {
-          const notif = await db.getNotif(ev.user_id);
+          const notif = await notifOf(ev.user_id);
           if (!notif.events.on) { await db.markEventReminded(ev.id); continue; }
           await tgSend(env.BOT_TOKEN, ev.user_id, `📅 Скоро встреча: ${ev.title}\n🕒 ${formatEventTime(ev.starts_at, tz)}${ev.location ? `\n📍 ${ev.location}` : ""}`);
           await db.markEventReminded(ev.id);
@@ -239,7 +255,7 @@ export default {
       const bdays = await db.birthdaysForReminder(mmdd, year);
       for (const c of bdays) {
         try {
-          const notif = await db.getNotif(c.user_id);
+          const notif = await notifOf(c.user_id);
           if (!notif.birthdays.on || notif.morning.hour !== localHour) continue;
           await tgSend(env.BOT_TOKEN, c.user_id, `🎂 Сегодня день рождения: <b>${c.name}</b>!\nНе забудь поздравить 🎉${c.phone ? `\n📞 ${c.phone}` : ""}`);
           await db.markBirthdayReminded(c.id, year);
@@ -253,7 +269,7 @@ export default {
       const start = startOfLocalDayIso(tz), end = startOfLocalDayOffsetIso(tz, 1);
       for (const u of recipients) {
         try {
-          const notif = await db.getNotif(u.user_id);
+          const notif = await notifOf(u.user_id);
           if (notif.morning.on && notif.morning.hour === localHour) {
             const text = await buildDigest(db, u.user_id, u.role, tz);
             await tgSend(env.BOT_TOKEN, u.user_id, "☀️ Доброе утро!\n\n" + text);
