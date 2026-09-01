@@ -1354,6 +1354,89 @@
 
     document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab, true); });
 
+    /** Сырые initData мини-приложения: у разных сборок MAX объект называется по-разному. */
+    function bridgeInitData() {
+      try {
+        const b = window.WebApp || window.MAX || window.maxWebApp || window.maxBridge || null;
+        const raw = b && (b.initData || b.initDataRaw || b.initDataUnsafe?.raw);
+        if (raw && typeof raw === "string") return raw;
+        const h = (location.hash || "").replace(/^#/, "");
+        return /(^|&)hash=/.test(h) ? h : "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    /** Пробуем войти по подписи мини-приложения. true — вошли, страница перезагрузится. */
+    async function tryBridgeLogin() {
+      const raw = bridgeInitData();
+      if (!raw) return false;
+      try {
+        const res = await fetch("/api/auth/max", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData: raw }),
+        });
+        if (!res.ok) return false;
+        const d = await res.json();
+        if (!d.token) return false;
+        localStorage.setItem(MAX_KEY, d.token);
+        location.reload();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    /** Экран входа: код из чата с ботом. */
+    function renderLogin(note) {
+      $("subtitle").textContent = "Нужен вход";
+      view.innerHTML = `
+        <div class="card" style="padding:18px;text-align:center">
+          <img src="${SARA}" alt="" style="width:96px;height:96px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
+          <div style="font-size:17px;font-weight:700;margin-bottom:6px">Вход в Сару</div>
+          <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
+            Отправь боту в чате команду <b>/code</b> — он пришлёт код из 8 символов. Введи его один раз, дальше приложение будет открываться сразу.
+          </div>
+          <div class="field" style="text-align:left">
+            <label>Код из чата</label>
+            <input id="login-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
+                   placeholder="Например, K7QM4XZP" style="text-transform:uppercase;letter-spacing:2px;font-weight:700">
+          </div>
+          <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-bottom:10px">${note ? esc(note) : ""}</div>
+          <button class="btn primary" style="width:100%" onclick="submitLoginCode()">Войти</button>
+        </div>`;
+      const input = $("login-code");
+      if (input) {
+        input.focus();
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitLoginCode(); });
+      }
+    }
+
+    window.submitLoginCode = async () => {
+      const input = $("login-code");
+      const msg = $("login-msg");
+      const code = (input?.value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (code.length !== 8) { if (msg) msg.textContent = "Код состоит из 8 символов."; return; }
+      if (msg) msg.textContent = "Проверяю…";
+      try {
+        const res = await fetch("/api/auth/code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.token) {
+          if (msg) msg.textContent = d.error === "no_access" ? "Доступ ещё не подтверждён владельцем." : "Код не подошёл — запроси новый командой /code.";
+          return;
+        }
+        localStorage.setItem(MAX_KEY, d.token);
+        location.reload();
+      } catch (e) {
+        if (msg) msg.textContent = "Не получилось. Попробуй ещё раз.";
+      }
+    };
+
     (async () => {
       try {
         me = await api("/me");
@@ -1365,9 +1448,9 @@
       } catch (e) {
         const m = String(e.message || e);
         if (m === "unauthorized") {
-          // Открыли по прямой ссылке (например, кнопкой мини-приложения в MAX) — нужен вход
-          $("subtitle").textContent = "Нужен вход";
-          view.innerHTML = emptyBox("Нужен вход", "Открой чат с Сарой и отправь команду /app — бот пришлёт персональную ссылку. Дальше приложение будет открываться сразу.");
+          // Открыли кнопкой мини-приложения в MAX: сначала пробуем подпись, иначе — код из чата
+          if (await tryBridgeLogin()) return;
+          renderLogin("");
         } else {
           $("subtitle").textContent = "Нет доступа";
           view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");

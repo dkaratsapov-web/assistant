@@ -106,6 +106,9 @@ export class DB {
     await this.d1
       .prepare("CREATE TABLE IF NOT EXISTS web_session (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
       .run();
+    await this.d1
+      .prepare("CREATE TABLE IF NOT EXISTS login_code (code TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
+      .run();
     ready.web = true;
   }
 
@@ -135,6 +138,38 @@ export class DB {
       .bind(userId, soon)
       .first<{ token: string }>();
     return row ? row.token : this.createWebSession(userId, ttlDays);
+  }
+
+  /**
+   * Одноразовый код входа в Mini App: бот выдаёт его в чате, приложение обменивает на сессию.
+   * Восемь символов без похожих (0/O, 1/I) — подобрать за 10 минут жизни нереально.
+   */
+  async createLoginCode(userId: number, ttlMin = 10): Promise<string> {
+    await this.ensureWeb();
+    const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const code = [...bytes].map((b) => ALPHABET[b % ALPHABET.length]).join("");
+    const expires = new Date(Date.now() + ttlMin * 60_000).toISOString();
+    await this.d1.prepare("DELETE FROM login_code WHERE user_id = ? OR expires_at < ?").bind(userId, nowIso()).run();
+    await this.d1
+      .prepare("INSERT INTO login_code (code, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+      .bind(code, userId, expires, nowIso())
+      .run();
+    return code;
+  }
+
+  /** Обменивает код входа на user_id (код одноразовый — сразу гасим). */
+  async redeemLoginCode(code: string): Promise<number | null> {
+    const clean = (code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (clean.length !== 8) return null;
+    await this.ensureWeb();
+    const row = await this.d1
+      .prepare("SELECT user_id FROM login_code WHERE code = ? AND expires_at > ?")
+      .bind(clean, nowIso())
+      .first<{ user_id: number }>();
+    if (!row) return null;
+    await this.d1.prepare("DELETE FROM login_code WHERE code = ?").bind(clean).run();
+    return row.user_id;
   }
 
   /** Возвращает user_id по токену Mini App или null (нет токена / протух). */

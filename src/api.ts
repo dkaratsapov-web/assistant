@@ -3,6 +3,8 @@ import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
 import { transcribeVoice } from "./speech";
+import { validateMaxInitData } from "./max/auth";
+import { CHANNEL_MAX, maxUid } from "./max/ids";
 import { buildNutritionSummary } from "./reports";
 import {
   Env,
@@ -92,6 +94,29 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const path = url.pathname;
   const tz = tzOffsetOf(env);
   const ai = aiConfig(env);
+
+  // ---------- Публичные эндпоинты входа (до проверки авторизации) ----------
+
+  // POST /api/auth/max {initData} — вход внутри мини-приложения MAX по подписи
+  if (path === "/api/auth/max" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { initData?: string };
+    const mu = await validateMaxInitData(body.initData ?? "", env.MAX_BOT_TOKEN ?? "");
+    if (!mu) return json({ error: "bad_signature" }, 401);
+    const muid = maxUid(mu.id);
+    const mUser = await db.ensureChannelUser(muid, CHANNEL_MAX, mu.id, mu.username ?? null, mu.name ?? null);
+    if (mUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
+    return json({ token: await db.webSessionFor(muid), role: mUser.role });
+  }
+
+  // POST /api/auth/code {code} — вход по одноразовому коду из чата с ботом
+  if (path === "/api/auth/code" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { code?: string };
+    const codeUid = await db.redeemLoginCode(body.code ?? "");
+    if (!codeUid) return json({ error: "bad_code" }, 400);
+    const codeUser = await db.getUser(codeUid);
+    if (!codeUser || codeUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
+    return json({ token: await db.webSessionFor(codeUid), role: codeUser.role });
+  }
 
   // Два способа входа: подпись Telegram initData либо токен сессии, выданный ботом
   // в другом канале (MAX) — там подписи Telegram нет.

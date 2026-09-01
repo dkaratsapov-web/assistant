@@ -38,6 +38,7 @@ const HELP = `🤖 Сара — команды в MAX:
 /addtask <текст> — новая задача (пример: /addtask Позвонить клиенту завтра 15:00)
 /digest — сводка на сегодня
 /app — открыть приложение (задачи, календарь, здоровье)
+/code — код для входа в приложение
 /ai <запрос> — спросить ИИ
 /help — помощь
 
@@ -174,6 +175,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     // Если мини-приложение зарегистрировано в кабинете MAX — открываем внутри мессенджера
     if (env.MAX_APP_NAME) buttons.push({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });
     buttons.push({ type: "link", text: buttons.length ? "🔗 В браузере" : "📲 Открыть приложение", url: link });
+    buttons.push({ type: "callback", text: "🔑 Код входа", payload: "login:code" });
     return buttons;
   }
 
@@ -200,6 +202,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
         .catch(() => {});
       return;
     }
+    if (action === "login" && arg === "code") return sendLoginCode();
     if (action === "menu") {
       if (arg === "tasks") return listTasks();
       if (arg === "digest") return sendDigest();
@@ -280,6 +283,8 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     case "/stop":
       await db.clearState(uid);
       return void (await reply("Ок, вышла из режима ИИ.", mainMenu(await appButtons())));
+    case "/code":
+      return sendLoginCode();
     case "/tasks":
       return listTasks();
     case "/digest":
@@ -317,6 +322,12 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       const status = TASK_STATUS_LABELS[t.status] ?? "";
       await reply(`#${t.id} ${t.title}${due ? `\n⏰ ${due}` : ""}\n${status}`, taskButtons(t.id));
     }
+  }
+
+  /** Код для входа в мини-приложение, когда оно открыто кнопкой MAX (без персональной ссылки). */
+  async function sendLoginCode() {
+    const code = await db.createLoginCode(uid);
+    await reply(`🔑 Код для входа в приложение:\n\n${code}\n\nВведи его в окне «Нужен вход». Код действует 10 минут и работает один раз.`);
   }
 
   async function sendDigest() {
