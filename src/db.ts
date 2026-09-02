@@ -100,6 +100,23 @@ export class DB {
     return (await this.getUser(userId))!;
   }
 
+  /**
+   * Приглашение: заранее выдаёт роль аккаунту канала по его внешнему id.
+   * Пользователь получает доступ сразу, как только напишет боту — подтверждать не нужно.
+   */
+  async inviteChannelUser(userId: number, channel: string, extId: number, role: string, note?: string): Promise<User> {
+    await this.ensureSchema();
+    await this.d1
+      .prepare(
+        `INSERT INTO users (user_id, username, full_name, role, created_at, channel, ext_id)
+         VALUES (?, NULL, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET role = excluded.role`
+      )
+      .bind(userId, note ?? null, role, nowIso(), channel, extId)
+      .run();
+    return (await this.getUser(userId))!;
+  }
+
   // ---------- Веб-сессии Mini App (для каналов без подписи initData, напр. MAX) ----------
   private async ensureWeb(): Promise<void> {
     if (ready.web) return;
@@ -310,22 +327,35 @@ export class DB {
     return res.meta.last_row_id as number;
   }
 
-  async getTask(id: number): Promise<Task | null> {
-    return await this.d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>();
-  }
-
-  /** Поиск активной задачи по названию (для «выполни/удали задачу …» голосом). */
-  async findTaskByTitle(title: string): Promise<Task | null> {
-    const n = title.trim().toLowerCase();
+  /** Задача по id, только если она принадлежит пользователю (создана им или назначена ему). */
+  async getTask(id: number, userId: number): Promise<Task | null> {
     return await this.d1
-      .prepare("SELECT * FROM tasks WHERE status IN ('open','in_progress') AND lower(title) LIKE ? ORDER BY (lower(title) = ?) DESC, created_at DESC LIMIT 1")
-      .bind(`%${n}%`, n)
+      .prepare("SELECT * FROM tasks WHERE id = ? AND (creator_id = ? OR assignee_id = ?)")
+      .bind(id, userId, userId)
       .first<Task>();
   }
 
+  /** Поиск активной задачи пользователя по названию (для «выполни/удали задачу …» голосом). */
+  async findTaskByTitle(userId: number, title: string): Promise<Task | null> {
+    const n = title.trim().toLowerCase();
+    return await this.d1
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE status IN ('open','in_progress') AND (creator_id = ? OR assignee_id = ?) AND lower(title) LIKE ?
+         ORDER BY (lower(title) = ?) DESC, created_at DESC LIMIT 1`
+      )
+      .bind(userId, userId, `%${n}%`, n)
+      .first<Task>();
+  }
+
+  /**
+   * Список задач. `visibleTo` — обязательная граница видимости: пользователь видит
+   * только свои задачи (созданные им или назначенные ему), включая владельца.
+   * Личные аккаунты изолированы: чужие задачи не попадают ни в списки, ни в сводки.
+   */
   async listTasks(opts: {
     statuses?: string[];
-    assigneeId?: number | null;
+    visibleTo?: number | null;
     clientId?: number | null;
     scope?: string | null;
     orderByDone?: boolean;
@@ -338,9 +368,9 @@ export class DB {
       q += ` AND status IN (${statuses.map(() => "?").join(",")})`;
       binds.push(...statuses);
     }
-    if (opts.assigneeId != null) {
+    if (opts.visibleTo != null) {
       q += " AND (assignee_id = ? OR creator_id = ?)";
-      binds.push(opts.assigneeId, opts.assigneeId);
+      binds.push(opts.visibleTo, opts.visibleTo);
     }
     if (opts.clientId != null) {
       q += " AND client_id = ?";
@@ -357,14 +387,19 @@ export class DB {
     return results ?? [];
   }
 
-  async setTaskStatus(id: number, status: string): Promise<void> {
+  /** Смена статуса своей задачи. Возвращает false, если задача чужая или её нет. */
+  async setTaskStatus(id: number, status: string, userId: number): Promise<boolean> {
     await this.ensureSchema();
     const doneAt = status === TASK_DONE ? nowIso() : null;
-    await this.d1.prepare("UPDATE tasks SET status = ?, done_at = ? WHERE id = ?").bind(status, doneAt, id).run();
+    const res = await this.d1
+      .prepare("UPDATE tasks SET status = ?, done_at = ? WHERE id = ? AND (creator_id = ? OR assignee_id = ?)")
+      .bind(status, doneAt, id, userId, userId)
+      .run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
-  /** Частичное обновление задачи (редактирование). */
-  async updateTask(id: number, fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number }): Promise<void> {
+  /** Частичное обновление своей задачи (редактирование). */
+  async updateTask(id: number, fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number }, userId?: number): Promise<void> {
     const sets: string[] = [];
     const binds: unknown[] = [];
     if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
@@ -373,11 +408,21 @@ export class DB {
     if (fields.priority !== undefined) { sets.push("priority = ?"); binds.push(fields.priority); }
     if (!sets.length) return;
     binds.push(id);
-    await this.d1.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+    let where = "id = ?";
+    if (userId != null) {
+      where += " AND (creator_id = ? OR assignee_id = ?)";
+      binds.push(userId, userId);
+    }
+    await this.d1.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE ${where}`).bind(...binds).run();
   }
 
-  async deleteTask(id: number): Promise<void> {
-    await this.d1.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
+  /** Удаление своей задачи. Возвращает false, если задача чужая или её нет. */
+  async deleteTask(id: number, userId: number): Promise<boolean> {
+    const res = await this.d1
+      .prepare("DELETE FROM tasks WHERE id = ? AND (creator_id = ? OR assignee_id = ?)")
+      .bind(id, userId, userId)
+      .run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   async tasksDueForReminder(nowIsoStr: string): Promise<Task[]> {

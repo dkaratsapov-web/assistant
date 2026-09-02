@@ -9,6 +9,8 @@ import { buildNutritionSummary } from "./reports";
 import {
   Env,
   NotifSettings,
+  ROLE_CLIENT,
+  ROLE_MEMBER,
   Profile,
   EMPTY_PROFILE,
   ROLE_OWNER,
@@ -139,6 +141,69 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
     return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+  }
+
+  // ---------- Админка владельца ----------
+  // Здесь только управление доступами: список аккаунтов, роли, приглашения.
+  // Содержимое чужих аккаунтов (задачи, здоровье, заметки) сюда не попадает —
+  // личные пространства остаются закрытыми даже для владельца.
+  if (path.startsWith("/api/admin/")) {
+    if (!isOwner) return json({ error: "forbidden" }, 403);
+
+    if (path === "/api/admin/users" && request.method === "GET") {
+      const users = await db.listUsers();
+      return json({
+        users: users.map((u) => ({
+          user_id: u.user_id,
+          channel: u.channel ?? "tg",
+          ext_id: u.ext_id ?? null,
+          name: u.full_name,
+          username: u.username,
+          role: u.role,
+          created_at: u.created_at,
+          is_me: u.user_id === uid,
+        })),
+      });
+    }
+
+    const roleMatch = path.match(/^\/api\/admin\/users\/(\d+)\/role$/);
+    if (roleMatch && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { role?: string };
+      const role = body.role ?? "";
+      if (![ROLE_MEMBER, ROLE_CLIENT].includes(role)) return json({ error: "bad_role" }, 400);
+      const target = parseInt(roleMatch[1], 10);
+      if (target === uid) return json({ error: "self" }, 400);
+      await db.setRole(target, role);
+      return json({ ok: true });
+    }
+
+    const userDel = path.match(/^\/api\/admin\/users\/(\d+)$/);
+    if (userDel && request.method === "DELETE") {
+      const target = parseInt(userDel[1], 10);
+      if (target === uid) return json({ error: "self" }, 400);
+      await db.deleteUser(target);
+      return json({ ok: true });
+    }
+
+    // Пригласить конкретный аккаунт: доступ откроется сразу, как он напишет боту
+    if (path === "/api/admin/invite" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { channel?: string; id?: number | string; role?: string; note?: string };
+      const extId = parseInt(String(body.id ?? ""), 10);
+      if (!extId) return json({ error: "bad_id" }, 400);
+      const role = body.role === ROLE_CLIENT ? ROLE_CLIENT : ROLE_MEMBER;
+      const channel = body.channel === CHANNEL_MAX ? CHANNEL_MAX : "tg";
+      const inviteUid = channel === CHANNEL_MAX ? maxUid(extId) : extId;
+      const invited = await db.inviteChannelUser(inviteUid, channel, extId, role, (body.note ?? "").trim() || undefined);
+      return json({ ok: true, user_id: invited.user_id, role: invited.role });
+    }
+
+    return json({ error: "not_found" }, 404);
+  }
+
+  // Клиентская база — рабочий инструмент владельца и команды.
+  // Личным аккаунтам (роль client) она не видна.
+  if ((path.startsWith("/api/clients") || path === "/api/reports/metrika") && user.role === ROLE_CLIENT) {
+    return json({ error: "forbidden" }, 403);
   }
 
   // ---------- БАДы / фарма ----------
@@ -609,7 +674,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       : filter === "in_progress" ? [TASK_IN_PROGRESS]
       : filter === "all" ? [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED]
       : [TASK_OPEN, TASK_IN_PROGRESS];
-    const tasks = await db.listTasks({ statuses, assigneeId: isOwner ? null : uid, scope, orderByDone: filter === "done" });
+    const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, orderByDone: filter === "done" });
     const out = [];
     for (const t of tasks) {
       const client = t.client_id ? await db.getClient(t.client_id) : null;
@@ -642,9 +707,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (statusMatch && request.method === "POST") {
     const body = (await request.json()) as { status?: string };
     if (![TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED].includes(body.status ?? "")) return json({ error: "bad_status" }, 400);
-    const task = await db.getTask(parseInt(statusMatch[1], 10));
+    const task = await db.getTask(parseInt(statusMatch[1], 10), uid);
     if (!task) return json({ error: "not_found" }, 404);
-    await db.setTaskStatus(task.id, body.status!);
+    await db.setTaskStatus(task.id, body.status!, uid);
     return json({ ok: true });
   }
 
@@ -661,14 +726,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.due !== undefined) fields.dueAt = body.due.trim() ? parseDue(body.due, tz) : null;
     if (body.scope !== undefined) fields.scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     if (body.priority !== undefined) fields.priority = body.priority ? 1 : 0;
-    await db.updateTask(parseInt(editMatch[1], 10), fields);
+    await db.updateTask(parseInt(editMatch[1], 10), fields, uid);
     return json({ ok: true });
   }
 
   // DELETE /api/tasks/{id}
   const delMatch = path.match(/^\/api\/tasks\/(\d+)$/);
   if (delMatch && request.method === "DELETE") {
-    await db.deleteTask(parseInt(delMatch[1], 10));
+    if (!(await db.deleteTask(parseInt(delMatch[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -804,8 +869,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/home — агенда: сегодня/просрочка, ближайшие встречи и ДР
   if (path === "/api/home" && request.method === "GET") {
-    const assignee = isOwner ? null : uid;
-    const active = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: assignee });
+    const active = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: uid });
     const nowMs = Date.now();
     const todayLocalDay = Math.floor((nowMs + tz * 3600_000) / 86400_000);
     const agendaTasks = active
@@ -846,7 +910,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     upcomingBirthdays.sort((a, b) => a.in_days - b.in_days);
 
     // Статистика по выполненным задачам
-    const done = await db.listTasks({ statuses: [TASK_DONE], assigneeId: assignee, orderByDone: true });
+    const done = await db.listTasks({ statuses: [TASK_DONE], visibleTo: uid, orderByDone: true });
     const weekAgo = nowMs - 7 * 86400_000;
     const stats = {
       doneToday: done.filter((t) => t.done_at && Math.floor((new Date(t.done_at).getTime() + tz * 3600_000) / 86400_000) === todayLocalDay).length,

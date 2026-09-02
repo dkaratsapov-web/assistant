@@ -54,8 +54,8 @@ export async function buildDigest(db: DB, userId: number, role: string, tzOffset
   const pad = (n: number) => String(n).padStart(2, "0");
   const header = `📊 Сводка на ${pad(nowLocal.getUTCDate())}.${pad(nowLocal.getUTCMonth() + 1)}.${nowLocal.getUTCFullYear()}\n`;
 
-  const assignee = role === ROLE_OWNER ? null : userId;
-  const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: assignee });
+  // Сводка всегда личная: каждый видит только свои задачи, включая владельца
+  const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: userId });
 
   if (!tasks.length) {
     return header + "\nНа сегодня активных задач нет. Отличный момент навести порядок 🙂";

@@ -197,6 +197,7 @@
         <div class="sub" id="subtitle">Загрузка…</div>
       </div>
       <button class="icon-btn" id="notif-btn" aria-label="Уведомления" onclick="openNotif()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+      <button class="icon-btn" id="admin-btn" aria-label="Доступы" style="display:none" onclick="openAdmin()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M17 8v6M14 11h6"/></svg></button>
       <button class="icon-btn" id="theme-btn" aria-label="Тема"></button>
     </div>
   </header>
@@ -969,6 +970,89 @@
       closeSheet(); tg.showAlert("Настройки уведомлений сохранены");
     };
 
+    /* ---------- Админка: доступы (только владелец) ---------- */
+    const ROLE_RU = { owner: "Владелец", member: "Команда", client: "Личный аккаунт", pending: "Ждёт подтверждения" };
+
+    window.openAdmin = async () => {
+      openSheet(`<h3>Доступы</h3><div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Кто пользуется ботом и с какими правами. Личные задачи и здоровье этих аккаунтов остаются закрытыми — здесь только доступ.</div><div id="adm-body"><div class="loading">Загрузка…</div></div>`);
+      renderAdmin();
+    };
+
+    async function renderAdmin() {
+      try {
+        const { users } = await api("/admin/users");
+        let h = `<div class="card" style="padding:12px">
+          <div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Пригласить аккаунт</div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Мессенджер</label><select id="adm-ch"><option value="max">MAX</option><option value="tg">Telegram</option></select></div>
+            <div class="field" style="flex:1"><label>ID пользователя</label><input id="adm-id" type="number" inputmode="numeric" placeholder="узнаётся командой /id"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div class="field" style="flex:1"><label>Права</label><select id="adm-role"><option value="client">Личный аккаунт</option><option value="member">Команда</option></select></div>
+            <div class="field" style="flex:1"><label>Имя (для себя)</label><input id="adm-note" placeholder="напр. Иван, клиент"></div>
+          </div>
+          <div id="adm-msg" style="color:var(--muted);font-size:12.5px;min-height:16px;margin-bottom:8px"></div>
+          <button class="btn primary" style="width:100%" onclick="inviteUser()">Выдать доступ</button>
+        </div>`;
+
+        const rows = users.filter((u) => !u.is_me);
+        h += `<div style="font-weight:700;font-size:13.5px;margin:14px 2px 8px">Пользователи${rows.length ? ` · ${rows.length}` : ""}</div>`;
+        h += rows.length ? rows.map(adminRow).join("") : `<div class="card"><div style="padding:8px;color:var(--muted);font-size:13px">Пока только ты.</div></div>`;
+        setHTML("adm-body", h);
+      } catch (e) {
+        setHTML("adm-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`);
+      }
+    }
+
+    function adminRow(u) {
+      const who = esc(u.name || u.username || "Без имени");
+      const ch = u.channel === "max" ? "MAX" : "Telegram";
+      const idText = u.ext_id || u.user_id;
+      const pending = u.role === "pending";
+      return `<div class="card" style="padding:12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+          <div>
+            <div style="font-weight:600">${who}</div>
+            <div style="color:var(--muted);font-size:12px;margin-top:2px">${ch} · ID ${idText}</div>
+          </div>
+          <span class="pill" style="flex:none">${ROLE_RU[u.role] || esc(u.role)}</span>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          ${u.role !== "client" ? `<button class="btn sm" onclick="setUserRole(${u.user_id}, 'client')">${pending ? "Дать личный акк" : "Сделать личным"}</button>` : ""}
+          ${u.role !== "member" ? `<button class="btn sm" onclick="setUserRole(${u.user_id}, 'member')">В команду</button>` : ""}
+          <button class="btn sm ghost" style="flex:0 0 auto;color:var(--danger,#e5484d)" onclick="removeUser(${u.user_id})">Отозвать</button>
+        </div>
+      </div>`;
+    }
+
+    window.inviteUser = async () => {
+      const msg = $("adm-msg");
+      const id = ($("adm-id").value || "").trim();
+      if (!id) { if (msg) msg.textContent = "Укажи ID — пользователь узнаёт его командой /id в чате с ботом."; return; }
+      if (msg) msg.textContent = "Выдаю…";
+      try {
+        await api("/admin/invite", {
+          method: "POST",
+          body: JSON.stringify({ channel: $("adm-ch").value, id, role: $("adm-role").value, note: ($("adm-note").value || "").trim() }),
+        });
+        renderAdmin();
+      } catch (e) {
+        if (msg) msg.textContent = "Не вышло: " + esc(e.message || e);
+      }
+    };
+
+    window.setUserRole = async (uid, role) => {
+      haptic();
+      try { await api(`/admin/users/${uid}/role`, { method: "POST", body: JSON.stringify({ role }) }); } catch (e) { return tg.showAlert("Ошибка: " + (e.message || e)); }
+      renderAdmin();
+    };
+
+    window.removeUser = async (uid) => {
+      if (!(await ask("Отозвать доступ у этого пользователя? Его записи останутся в базе, но войти он больше не сможет."))) return;
+      try { await api(`/admin/users/${uid}`, { method: "DELETE" }); } catch (e) { return tg.showAlert("Ошибка: " + (e.message || e)); }
+      renderAdmin();
+    };
+
     /* ---------- Личный профиль ---------- */
     window.openProfile = async () => {
       openSheet(`<h3>Мой профиль</h3><div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Сара опирается на эти данные при подборе меню, тренировок и советов. Всё по желанию.</div><div id="prof-body"><div class="loading">Загрузка…</div></div>`);
@@ -1449,7 +1533,13 @@
         const hour = new Date().getHours();
         const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
         $("greeting").textContent = `${hi}${name ? ", " + name : ""}`;
-        $("subtitle").textContent = me.role === "owner" ? "Личный ассистент" : me.role === "member" ? "Команда" : "Клиент";
+        $("subtitle").textContent = me.role === "owner" ? "Личный ассистент" : me.role === "member" ? "Команда" : "Личный аккаунт";
+        if (me.role === "owner") $("admin-btn").style.display = "";
+        // Личный аккаунт — без клиентской базы владельца
+        if (me.role === "client") {
+          const cl = document.querySelector('.nav a[data-tab="clients"]');
+          if (cl) cl.remove();
+        }
       } catch (e) {
         const m = String(e.message || e);
         if (m === "unauthorized") {

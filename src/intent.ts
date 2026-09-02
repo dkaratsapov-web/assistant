@@ -35,18 +35,18 @@ export async function performIntent(
   if (intent.action === "task_done") {
     const q = (intent.title ?? "").trim();
     if (!q) return null;
-    const task = await db.findTaskByTitle(q);
+    const task = await db.findTaskByTitle(uid, q);
     if (!task) return `Не нашла активную задачу «${q}».`;
-    await db.setTaskStatus(task.id, TASK_DONE);
+    await db.setTaskStatus(task.id, TASK_DONE, uid);
     return `✅ Задача #${task.id} «${task.title}» отмечена выполненной. Молодец!`;
   }
 
   if (intent.action === "task_delete") {
     const q = (intent.title ?? "").trim();
     if (!q) return null;
-    const task = await db.findTaskByTitle(q);
+    const task = await db.findTaskByTitle(uid, q);
     if (!task) return `Не нашла задачу «${q}».`;
-    await db.deleteTask(task.id);
+    await db.deleteTask(task.id, uid);
     return `🗑 Задача #${task.id} «${task.title}» удалена.`;
   }
 

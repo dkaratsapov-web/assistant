@@ -39,6 +39,7 @@ const HELP = `🤖 Сара — команды в MAX:
 /digest — сводка на сегодня
 /app — открыть приложение (задачи, календарь, здоровье)
 /code — код для входа в приложение
+/id — узнать свой ID в MAX
 /ai <запрос> — спросить ИИ
 /help — помощь
 
@@ -126,10 +127,10 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   const reply = (t: string, kb?: MaxButton[][]) =>
     client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, t, kb);
 
-  // /whoami — доступно всем: помогает узнать свой user_id для MAX_OWNER_ID
-  if ((text ?? "").trim().toLowerCase() === "/whoami") {
+  // Узнать свой user_id — доступно всем: нужно для MAX_OWNER_ID и для приглашений
+  if (["/id", "/whoami", "/whois", "id"].includes((text ?? "").trim().toLowerCase())) {
     if (callbackId) await client.answerCallback(callbackId).catch(() => {});
-    return void (await reply(`Твой MAX user_id: ${senderId}`).catch(() => {}));
+    return void (await reply(`Твой ID в MAX: ${senderId}\n\nПередай его владельцу — он выдаст доступ.`).catch(() => {}));
   }
   if (!senderId) return;
 
@@ -213,12 +214,12 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       if (arg === "help") return void (await reply(HELP));
     }
     if (action === "task_done") {
-      await db.setTaskStatus(parseInt(arg, 10), TASK_DONE);
-      return void (await reply(`✅ Задача #${arg} закрыта.`));
+      const ok = await db.setTaskStatus(parseInt(arg, 10), TASK_DONE, uid);
+      return void (await reply(ok ? `✅ Задача #${arg} закрыта.` : "Не нашла такую задачу."));
     }
     if (action === "task_del") {
-      await db.deleteTask(parseInt(arg, 10));
-      return void (await reply(`🗑 Задача #${arg} удалена.`));
+      const ok = await db.deleteTask(parseInt(arg, 10), uid);
+      return void (await reply(ok ? `🗑 Задача #${arg} удалена.` : "Не нашла такую задачу."));
     }
     return;
   }
@@ -314,7 +315,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
 
   // ===== helpers =====
   async function listTasks() {
-    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: isOwner ? null : uid });
+    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: uid });
     if (!tasks.length) return void (await reply("Активных задач нет. Добавь: /addtask <текст>"));
     await reply(`📋 Активные задачи: ${tasks.length}`);
     for (const t of tasks.slice(0, 15)) {

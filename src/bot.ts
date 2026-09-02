@@ -502,21 +502,22 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   bot.callbackQuery(/^task:(done|progress|reopen|del):(\d+)$/, async (ctx) => {
     const action = ctx.match![1];
     const id = parseInt(ctx.match![2], 10);
-    const task = await db.getTask(id);
+    const me = ctx.from!.id;
+    const task = await db.getTask(id, me);
     if (!task) {
       await ctx.answerCallbackQuery({ text: "Задача не найдена.", show_alert: true });
       await ctx.editMessageReplyMarkup();
       return;
     }
     if (action === "del") {
-      await db.deleteTask(id);
+      await db.deleteTask(id, me);
       await ctx.editMessageText(`🗑 Задача #${id} удалена.`);
       await ctx.answerCallbackQuery({ text: "Удалено" });
       return;
     }
     const map: Record<string, string> = { done: TASK_DONE, progress: TASK_IN_PROGRESS, reopen: TASK_OPEN };
-    await db.setTaskStatus(id, map[action]);
-    const updated = (await db.getTask(id))!;
+    await db.setTaskStatus(id, map[action], me);
+    const updated = (await db.getTask(id, me))!;
     const client = updated.client_id ? await db.getClient(updated.client_id) : null;
     await ctx.editMessageText(taskLine(updated, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(id, updated.status) });
     await ctx.answerCallbackQuery({ text: action === "done" ? "Готово ✅" : "Обновлено" });
@@ -780,7 +781,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   async function listTasks(ctx: MyContext) {
     const role = ctx.appUser!.role;
     const assignee = role === ROLE_OWNER ? null : ctx.from!.id;
-    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], assigneeId: assignee });
+    const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: ctx.from!.id });
     if (!tasks.length) {
       await ctx.reply("Активных задач нет. Добавь через «➕ Задача» или открой «📲 Приложение».");
       return;
