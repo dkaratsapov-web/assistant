@@ -25,5 +25,6 @@ YANDEX_GPT_ROUTER_MODEL = "yandexgpt-lite/latest" # дешёвая модель:
 # YANDEX_VISION_MODEL = "gpt://<folder>/<vlm>"    # мультимодальная модель для фото еды (Model Gallery)
 # YANDEX_FOLDER_ID = "..."                        # каталог Yandex Cloud (можно секретом)
 # BOT_USERNAME = "my_assistant_bot"               # ник бота без @ (для команд вида /tasks@bot)
+PUBLIC_HOST = "assistant.d-karatsapov.workers.dev"  # адрес воркера для самонастройки вебхуков
 TZ_OFFSET = "3"       # смещение часового пояса от UTC (Москва = 3)
 DIGEST_HOUR = "9"     # час утреннего дайджеста по местному времени

@@ -12,7 +12,7 @@ import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIs
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 /** Метка сборки: видна на /version — по ней сразу ясно, какая версия сейчас в проде. */
-const BUILD = "2026-09-01 max-login";
+const BUILD = "2026-09-02 max-diag";
 
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
@@ -106,6 +106,46 @@ async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<voi
   }
 }
 
+/**
+ * Самонастройка каналов: раз в час проверяет, что webhook Telegram и подписка MAX
+ * на месте, и восстанавливает их. Благодаря этому открывать /init и /max/init руками
+ * не нужно — достаточно задать секреты, остальное бот делает сам.
+ */
+async function ensureWebhooks(env: Env, db: DB, origin: string): Promise<void> {
+  // Telegram: setWebhook идемпотентен, но лишний раз не дёргаем — сверяем текущий адрес
+  try {
+    const want = `${origin}/webhook`;
+    const info = (await (await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getWebhookInfo`)).json()) as {
+      result?: { url?: string };
+    };
+    if (info.result?.url !== want) {
+      const bot = createBot(env, origin);
+      await bot.api.setWebhook(want, { secret_token: env.WEBHOOK_SECRET, allowed_updates: ["message", "callback_query"] });
+      await bot.api.setMyCommands(COMMANDS);
+      await bot.api.setChatMenuButton({ menu_button: { type: "web_app", text: "📲 Открыть", web_app: { url: origin } } });
+      await db.setSetting("tg_init_at", new Date().toISOString());
+    }
+  } catch (e) {
+    console.error("tg webhook ensure failed", e);
+  }
+
+  // MAX: подписываемся, если нашего адреса нет в списке подписок
+  if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET) return;
+  try {
+    const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+    const want = `${origin}/max/webhook`;
+    const subs = (await client.getSubscriptions()) as { subscriptions?: { url?: string }[] };
+    const has = (subs?.subscriptions ?? []).some((x) => x.url === want);
+    if (!has) {
+      await client.subscribe(want, env.MAX_WEBHOOK_SECRET, MAX_UPDATE_TYPES);
+      await db.setSetting("max_init_at", new Date().toISOString());
+      console.log("max webhook subscribed", want);
+    }
+  } catch (e) {
+    console.error("max webhook ensure failed", e);
+  }
+}
+
 /** Одноразовая настройка: регистрирует webhook, команды и кнопку Mini App. */
 async function handleInit(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
@@ -125,29 +165,80 @@ async function handleInit(request: Request, env: Env, origin: string): Promise<R
   return new Response(`OK ✅ Webhook и меню настроены.\nБот готов, а Mini App доступен по адресу: ${origin}`);
 }
 
+/** Служебные адреса MAX пускают по любому из двух секретов — что окажется под рукой. */
+function maxAdminAllowed(url: URL, env: Env): boolean {
+  const got = url.searchParams.get("secret") ?? "";
+  return !!got && (got === env.WEBHOOK_SECRET || (!!env.MAX_WEBHOOK_SECRET && got === env.MAX_WEBHOOK_SECRET));
+}
+
 /** Настройка канала MAX: подписывает webhook на обновления. */
 async function handleMaxInit(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
-  if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
-    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+  if (!maxAdminAllowed(url, env)) {
+    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET (подойдёт и MAX_WEBHOOK_SECRET)", { status: 403 });
   }
   if (!env.MAX_BOT_TOKEN) return new Response("MAX_BOT_TOKEN не задан", { status: 400 });
   if (!env.MAX_WEBHOOK_SECRET) return new Response("MAX_WEBHOOK_SECRET не задан", { status: 400 });
   const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+  const db = new DB(env.DB);
   try {
     const me = await client.getMe();
+    // старые подписки на этот же адрес мешают переподписке — снимаем и подписываемся заново
+    await client.unsubscribe(`${origin}/max/webhook`).catch(() => {});
     await client.subscribe(`${origin}/max/webhook`, env.MAX_WEBHOOK_SECRET, MAX_UPDATE_TYPES);
-    return new Response(`OK ✅ MAX webhook подписан на ${origin}/max/webhook\nБот: ${me.name ?? me.user_id}`);
+    const subs = await client.getSubscriptions().catch(() => null);
+    await db.setSetting("max_init_at", new Date().toISOString());
+    return new Response(
+      `OK ✅ MAX webhook подписан на ${origin}/max/webhook\nБот: ${me.name ?? me.user_id}\n\nПодписки сейчас:\n${JSON.stringify(subs, null, 2)}`,
+      { headers: { "content-type": "text/plain; charset=utf-8" } }
+    );
   } catch (e) {
     return new Response(`MAX init error: ${(e as Error).message}`, { status: 502 });
   }
 }
 
+/** Диагностика канала MAX: что настроено, какие подписки и приходили ли обновления. */
+async function handleMaxStatus(request: Request, env: Env, origin: string): Promise<Response> {
+  const url = new URL(request.url);
+  if (!maxAdminAllowed(url, env)) {
+    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET (подойдёт и MAX_WEBHOOK_SECRET)", { status: 403 });
+  }
+  const db = new DB(env.DB);
+  const out: Record<string, unknown> = {
+    webhookUrl: `${origin}/max/webhook`,
+    hasBotToken: !!env.MAX_BOT_TOKEN,
+    hasWebhookSecret: !!env.MAX_WEBHOOK_SECRET,
+    maxOwnerId: env.MAX_OWNER_ID ?? null,
+    ownerId: env.OWNER_ID ?? null,
+    hasAiKey: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID),
+    initAt: await db.getSetting("max_init_at"),
+    lastUpdateAt: await db.getSetting("max_last_update_at"),
+    lastUpdateType: await db.getSetting("max_last_update_type"),
+    lastUpdateFrom: await db.getSetting("max_last_update_from"),
+    lastRejectAt: await db.getSetting("max_last_reject_at"),
+  };
+  if (env.MAX_BOT_TOKEN) {
+    const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+    out.me = await client.getMe().catch((e) => ({ error: (e as Error).message }));
+    out.subscriptions = await client.getSubscriptions().catch((e) => ({ error: (e as Error).message }));
+  }
+  return new Response(JSON.stringify(out, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
+}
+
 /** Приём обновлений MAX по webhook. */
 async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx: ExecutionContext): Promise<Response> {
-  // Проверка секрета webhook (заголовок X-Max-Bot-Api-Secret)
-  const got = request.headers.get("X-Max-Bot-Api-Secret");
-  if (env.MAX_WEBHOOK_SECRET && got !== env.MAX_WEBHOOK_SECRET) {
+  const db = new DB(env.DB);
+  const url = new URL(request.url);
+  // Секрет MAX присылает заголовком; какой именно вариант имени — зависит от версии
+  // платформы, поэтому принимаем несколько и допускаем передачу в query.
+  const got =
+    request.headers.get("X-Max-Bot-Api-Secret") ??
+    request.headers.get("X-Max-Api-Secret") ??
+    request.headers.get("X-Secret") ??
+    url.searchParams.get("secret");
+  if (env.MAX_WEBHOOK_SECRET && got != null && got !== env.MAX_WEBHOOK_SECRET) {
+    // Секрет пришёл, но чужой — это уже не наш отправитель
+    await db.setSetting("max_last_reject_at", new Date().toISOString());
     return new Response("forbidden", { status: 403 });
   }
   let update: MaxUpdate;
@@ -156,6 +247,17 @@ async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx:
   } catch {
     return new Response("bad request", { status: 400 });
   }
+  // Отметка о приёме — по ней видно в /max/status, доходят ли обновления вообще
+  ctx.waitUntil(
+    (async () => {
+      await db.setSetting("max_last_update_at", new Date().toISOString());
+      await db.setSetting("max_last_update_type", update.update_type ?? "?");
+      await db.setSetting(
+        "max_last_update_from",
+        String(update.message?.sender?.user_id ?? update.user?.user_id ?? update.callback?.user?.user_id ?? "")
+      );
+    })().catch(() => {})
+  );
   // Обрабатываем в фоне, MAX ждёт 200 в течение 30 секунд
   ctx.waitUntil(handleMaxUpdate(update, env, origin).catch((e) => console.error("max update failed", e)));
   return new Response("ok");
@@ -217,6 +319,7 @@ export default {
     if (url.pathname === "/init") return handleInit(request, env, origin);
     if (url.pathname === "/max/webhook" && request.method === "POST") return handleMaxWebhook(request, env, origin, ctx);
     if (url.pathname === "/max/init") return handleMaxInit(request, env, origin);
+    if (url.pathname === "/max/status") return handleMaxStatus(request, env, origin);
     if (url.pathname === "/telemost/auth") return handleTelemostAuth(request, env, origin);
     if (url.pathname === "/telemost/callback") return handleTelemostCallback(request, env, origin);
     if (url.pathname === "/health") return new Response("ok");
@@ -289,6 +392,8 @@ export default {
       // Напоминания о приёме БАДов/фармы
       await runSupplementReminders(env, db, tz);
     } else if (event.cron === "0 * * * *") {
+      // каналы должны быть подписаны — проверяем и чиним сами
+      await ensureWebhooks(env, db, `https://${env.PUBLIC_HOST || "assistant.d-karatsapov.workers.dev"}`);
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       const nowLocal = new Date(Date.now() + tz * 3600_000);
       const pad = (n: number) => String(n).padStart(2, "0");

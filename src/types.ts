@@ -6,6 +6,7 @@ export interface Env {
   BOT_TOKEN: string;
   OWNER_ID: string;
   WEBHOOK_SECRET: string;
+  PUBLIC_HOST?: string;   // публичный хост воркера — нужен фоновой самонастройке вебхуков
   BOT_USERNAME?: string;  // ник бота без @ (нужен grammy для разбора команд вида /tasks@bot)
   BOT_NAME?: string;      // отображаемое имя бота
   // ИИ-«мозги» и голос — Yandex Cloud (YandexGPT + SpeechKit), один API-ключ на оба сервиса

@@ -981,7 +981,17 @@
     async function renderAdmin() {
       try {
         const { users } = await api("/admin/users");
+        const mo = await api("/admin/max-owner").catch(() => ({ id: "" }));
         let h = `<div class="card" style="padding:12px">
+          <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">Мой аккаунт в MAX</div>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:8px">Напиши боту в MAX «/id» и впиши число сюда — тогда там ты будешь владельцем: те же данные, админка и подтверждение заявок.</div>
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <div class="field" style="flex:1;margin-bottom:0"><input id="adm-owner" type="number" inputmode="numeric" value="${esc(String(mo.id || ""))}" placeholder="напр. 4821903"></div>
+            <button class="btn sm primary" onclick="saveMaxOwner()">Сохранить</button>
+          </div>
+          <div id="adm-owner-msg" style="color:var(--muted);font-size:12px;min-height:16px;margin-top:6px"></div>
+        </div>
+        <div class="card" style="padding:12px;margin-top:8px">
           <div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Пригласить аккаунт</div>
           <div style="display:flex;gap:8px">
             <div class="field" style="flex:1"><label>Мессенджер</label><select id="adm-ch"><option value="max">MAX</option><option value="tg">Telegram</option></select></div>
@@ -1024,6 +1034,18 @@
         </div>
       </div>`;
     }
+
+    window.saveMaxOwner = async () => {
+      const msg = $("adm-owner-msg");
+      const id = ($("adm-owner").value || "").trim();
+      if (!id) { if (msg) msg.textContent = "Впиши свой ID из MAX (команда /id)."; return; }
+      try {
+        await api("/admin/max-owner", { method: "POST", body: JSON.stringify({ id }) });
+        if (msg) msg.textContent = "Готово — в MAX ты владелец.";
+      } catch (e) {
+        if (msg) msg.textContent = "Не вышло: " + esc(e.message || e);
+      }
+    };
 
     window.inviteUser = async () => {
       const msg = $("adm-msg");

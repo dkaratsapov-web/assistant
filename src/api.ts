@@ -185,6 +185,19 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return json({ ok: true });
     }
 
+    // Свой аккаунт в MAX: владелец указывает его id прямо в админке,
+    // чтобы не лезть в переменные окружения ради MAX_OWNER_ID
+    if (path === "/api/admin/max-owner" && request.method === "GET") {
+      return json({ id: (await db.getSetting("max_owner_id")) || env.MAX_OWNER_ID || "" });
+    }
+    if (path === "/api/admin/max-owner" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { id?: number | string };
+      const maxId = parseInt(String(body.id ?? ""), 10);
+      if (!maxId) return json({ error: "bad_id" }, 400);
+      await db.setSetting("max_owner_id", String(maxId));
+      return json({ ok: true, id: maxId });
+    }
+
     // Пригласить конкретный аккаунт: доступ откроется сразу, как он напишет боту
     if (path === "/api/admin/invite" && request.method === "POST") {
       const body = (await request.json().catch(() => ({}))) as { channel?: string; id?: number | string; role?: string; note?: string };

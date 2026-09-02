@@ -135,7 +135,8 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   if (!senderId) return;
 
   // ---------- Пользователь и доступ ----------
-  const ownerMax = parseInt(env.MAX_OWNER_ID ?? "0", 10);
+  // id владельца в MAX: из переменной окружения либо из настроек (задаётся в админке)
+  const ownerMax = parseInt(env.MAX_OWNER_ID || (await db.getSetting("max_owner_id")) || "0", 10);
   const isOwnerMax = !!ownerMax && senderId === ownerMax;
   // Владелец в MAX работает с данными владельца Telegram, остальные — со своими
   const uid = isOwnerMax ? parseInt(env.OWNER_ID, 10) : maxUid(senderId);
