@@ -982,7 +982,15 @@
       try {
         const { users } = await api("/admin/users");
         const mo = await api("/admin/max-owner").catch(() => ({ id: "" }));
-        let h = `<div class="card" style="padding:12px">
+        let h = `<div class="card" style="padding:12px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">Канал MAX</div>
+          <div id="adm-max" style="color:var(--muted);font-size:12.5px">Проверяю…</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="btn sm" onclick="checkMax()">Проверить</button>
+            <button class="btn sm primary" onclick="subscribeMax()">Подписать webhook</button>
+          </div>
+        </div>
+        <div class="card" style="padding:12px">
           <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">Мой аккаунт в MAX</div>
           <div style="color:var(--muted);font-size:12px;margin-bottom:8px">Напиши боту в MAX «/id» и впиши число сюда — тогда там ты будешь владельцем: те же данные, админка и подтверждение заявок.</div>
           <div style="display:flex;gap:8px;align-items:flex-end">
@@ -1009,6 +1017,7 @@
         h += `<div style="font-weight:700;font-size:13.5px;margin:14px 2px 8px">Пользователи${rows.length ? ` · ${rows.length}` : ""}</div>`;
         h += rows.length ? rows.map(adminRow).join("") : `<div class="card"><div style="padding:8px;color:var(--muted);font-size:13px">Пока только ты.</div></div>`;
         setHTML("adm-body", h);
+        checkMax();
       } catch (e) {
         setHTML("adm-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`);
       }
@@ -1034,6 +1043,39 @@
         </div>
       </div>`;
     }
+
+    window.checkMax = async () => {
+      const box = $("adm-max");
+      if (box) box.textContent = "Проверяю…";
+      try {
+        const d = await api("/admin/max-status");
+        const botOk = d.bot && !d.bot.error;
+        const subs = d.subscriptions && !d.subscriptions.error ? (d.subscriptions.subscriptions || []) : null;
+        const subOk = subs && subs.some((x) => x.url === d.webhookUrl);
+        const line = (ok, text) => `<div style="margin:3px 0">${ok ? "✅" : "⚠️"} ${text}</div>`;
+        let h = "";
+        h += line(d.hasBotToken, "Токен бота задан");
+        h += line(botOk, botOk ? `Связь с MAX есть · ${esc(d.bot.name || d.bot.user_id || "")}` : `Связь с MAX: ${esc((d.bot && d.bot.error) || "нет токена")}`);
+        h += line(!!subOk, subOk ? "Webhook подписан" : "Webhook не подписан — нажми «Подписать webhook»");
+        h += line(!!d.lastUpdateAt, d.lastUpdateAt ? `Последнее сообщение: ${new Date(d.lastUpdateAt).toLocaleString("ru-RU")} (${esc(d.lastUpdateType || "")})` : "Сообщений из MAX ещё не приходило");
+        h += line(!!d.maxOwnerId, d.maxOwnerId ? `Владелец в MAX: ${esc(String(d.maxOwnerId))}` : "Владелец в MAX не задан — впиши свой ID ниже");
+        if (box) box.innerHTML = h;
+      } catch (e) {
+        if (box) box.textContent = "Ошибка: " + (e.message || e);
+      }
+    };
+
+    window.subscribeMax = async () => {
+      const box = $("adm-max");
+      if (box) box.textContent = "Подписываю…";
+      try {
+        await api("/admin/max-subscribe", { method: "POST" });
+      } catch (e) {
+        if (box) box.textContent = "Не вышло: " + (e.message || e);
+        return;
+      }
+      checkMax();
+    };
 
     window.saveMaxOwner = async () => {
       const msg = $("adm-owner-msg");

@@ -2,8 +2,10 @@
  * Тонкий HTTP-клиент MAX Bot API (мессенджер MAX, platform-api.max.ru).
  * Документация: https://dev.max.ru/docs-api
  *
- * Авторизация: токен бота (из @BotFather внутри MAX) передаётся в заголовке
- * Authorization. Для совместимости дублируем legacy-параметром ?access_token=.
+ * Авторизация — только заголовок Authorization: параметр ?access_token= платформа
+ * объявила устаревшим и отвечает на него 401 («use Authorization header»), даже
+ * когда заголовок тоже передан. Формат заголовка отличается между версиями
+ * платформы, поэтому при 401 повторяем запрос с «голым» токеном без Bearer.
  * Базовый хост настраивается через env MAX_API_URL (на случай миграции на
  * platform-api2.max.ru).
  */
@@ -69,17 +71,12 @@ export class MaxClient {
     for (const [k, v] of Object.entries(opts.query ?? {})) {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
-    // legacy-совместимость: некоторые окружения ещё принимают токен в query
-    url.searchParams.set("access_token", this.token);
+    const body = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
+    const attempt = (authorization: string) =>
+      fetch(url.toString(), { method, headers: { "content-type": "application/json", authorization }, body });
 
-    const res = await fetch(url.toString(), {
-      method,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.token}`,
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
+    let res = await attempt(`Bearer ${this.token}`);
+    if (res.status === 401) res = await attempt(this.token); // некоторые версии ждут токен без Bearer
     const data = (await res.json().catch(() => ({}))) as T;
     if (!res.ok) {
       throw new Error(`MAX API ${method} ${path} → ${res.status}: ${JSON.stringify(data)}`);

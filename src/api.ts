@@ -5,6 +5,7 @@ import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCod
 import { transcribeVoice } from "./speech";
 import { validateMaxInitData } from "./max/auth";
 import { CHANNEL_MAX, maxUid } from "./max/ids";
+import { MaxClient } from "./max/client";
 import { buildNutritionSummary } from "./reports";
 import {
   Env,
@@ -183,6 +184,46 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (target === uid) return json({ error: "self" }, 400);
       await db.deleteUser(target);
       return json({ ok: true });
+    }
+
+    // Состояние канала MAX — без секретов: владелец уже подтверждён подписью Mini App
+    if (path === "/api/admin/max-status" && request.method === "GET") {
+      const origin = url.origin;
+      const out: Record<string, unknown> = {
+        webhookUrl: `${origin}/max/webhook`,
+        hasBotToken: !!env.MAX_BOT_TOKEN,
+        hasWebhookSecret: !!env.MAX_WEBHOOK_SECRET,
+        maxOwnerId: env.MAX_OWNER_ID || (await db.getSetting("max_owner_id")) || null,
+        hasAi: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID),
+        initAt: await db.getSetting("max_init_at"),
+        lastUpdateAt: await db.getSetting("max_last_update_at"),
+        lastUpdateType: await db.getSetting("max_last_update_type"),
+        lastUpdateFrom: await db.getSetting("max_last_update_from"),
+        lastRejectAt: await db.getSetting("max_last_reject_at"),
+      };
+      if (env.MAX_BOT_TOKEN) {
+        const mc = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+        out.bot = await mc.getMe().catch((e) => ({ error: (e as Error).message }));
+        out.subscriptions = await mc.getSubscriptions().catch((e) => ({ error: (e as Error).message }));
+      }
+      return json(out);
+    }
+
+    // Переподписать webhook MAX одной кнопкой из админки
+    if (path === "/api/admin/max-subscribe" && request.method === "POST") {
+      if (!env.MAX_BOT_TOKEN) return json({ error: "no_bot_token" }, 400);
+      if (!env.MAX_WEBHOOK_SECRET) return json({ error: "no_webhook_secret" }, 400);
+      const target = `${url.origin}/max/webhook`;
+      const mc = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+      try {
+        await mc.unsubscribe(target).catch(() => {});
+        await mc.subscribe(target, env.MAX_WEBHOOK_SECRET, ["message_created", "message_callback", "bot_started"]);
+        await db.setSetting("max_init_at", new Date().toISOString());
+        const subs = await mc.getSubscriptions().catch(() => null);
+        return json({ ok: true, url: target, subscriptions: subs });
+      } catch (e) {
+        return json({ error: "subscribe_failed", message: (e as Error).message }, 502);
+      }
     }
 
     // Свой аккаунт в MAX: владелец указывает его id прямо в админке,

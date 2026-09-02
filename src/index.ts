@@ -12,7 +12,7 @@ import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIs
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 /** Метка сборки: видна на /version — по ней сразу ясно, какая версия сейчас в проде. */
-const BUILD = "2026-09-02 max-diag";
+const BUILD = "2026-09-02 max-auth-fix";
 
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
