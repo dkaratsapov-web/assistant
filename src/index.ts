@@ -12,7 +12,7 @@ import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIs
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 /** Метка сборки: видна на /version — по ней сразу ясно, какая версия сейчас в проде. */
-const BUILD = "2026-09-02 max-diag2";
+const BUILD = "2026-09-25 max-owner-link";
 
 const COMMANDS = [
   { command: "menu", description: "Показать меню" },
@@ -197,6 +197,25 @@ async function handleMaxInit(request: Request, env: Env, origin: string): Promis
   }
 }
 
+/**
+ * Назначить владельца канала MAX по его id — без захода в админку.
+ * Тот же результат, что у поля «Мой аккаунт в MAX» в Mini App.
+ */
+async function handleMaxOwner(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (!maxAdminAllowed(url, env)) {
+    return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET (подойдёт и MAX_WEBHOOK_SECRET)", { status: 403 });
+  }
+  const id = parseInt(url.searchParams.get("id") ?? "", 10);
+  if (!id) return new Response("укажи ?id=<твой ID в MAX> (узнаётся командой /id боту)", { status: 400 });
+  const db = new DB(env.DB);
+  await db.setSetting("max_owner_id", String(id));
+  return new Response(
+    `OK ✅ Владелец в MAX: ${id}\n\nНапиши боту в MAX любое сообщение — появится меню владельца, админка и подтверждение заявок.`,
+    { headers: { "content-type": "text/plain; charset=utf-8" } }
+  );
+}
+
 /** Диагностика канала MAX: что настроено, какие подписки и приходили ли обновления. */
 async function handleMaxStatus(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
@@ -320,6 +339,7 @@ export default {
     if (url.pathname === "/max/webhook" && request.method === "POST") return handleMaxWebhook(request, env, origin, ctx);
     if (url.pathname === "/max/init") return handleMaxInit(request, env, origin);
     if (url.pathname === "/max/status") return handleMaxStatus(request, env, origin);
+    if (url.pathname === "/max/owner") return handleMaxOwner(request, env);
     if (url.pathname === "/telemost/auth") return handleTelemostAuth(request, env, origin);
     if (url.pathname === "/telemost/callback") return handleTelemostCallback(request, env, origin);
     if (url.pathname === "/health") return new Response("ok");
