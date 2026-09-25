@@ -22,9 +22,11 @@
       --fg-contrast: #ffffff;   /* текст на --fg */
       --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
       --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
-      --radius: 18px;
-      --radius-sm: 12px;
-      --nav-h: 62px;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --nav-h: 54px;
+      /* Шаг сетки: всё вертикальное расстояние кратно 4 */
+      --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px;
     }
     :root[data-theme="dark"] {
       --bg: #0a0a0b;
@@ -46,51 +48,54 @@
     body {
       font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text);
-      font-size: 15px; line-height: 1.5; letter-spacing: -.01em;
-      padding-bottom: calc(var(--nav-h) + 28px + env(safe-area-inset-bottom));
+      font-size: 15px; line-height: 1.45; letter-spacing: -.01em;
+      padding-bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
       overflow-x: hidden; transition: background .25s ease, color .25s ease;
       -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     }
-    .wrap { max-width: 640px; margin: 0 auto; padding: 0 18px; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 0 14px; }
     button, input, select, textarea { font-family: inherit; }
 
     /* Header */
-    header { padding: 20px 18px 6px; }
-    .hrow { display: flex; align-items: center; gap: 13px; max-width: 640px; margin: 0 auto; }
-    .avatar { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; flex: none;
+    header { padding: 12px 14px 4px; }
+    .hrow { display: flex; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none;
       border: 1px solid var(--border); background: var(--surface-2); }
     .hello { flex: 1; min-width: 0; }
-    .hello .h1 { font-size: 20px; font-weight: 800; letter-spacing: -.03em; }
-    .hello .sub { color: var(--muted); font-size: 13px; margin-top: 1px; font-weight: 500; }
-    .icon-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
+    .hello { min-width: 0; }
+    .hello .h1 { font-size: 16.5px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hello .sub { color: var(--muted); font-size: 12px; margin-top: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .icon-btn { position: relative; flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border);
       background: var(--surface); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer;
       box-shadow: var(--shadow-sm); transition: transform .12s ease, background .2s ease; }
     .icon-btn:active { transform: scale(.92); }
-    .icon-btn svg { width: 19px; height: 19px; }
+    .icon-btn svg { width: 17px; height: 17px; }
+    /* Зона нажатия 44×44 при меньшем визуальном размере — правило touch target */
+    .icon-btn::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
 
     .section-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
       letter-spacing: .13em; margin: 22px 4px 11px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 16px; margin-bottom: 11px; box-shadow: var(--shadow); }
+      padding: 13px; margin-bottom: var(--s2); box-shadow: var(--shadow-sm); }
 
     /* Home tiles */
-    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
-    .tile { border-radius: var(--radius); padding: 16px; cursor: pointer; border: 1px solid var(--border);
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+    .tile { border-radius: var(--radius); padding: 13px; cursor: pointer; border: 1px solid var(--border);
       background: var(--surface); box-shadow: var(--shadow); transition: transform .12s ease; }
     .tile:active { transform: scale(.98); }
     .tile.accent { background: var(--fg); border-color: var(--fg); }
     .tile.accent .n, .tile.accent .l { color: var(--fg-contrast); }
-    .tile .n { font-size: 30px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
-    .tile .l { font-size: 12.5px; color: var(--muted); margin-top: 8px; font-weight: 600; }
+    .tile .n { font-size: 23px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+    .tile .l { font-size: 12px; color: var(--muted); margin-top: var(--s1); font-weight: 600; }
 
     /* CTA */
     .cta { display: flex; align-items: center; gap: 13px; cursor: pointer; background: var(--fg); border: 0;
-      border-radius: var(--radius); padding: 16px 18px; margin: 11px 0; box-shadow: var(--shadow); transition: transform .12s ease; }
+      border-radius: var(--radius); padding: 12px 14px; margin: var(--s2) 0; box-shadow: var(--shadow-sm); transition: transform .12s ease; }
     .cta:active { transform: scale(.985); }
     .cta .ci { width: 38px; height: 38px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
       background: color-mix(in srgb, var(--fg-contrast) 14%, transparent); }
     .cta .ci svg { width: 20px; height: 20px; color: var(--fg-contrast); }
-    .cta .tx { color: var(--fg-contrast); font-weight: 700; font-size: 15.5px; letter-spacing: -.02em; }
+    .cta .tx { color: var(--fg-contrast); font-weight: 700; font-size: 14.5px; letter-spacing: -.02em; }
     .cta .sm { color: color-mix(in srgb, var(--fg-contrast) 70%, transparent); font-size: 12.5px; font-weight: 500; margin-top: 1px; }
     .cta .arw { margin-left: auto; color: var(--fg-contrast); opacity: .7; }
 
@@ -104,52 +109,60 @@
     .agenda-item .t .m { font-size: 12.5px; color: var(--muted); margin-top: 2px; font-weight: 500; }
 
     /* Segmented + chips */
-    .seg { display: flex; background: var(--surface-2); border-radius: 13px; padding: 4px; gap: 4px; margin: 2px 0 14px; }
-    .seg div { flex: 1; text-align: center; padding: 9px; border-radius: 10px; font-weight: 600; font-size: 13.5px; color: var(--muted); cursor: pointer; transition: all .18s ease; }
+    .seg { display: flex; background: var(--surface-2); border-radius: 11px; padding: 3px; gap: 3px; margin: 0 0 var(--s2); }
+    .seg div { flex: 1; text-align: center; padding: 8px; border-radius: 9px; font-weight: 600; font-size: 13px; color: var(--muted); cursor: pointer; transition: all .18s ease; }
     .seg div.on { color: var(--fg-contrast); background: var(--fg); box-shadow: var(--shadow-sm); }
-    .chips { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-    .chip { padding: 7px 14px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s ease; }
+    .chips { display: flex; gap: 6px; margin-bottom: var(--s2); flex-wrap: nowrap; overflow-x: auto;
+      scrollbar-width: none; -ms-overflow-style: none; padding-bottom: 2px; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; }
+    .chip { padding: 6px 11px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all .15s ease; }
     .chip.on { color: var(--fg-contrast); background: var(--fg); border-color: var(--fg); }
 
     /* Task / list cards */
     .item { position: relative; }
-    .item .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-    .item .name { font-weight: 700; flex: 1; letter-spacing: -.02em; }
+    .item .top { display: flex; justify-content: space-between; gap: var(--s2); align-items: flex-start; }
+    .item .name { font-weight: 700; flex: 1; letter-spacing: -.02em; font-size: 14.5px; line-height: 1.35; }
     .item .name.done { text-decoration: line-through; color: var(--muted); }
     .item.done { opacity: .55; }
-    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
-    .pill { font-size: 11.5px; padding: 4px 10px; border-radius: 9px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); font-weight: 600; }
+    .meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; align-items: center; }
+    .pill { font-size: 11px; padding: 3px 8px; border-radius: 7px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); font-weight: 600; }
     .pill.strong { color: var(--fg-contrast); background: var(--fg); border-color: var(--fg); }
-    .actions { display: flex; gap: 8px; margin-top: 14px; }
-    .btn { flex: 1; padding: 10px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); transition: transform .1s ease; }
+    .actions { display: flex; gap: var(--s2); margin-top: 10px; }
+    .btn { flex: 1; min-height: 40px; padding: 9px 10px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); transition: transform .1s ease; white-space: nowrap; }
     .btn:active { transform: scale(.97); }
     .btn.primary { background: var(--fg); color: var(--fg-contrast); border-color: var(--fg); }
-    .btn.ghost { flex: 0 0 44px; color: var(--muted); }
+    .btn.ghost { flex: 0 0 40px; color: var(--muted); padding: 9px 0; }
     .btn.sm { flex: 0 0 auto; padding: 9px 16px; }
 
-    .empty { text-align: center; padding: 54px 20px; color: var(--muted); }
+    .empty { text-align: center; padding: 32px 16px; color: var(--muted); }
     .empty img { width: 96px; height: 96px; object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
     .empty .big { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -.02em; }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-weight: 500; }
 
     /* FAB */
     .fab { position: fixed; right: calc(50% - 300px); bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
-      width: 54px; height: 54px; border-radius: 50%; background: var(--fg); color: var(--fg-contrast); border: none; cursor: pointer;
+      width: 46px; height: 46px; border-radius: 50%; background: var(--fg); color: var(--fg-contrast); border: none; cursor: pointer;
       box-shadow: var(--shadow); z-index: 40; display: none; align-items: center; justify-content: center; transition: transform .12s ease; }
     .fab:active { transform: scale(.9); }
-    .fab svg { width: 24px; height: 24px; }
-    @media (max-width: 676px) { .fab { right: 20px; } }
+    .fab svg { width: 21px; height: 21px; }
+    @media (max-width: 676px) { .fab { right: 16px; } }
 
     /* Bottom nav */
     .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
       background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: saturate(180%) blur(20px);
       border-top: 1px solid var(--border); padding: 8px 6px calc(6px + env(safe-area-inset-bottom)); }
     .nav-inner { max-width: 640px; margin: 0 auto; display: flex; }
-    .nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; padding: 2px; transition: color .15s ease; letter-spacing: -.01em; }
-    .nav a svg { width: 22px; height: 22px; }
+    .nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--muted); font-size: 9.5px; font-weight: 600; cursor: pointer; padding: 2px; transition: color .15s ease; letter-spacing: -.01em; }
+    .nav a svg { width: 19px; height: 19px; }
     .nav a.on { color: var(--text); }
 
     /* Sheets */
+    .toast { position: fixed; left: 50%; bottom: calc(var(--nav-h) + 16px + env(safe-area-inset-bottom));
+      transform: translate(-50%, 12px); background: var(--fg); color: var(--fg-contrast);
+      padding: 11px 16px; border-radius: 12px; font-size: 13.5px; font-weight: 600; max-width: 88vw;
+      text-align: center; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; z-index: 80; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
     .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); display: none; align-items: flex-end; z-index: 60; opacity: 0; transition: opacity .2s ease; }
     .sheet-bg.show { display: flex; opacity: 1; }
     .sheet { background: var(--bg); width: 100%; max-width: 640px; margin: 0 auto; border-radius: 24px 24px 0 0; padding: 10px 18px calc(22px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px rgba(0,0,0,.3); transform: translateY(12px); transition: transform .22s cubic-bezier(.2,.8,.2,1);
@@ -225,9 +238,19 @@
   <script>
     // Приложение открывается и в Telegram, и по ссылке из MAX (там объекта Telegram нет) —
     // подставляем заглушку с теми же методами, чтобы код ниже не расходился на две ветки.
+    const noop = () => {};
     const tg = (window.Telegram && window.Telegram.WebApp) || {
-      ready() {}, expand() {}, initData: "", initDataUnsafe: {},
-      setHeaderColor() {}, setBackgroundColor() {}, HapticFeedback: { impactOccurred() {} },
+      // Вне Telegram (MAX, браузер) объекта нет — заглушка должна повторять ВЕСЬ используемый
+      // API, иначе приложение падает на первом же вызове и остаётся на «Загрузка…».
+      ready: noop, expand: noop, close: noop,
+      initData: "", initDataUnsafe: {}, colorScheme: "",
+      setHeaderColor: noop, setBackgroundColor: noop, disableVerticalSwipes: noop,
+      HapticFeedback: { impactOccurred: noop, notificationOccurred: noop },
+      BackButton: { show: noop, hide: noop, onClick: noop, offClick: noop },
+      MainButton: { show: noop, hide: noop, setText: noop, onClick: noop },
+      showAlert: (msg, cb) => { toast(msg); if (cb) cb(); },
+      showConfirm: (msg, cb) => cb(typeof confirm === "function" ? confirm(msg) : true),
+      openLink: (url) => window.open(url, "_blank", "noopener"),
     };
     tg.ready(); tg.expand();
     // На мобильном Telegram перехватывает вертикальный свайп и мешает вводу в поля — отключаем
@@ -260,6 +283,21 @@
     })();
     const AUTH_HEADERS = { "X-Telegram-Init-Data": INIT, ...(MAX_SESSION ? { "X-Max-Session": MAX_SESSION } : {}) };
     const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
+
+    /** Короткое уведомление внизу экрана — замена системного алерта вне Telegram. */
+    function toast(msg) {
+      let el = document.getElementById("toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        el.className = "toast";
+        document.body.appendChild(el);
+      }
+      el.textContent = String(msg);
+      el.classList.add("show");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove("show"), 2600);
+    }
 
     const $ = (id) => document.getElementById(id);
     const view = $("view");
@@ -719,15 +757,31 @@
     const TASK_STAGES = [["open", "Неразобранное"], ["in_progress", "В работе"], ["done", "Выполнено"], ["failed", "Не выполнено"]];
     const T_ED = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg>';
     const T_DEL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>';
+    /**
+     * В ряду максимум два действия и «ещё» — пять кнопок не помещались в ширину телефона
+     * и переносились на вторую строку. Редкое (не сделано, изменить, удалить) — в шторке.
+     */
+    const T_MORE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
     function taskActions(t) {
       const s = t.status;
-      const del = `<button class="btn ghost" onclick="delTask(${t.id})">${T_DEL}</button>`;
-      const edit = `<button class="btn ghost" onclick="editTask(${t.id})">${T_ED}</button>`;
-      if (s === "done") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button>${del}`;
-      if (s === "failed") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button><button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button>${del}`;
-      if (s === "in_progress") return `<button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button><button class="btn" onclick="setTask(${t.id},'failed')">Не сделано</button>${edit}${del}`;
-      return `<button class="btn primary" onclick="setTask(${t.id},'in_progress')">В работу</button><button class="btn" onclick="setTask(${t.id},'done')">Готово</button><button class="btn" onclick="setTask(${t.id},'failed')">Не сделано</button>${edit}${del}`;
+      const more = `<button class="btn ghost" aria-label="Ещё" onclick="taskMore(${t.id})">${T_MORE}</button>`;
+      if (s === "done") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button>${more}`;
+      if (s === "failed") return `<button class="btn" onclick="setTask(${t.id},'open')">Вернуть</button><button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button>${more}`;
+      if (s === "in_progress") return `<button class="btn primary" onclick="setTask(${t.id},'done')">Готово</button><button class="btn" onclick="setTask(${t.id},'open')">В план</button>${more}`;
+      return `<button class="btn primary" onclick="setTask(${t.id},'in_progress')">В работу</button><button class="btn" onclick="setTask(${t.id},'done')">Готово</button>${more}`;
     }
+
+    /** Шторка с редкими действиями по задаче. */
+    window.taskMore = (id) => {
+      const t = tasksCache.find((x) => x.id === id);
+      if (!t) return;
+      haptic();
+      const rows = [];
+      if (t.status !== "failed") rows.push(`<button class="btn" style="width:100%" onclick="closeSheet();setTask(${id},'failed')">Не сделано</button>`);
+      if (t.status !== "done") rows.push(`<button class="btn" style="width:100%" onclick="closeSheet();editTask(${id})">Изменить</button>`);
+      rows.push(`<button class="btn" style="width:100%;color:#e5484d" onclick="closeSheet();delTask(${id})">Удалить</button>`);
+      openSheet(`<h3>${esc(t.title)}</h3><div style="display:flex;flex-direction:column;gap:8px">${rows.join("")}</div>`);
+    };
     function taskCard(t) {
       const due = fmtDue(t.due_at);
       const done = t.status === "done", closed = done || t.status === "failed";
