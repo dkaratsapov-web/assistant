@@ -5,6 +5,7 @@ import { buildPptx, Slide } from "./pptx";
 import { buildNutritionSummary } from "./reports";
 import { editSite, revertLastSiteEdit, siteConfigured } from "./site";
 import { tryPerformCommand } from "./intent";
+import { onboardingAnswer, onboardingDone, onboardingStart, onboardingState, OnbQuestion } from "./onboarding";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { transcribeVoice } from "./speech";
 import { DB } from "./db";
@@ -88,6 +89,18 @@ function mainMenu(origin: string): Keyboard {
     .text(BTN_AI).text(BTN_DIGEST).row()
     .webApp(BTN_APP, origin).text(BTN_HELP).row()
     .resized();
+}
+
+/** Вопрос брифинга: текст с прогрессом и кнопки вариантов. */
+function onbKeyboard(q: OnbQuestion): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  (q.options ?? []).forEach((o, i) => {
+    kb.text(o.label, `onb:${o.value}`);
+    if (i % 2 === 1) kb.row();
+  });
+  if (q.options?.length) kb.row();
+  if (q.skippable) kb.text("Пропустить", "onb:");
+  return kb;
 }
 
 function taskActions(id: number, status: string): InlineKeyboard {
@@ -213,12 +226,22 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   // --- /start и доступ ---
   bot.command("start", async (ctx) => {
     const from = ctx.from!;
+    const startBriefing = async () => {
+      await ctx.reply(
+        "Привет! Я Сара — помню дела за тебя, напоминаю вовремя и считаю калории, если нужно.\n\nПознакомимся за минуту: несколько коротких вопросов, любой можно пропустить.",
+        { reply_markup: mainMenu(origin) }
+      );
+      const q = await onboardingStart(db, from.id);
+      await ctx.reply(`${q.block}\n\n${q.text}`, { reply_markup: onbKeyboard(q) });
+    };
     if (from.id === ownerId) {
+      if (!(await onboardingDone(db, from.id))) return startBriefing();
       await ctx.reply(WELCOME, { reply_markup: mainMenu(origin) });
       return;
     }
     const user = ctx.appUser;
     if (user && user.role !== ROLE_PENDING) {
+      if (!(await onboardingDone(db, from.id))) return startBriefing();
       await ctx.reply(WELCOME, { reply_markup: mainMenu(origin) });
       return;
     }
@@ -277,6 +300,10 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
 
   // --- Помощь / меню / приложение ---
   bot.command("help", async (ctx) => ctx.reply(HELP_TEXT, HTML));
+  bot.command("setup", async (ctx) => {
+    const q = await onboardingStart(db, ctx.from!.id);
+    await ctx.reply(`${q.block}\n\n${q.text}`, { reply_markup: onbKeyboard(q) });
+  });
   bot.command("menu", async (ctx) => ctx.reply("Меню внизу 👇", { reply_markup: mainMenu(origin) }));
   bot.command("app", async (ctx) => {
     await ctx.reply("Открой доску задач в удобном интерфейсе:", {
@@ -498,6 +525,25 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     await ctx.reply(`Пользователь ${uid} удалён из доступа.`);
   });
 
+  /** Один ход брифинга: применяем ответ и задаём следующий вопрос. */
+  async function onbStep(ctx: MyContext, answer: string) {
+    const st = onboardingState(await db.getState(ctx.from!.id));
+    if (!st) return;
+    const r = await onboardingAnswer(db, ctx.from!.id, st, answer, tz);
+    if (r.reply) await ctx.reply(r.reply);
+    if (r.question) {
+      await ctx.reply(`${r.question.block}\n\n${r.question.text}`, { reply_markup: onbKeyboard(r.question) });
+    } else if (r.summary) {
+      await ctx.reply(r.summary, { reply_markup: mainMenu(origin) });
+    }
+  }
+
+  bot.callbackQuery(/^onb:(.*)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try { await ctx.editMessageReplyMarkup(); } catch {}
+    await onbStep(ctx, ctx.match![1] ?? "");
+  });
+
   // --- Callback-и задач ---
   bot.callbackQuery(/^task:(done|progress|reopen|del):(\d+)$/, async (ctx) => {
     const action = ctx.match![1];
@@ -716,6 +762,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     const state = await db.getState(ctx.from!.id);
     const step = state.step as string | undefined;
 
+    if (step === "onb") return onbStep(ctx, text);
     if (step) return handleStep(ctx, step, state, text);
 
     if (text.startsWith("!")) {

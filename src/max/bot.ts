@@ -29,6 +29,13 @@ import {
   User,
 } from "../types";
 import { formatDue, parseDue, tzOffsetOf } from "../utils";
+import {
+  onboardingAnswer,
+  onboardingDone,
+  onboardingStart,
+  onboardingState,
+  OnbQuestion,
+} from "../onboarding";
 import { CHANNEL_MAX, maxUid } from "./ids";
 import { MaxButton, MaxClient, MaxUpdate } from "./client";
 
@@ -40,6 +47,7 @@ const HELP = `🤖 Сара — команды в MAX:
 /app — открыть приложение (задачи, календарь, здоровье)
 /code — код для входа в приложение
 /id — узнать свой ID в MAX
+/setup — пройти знакомство заново
 /ai <запрос> — спросить ИИ
 /help — помощь
 
@@ -67,6 +75,18 @@ function taskButtons(id: number): MaxButton[][] {
       { type: "callback", text: "🗑 Удалить", payload: `task_del:${id}` },
     ],
   ];
+}
+
+/** Вопрос брифинга: текст с прогрессом и кнопки вариантов. */
+function onbView(q: OnbQuestion): { text: string; keyboard?: MaxButton[][] } {
+  const rows: MaxButton[][] = [];
+  if (q.options?.length) {
+    for (let i = 0; i < q.options.length; i += 2) {
+      rows.push(q.options.slice(i, i + 2).map((o) => ({ type: "callback" as const, text: o.label, payload: `onb:${o.value}` })));
+    }
+  }
+  if (q.skippable) rows.push([{ type: "callback", text: "Пропустить", payload: "onb:" }]);
+  return { text: `${q.block}\n\n${q.text}`, keyboard: rows.length ? rows : undefined };
 }
 
 /** Кнопки подтверждения доступа — приходят владельцу. */
@@ -181,9 +201,24 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     return buttons;
   }
 
+  /** Один ход брифинга: применяем ответ и задаём следующий вопрос. */
+  async function onbStep(answer: string): Promise<void> {
+    const st = onboardingState(await db.getState(uid));
+    if (!st) return;
+    const r = await onboardingAnswer(db, uid, st, answer, tz);
+    if (r.reply) await reply(r.reply);
+    if (r.question) {
+      const v = onbView(r.question);
+      await reply(v.text, v.keyboard);
+    } else if (r.summary) {
+      await reply(r.summary, mainMenu(await appButtons()));
+    }
+  }
+
   // ===== Callback-кнопки =====
   if (callbackPayload) {
     if (callbackId) await client.answerCallback(callbackId).catch(() => {});
+    if (callbackPayload.startsWith("onb:")) return onbStep(callbackPayload.slice(4));
     const [action, arg, arg2] = callbackPayload.split(":");
 
     if (action === "access") {
@@ -200,7 +235,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       await db.setRole(targetUid, role);
       await reply(`✅ Доступ выдан (${role === ROLE_CLIENT ? "клиент" : "команда"}).`);
       await client
-        .sendMessage({ userId: targetMax }, "✅ Доступ открыт! Напиши /help или просто скажи, что нужно сделать.", mainMenu(await appButtons()))
+        .sendMessage({ userId: targetMax }, "Готово, доступ открыт. Напиши мне «привет» — познакомимся за минуту, и я подстроюсь под тебя.")
         .catch(() => {});
       return;
     }
@@ -227,10 +262,13 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
 
   // ===== bot_started =====
   if (update.update_type === "bot_started") {
-    return void (await reply(
-      "👋 Привет! Я Сара — твой ИИ-ассистент.\nСтавь задачи словами или голосом, а приложение откроет календарь, клиентов и здоровье.",
-      mainMenu(await appButtons())
-    ));
+    if (!(await onboardingDone(db, uid))) {
+      await reply("Привет! Я Сара — помню дела за тебя, напоминаю вовремя и считаю калории, если нужно.\n\nПознакомимся за минуту — несколько коротких вопросов, любой можно пропустить.");
+      const q = await onboardingStart(db, uid);
+      const v = onbView(q);
+      return void (await reply(v.text, v.keyboard));
+    }
+    return void (await reply("Привет! Что нужно не забыть?", mainMenu(await appButtons())));
   }
 
   // ===== Голосовое сообщение =====
@@ -250,6 +288,11 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   }
   if (!raw) return;
   const low = raw.toLowerCase();
+
+  // Идёт брифинг — любой текст и голос считаем ответом на текущий вопрос
+  if (onboardingState(await db.getState(uid)) && !/^\/(start|help|setup|id|code)/i.test(raw)) {
+    return onbStep(raw);
+  }
 
   // Режим ИИ (FSM по внутреннему uid)
   const state = await db.getState(uid);
@@ -285,6 +328,11 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     case "/stop":
       await db.clearState(uid);
       return void (await reply("Ок, вышла из режима ИИ.", mainMenu(await appButtons())));
+    case "/setup": {
+      const q = await onboardingStart(db, uid);
+      const v = onbView(q);
+      return void (await reply(v.text, v.keyboard));
+    }
     case "/code":
       return sendLoginCode();
     case "/tasks":
