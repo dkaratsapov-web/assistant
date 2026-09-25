@@ -70,6 +70,28 @@ export async function validateInitData(
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
+/** Имя cookie с сессией Mini App. */
+export const SESSION_COOKIE = "sara_session";
+
+/**
+ * Cookie с сессией: вебвью MAX не всегда сохраняет localStorage между открытиями,
+ * поэтому вход запоминается на стороне сервера. SameSite=None — приложение
+ * открывается внутри мессенджера, то есть в стороннем контексте.
+ */
+export function sessionCookie(token: string, maxAgeSec = 180 * 86400): string {
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; Secure; SameSite=None`;
+}
+
+/** Читает cookie из запроса. */
+export function readCookie(request: Request, name: string): string {
+  const raw = request.headers.get("Cookie") ?? "";
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return v.join("=");
+  }
+  return "";
+}
+
 /**
  * Рекомендуемая суточная калорийность и БЖУ по профилю (Миффлин–Сан Жеор).
  * Возвращает null, если данных недостаточно (нет веса/роста/возраста/пола).
@@ -108,7 +130,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const muid = maxUid(mu.id);
     const mUser = await db.ensureChannelUser(muid, CHANNEL_MAX, mu.id, mu.username ?? null, mu.name ?? null);
     if (mUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
-    return json({ token: await db.webSessionFor(muid), role: mUser.role });
+    const mToken = await db.webSessionFor(muid);
+    return new Response(JSON.stringify({ token: mToken, role: mUser.role }), {
+      headers: { "content-type": "application/json", "set-cookie": sessionCookie(mToken) },
+    });
   }
 
   // POST /api/auth/code {code} — вход по одноразовому коду из чата с ботом
@@ -118,7 +143,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (!codeUid) return json({ error: "bad_code" }, 400);
     const codeUser = await db.getUser(codeUid);
     if (!codeUser || codeUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
-    return json({ token: await db.webSessionFor(codeUid), role: codeUser.role });
+    const codeToken = await db.webSessionFor(codeUid);
+    return new Response(JSON.stringify({ token: codeToken, role: codeUser.role }), {
+      headers: { "content-type": "application/json", "set-cookie": sessionCookie(codeToken) },
+    });
   }
 
   // Два способа входа: подпись Telegram initData либо токен сессии, выданный ботом
@@ -129,7 +157,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (tgUser.id === parseInt(env.OWNER_ID, 10)) await db.ensureOwner(tgUser.id);
     authUid = tgUser.id;
   } else {
-    authUid = await db.webSessionUid(request.headers.get("X-Max-Session") ?? "");
+    // токен из заголовка (localStorage) либо из cookie — что сохранилось
+    authUid =
+      (await db.webSessionUid(request.headers.get("X-Max-Session") ?? "")) ??
+      (await db.webSessionUid(readCookie(request, SESSION_COOKIE)));
   }
   if (!authUid) return json({ error: "unauthorized" }, 401);
 

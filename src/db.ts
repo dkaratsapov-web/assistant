@@ -130,7 +130,7 @@ export class DB {
   }
 
   /** Выдаёт токен доступа к Mini App для пользователя канала. */
-  async createWebSession(userId: number, ttlDays = 30): Promise<string> {
+  async createWebSession(userId: number, ttlDays = 180): Promise<string> {
     await this.ensureWeb();
     const token = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
     const expires = new Date(Date.now() + ttlDays * 86400_000).toISOString();
@@ -147,9 +147,9 @@ export class DB {
    * Действующий токен пользователя или новый, если подходящего нет.
    * Иначе каждое меню плодило бы новую сессию.
    */
-  async webSessionFor(userId: number, ttlDays = 30): Promise<string> {
+  async webSessionFor(userId: number, ttlDays = 180): Promise<string> {
     await this.ensureWeb();
-    const soon = new Date(Date.now() + 86400_000).toISOString(); // годен ещё хотя бы сутки
+    const soon = new Date(Date.now() + 7 * 86400_000).toISOString(); // годен ещё хотя бы неделю
     const row = await this.d1
       .prepare("SELECT token FROM web_session WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1")
       .bind(userId, soon)
@@ -161,7 +161,7 @@ export class DB {
    * Одноразовый код входа в Mini App: бот выдаёт его в чате, приложение обменивает на сессию.
    * Восемь символов без похожих (0/O, 1/I) — подобрать за 10 минут жизни нереально.
    */
-  async createLoginCode(userId: number, ttlMin = 10): Promise<string> {
+  async createLoginCode(userId: number, ttlMin = 60): Promise<string> {
     await this.ensureWeb();
     const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = crypto.getRandomValues(new Uint8Array(8));
@@ -189,15 +189,25 @@ export class DB {
     return row.user_id;
   }
 
-  /** Возвращает user_id по токену Mini App или null (нет токена / протух). */
-  async webSessionUid(token: string): Promise<number | null> {
+  /**
+   * Возвращает user_id по токену Mini App или null (нет токена / протух).
+   * Срок жизни продлевается на ходу: пока человек пользуется приложением,
+   * повторно входить не придётся.
+   */
+  async webSessionUid(token: string, ttlDays = 180): Promise<number | null> {
     if (!token) return null;
     await this.ensureWeb();
     const row = await this.d1
-      .prepare("SELECT user_id FROM web_session WHERE token = ? AND expires_at > ?")
+      .prepare("SELECT user_id, expires_at FROM web_session WHERE token = ? AND expires_at > ?")
       .bind(token, nowIso())
-      .first<{ user_id: number }>();
-    return row ? row.user_id : null;
+      .first<{ user_id: number; expires_at: string }>();
+    if (!row) return null;
+    const left = Date.parse(row.expires_at) - Date.now();
+    if (left < (ttlDays / 2) * 86400_000) {
+      const next = new Date(Date.now() + ttlDays * 86400_000).toISOString();
+      await this.d1.prepare("UPDATE web_session SET expires_at = ? WHERE token = ?").bind(next, token).run();
+    }
+    return row.user_id;
   }
 
   async listUsers(role?: string): Promise<User[]> {

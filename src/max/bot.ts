@@ -192,7 +192,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   async function appButtons(): Promise<MaxButton[]> {
     if (!appUrl) return [];
     const token = await db.webSessionFor(uid);
-    const link = `${appUrl}?max=${token}`;
+    const link = `${appUrl}/app?max=${token}`;
     const buttons: MaxButton[] = [];
     // Если мини-приложение зарегистрировано в кабинете MAX — открываем внутри мессенджера
     if (env.MAX_APP_NAME) buttons.push({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });

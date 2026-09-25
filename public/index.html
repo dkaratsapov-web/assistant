@@ -1604,7 +1604,7 @@
           <img src="${SARA}" alt="" style="width:96px;height:96px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
           <div style="font-size:17px;font-weight:700;margin-bottom:6px">Вход в Сару</div>
           <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
-            Отправь боту в чате команду <b>/code</b> — он пришлёт код из 8 символов. Введи его один раз, дальше приложение будет открываться сразу.
+            Отправь боту в чате команду <b>/code</b> — он пришлёт код из 8 символов. Ввести нужно один раз: дальше приложение узнаёт тебя само.
           </div>
           <div class="field" style="text-align:left">
             <label>Код из чата</label>
@@ -1640,7 +1640,12 @@
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok || !d.token) {
-          if (msg) msg.textContent = d.error === "no_access" ? "Доступ ещё не подтверждён владельцем." : "Код не подошёл — запроси новый командой /code.";
+          if (msg) {
+            msg.textContent =
+              d.error === "no_access"
+                ? "Доступ ещё не подтверждён владельцем."
+                : "Код не подошёл: он действует час и работает один раз. Отправь боту /code и введи новый.";
+          }
           return;
         }
         localStorage.setItem(MAX_KEY, d.token);

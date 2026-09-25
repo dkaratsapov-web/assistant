@@ -1,4 +1,4 @@
-import { handleApi } from "./api";
+import { handleApi, sessionCookie } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
@@ -342,6 +342,19 @@ export default {
     if (url.pathname === "/max/owner") return handleMaxOwner(request, env);
     if (url.pathname === "/telemost/auth") return handleTelemostAuth(request, env, origin);
     if (url.pathname === "/telemost/callback") return handleTelemostCallback(request, env, origin);
+    // Персональная ссылка из бота: запоминаем сессию в cookie и уводим на чистый адрес.
+    // Отдельный маршрут нужен потому, что статику отдаёт файловый сервер раньше воркера.
+    if (url.pathname === "/app") {
+      const linkToken = url.searchParams.get("max") ?? "";
+      const headers = new Headers({ location: `${origin}/`, "cache-control": "no-store" });
+      if (linkToken && (await new DB(env.DB).webSessionUid(linkToken))) {
+        headers.append("set-cookie", sessionCookie(linkToken));
+      } else if (linkToken) {
+        // токен протух — пусть приложение покажет экран входа
+        headers.set("location", `${origin}/?max=${encodeURIComponent(linkToken)}`);
+      }
+      return new Response(null, { status: 302, headers });
+    }
     if (url.pathname === "/health") return new Response("ok");
     if (url.pathname === "/version") {
       return new Response(BUILD, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
@@ -355,6 +368,12 @@ export default {
     if ((asset.headers.get("content-type") ?? "").includes("text/html")) {
       const headers = new Headers(asset.headers);
       headers.set("cache-control", "no-cache, no-store, must-revalidate");
+      // Пришли по персональной ссылке из бота — запоминаем вход в cookie,
+      // чтобы код больше не спрашивать даже там, где вебвью теряет localStorage.
+      const linkToken = url.searchParams.get("max") ?? "";
+      if (linkToken && (await new DB(env.DB).webSessionUid(linkToken))) {
+        headers.append("set-cookie", sessionCookie(linkToken));
+      }
       return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
     }
     return asset;
