@@ -1,4 +1,4 @@
-import { aiConfig, askAIChat, ChatMessage, estimateNutrition, estimateBurn } from "./ai";
+import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutrition, estimateBurn } from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
@@ -215,6 +215,26 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (target === uid) return json({ error: "self" }, 400);
       await db.deleteUser(target);
       return json({ ok: true });
+    }
+
+    // Проверка ИИ: делаем настоящий запрос и показываем ответ Яндекса как есть
+    if (path === "/api/admin/ai-status" && request.method === "GET") {
+      const cfg = aiConfig(env);
+      const out: Record<string, unknown> = {
+        hasApiKey: !!env.YANDEX_API_KEY,
+        hasFolderId: !!env.YANDEX_FOLDER_ID,
+        model: cfg?.model ?? null,
+        router: cfg?.router ?? null,
+        vision: cfg?.vision || null,
+        voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID),
+      };
+      if (!cfg) {
+        out.test = "не настроено: нужны YANDEX_API_KEY и YANDEX_FOLDER_ID";
+        return json(out);
+      }
+      const answer = await askAI(cfg, "Ответь одним словом: привет");
+      out.test = answer.startsWith("⚠️") ? { ok: false, error: answer } : { ok: true, answer: answer.slice(0, 120) };
+      return json(out);
     }
 
     // Состояние канала MAX — без секретов: владелец уже подтверждён подписью Mini App

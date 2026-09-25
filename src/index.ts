@@ -1,6 +1,7 @@
 import { handleApi, sessionCookie } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
+import { aiConfig, askAI } from "./ai";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
@@ -354,6 +355,21 @@ export default {
         headers.set("location", `${origin}/?max=${encodeURIComponent(linkToken)}`);
       }
       return new Response(null, { status: 302, headers });
+    }
+    if (url.pathname === "/ai/status") {
+      if (!maxAdminAllowed(url, env)) {
+        return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET (подойдёт и MAX_WEBHOOK_SECRET)", { status: 403 });
+      }
+      const cfg = aiConfig(env);
+      const body: Record<string, unknown> = {
+        hasApiKey: !!env.YANDEX_API_KEY,
+        hasFolderId: !!env.YANDEX_FOLDER_ID,
+        folderId: env.YANDEX_FOLDER_ID ? `${env.YANDEX_FOLDER_ID.slice(0, 6)}…` : null,
+        model: cfg?.model ?? null,
+        router: cfg?.router ?? null,
+      };
+      body.test = cfg ? await askAI(cfg, "Ответь одним словом: привет") : "не настроено: нужны YANDEX_API_KEY и YANDEX_FOLDER_ID";
+      return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
     }
     if (url.pathname === "/health") return new Response("ok");
     if (url.pathname === "/version") {

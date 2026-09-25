@@ -1040,6 +1040,11 @@
         const { users } = await api("/admin/users");
         const mo = await api("/admin/max-owner").catch(() => ({ id: "" }));
         let h = `<div class="card" style="padding:12px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">ИИ</div>
+          <div id="adm-ai" style="color:var(--muted);font-size:12.5px">Проверяю…</div>
+          <div class="actions" style="margin-top:10px"><button class="btn sm" onclick="checkAi()">Проверить ИИ</button></div>
+        </div>
+        <div class="card" style="padding:12px;margin-bottom:8px">
           <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">Канал MAX</div>
           <div id="adm-max" style="color:var(--muted);font-size:12.5px">Проверяю…</div>
           <div class="actions" style="margin-top:10px">
@@ -1074,6 +1079,7 @@
         h += `<div style="font-weight:700;font-size:13.5px;margin:14px 2px 8px">Пользователи${rows.length ? ` · ${rows.length}` : ""}</div>`;
         h += rows.length ? rows.map(adminRow).join("") : `<div class="card"><div style="padding:8px;color:var(--muted);font-size:13px">Пока только ты.</div></div>`;
         setHTML("adm-body", h);
+        checkAi();
         checkMax();
       } catch (e) {
         setHTML("adm-body", `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message || e)}</div></div>`);
@@ -1100,6 +1106,26 @@
         </div>
       </div>`;
     }
+
+    window.checkAi = async () => {
+      const box = $("adm-ai");
+      if (box) box.textContent = "Спрашиваю Яндекс…";
+      try {
+        const d = await api("/admin/ai-status");
+        const line = (ok, text) => `<div style="margin:3px 0">${ok ? "✅" : "⚠️"} ${text}</div>`;
+        let h = "";
+        h += line(d.hasApiKey, d.hasApiKey ? "Ключ YANDEX_API_KEY задан" : "Нет YANDEX_API_KEY");
+        h += line(d.hasFolderId, d.hasFolderId ? "Каталог YANDEX_FOLDER_ID задан" : "Нет YANDEX_FOLDER_ID");
+        if (d.model) h += line(true, `Модель: ${esc(d.model)} · разбор команд: ${esc(d.router || "")}`);
+        if (typeof d.test === "string") h += line(false, esc(d.test));
+        else if (d.test && d.test.ok) h += line(true, `Ответ получен: «${esc(d.test.answer)}»`);
+        else if (d.test) h += line(false, esc(d.test.error));
+        h += line(!!d.vision, d.vision ? `Фото еды: ${esc(d.vision)}` : "Фото еды выключено (нет YANDEX_VISION_MODEL)");
+        if (box) box.innerHTML = h;
+      } catch (e) {
+        if (box) box.textContent = "Ошибка: " + (e.message || e);
+      }
+    };
 
     window.checkMax = async () => {
       const box = $("adm-max");
