@@ -194,11 +194,35 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     const token = await db.webSessionFor(uid);
     const link = `${appUrl}/app?max=${token}`;
     const buttons: MaxButton[] = [];
-    // Если мини-приложение зарегистрировано в кабинете MAX — открываем внутри мессенджера
-    if (env.MAX_APP_NAME) buttons.push({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });
+
+    // Мини-приложение открываем внутри мессенджера: кнопка open_app привязывается
+    // либо к публичному имени из кабинета, либо к самому боту по его id.
+    const botId = await maxBotId();
+    if (env.MAX_APP_NAME) {
+      buttons.push({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });
+    } else if (botId) {
+      buttons.push({ type: "open_app", text: "📲 Открыть", contact_id: botId, payload: token });
+    }
+    // Ссылка остаётся запасным путём: откроется в браузере, если приложение недоступно
     buttons.push({ type: "link", text: buttons.length ? "🔗 В браузере" : "📲 Открыть приложение", url: link });
     buttons.push({ type: "callback", text: "🔑 Код входа", payload: "login:code" });
     return buttons;
+  }
+
+  /** id бота в MAX — нужен кнопке open_app; спрашиваем один раз и держим в настройках. */
+  async function maxBotId(): Promise<number | null> {
+    const cached = parseInt((await db.getSetting("max_bot_id")) ?? "", 10);
+    if (cached) return cached;
+    try {
+      const me = await client.getMe();
+      if (me?.user_id) {
+        await db.setSetting("max_bot_id", String(me.user_id));
+        return me.user_id;
+      }
+    } catch {
+      // не критично: останется ссылка в браузер
+    }
+    return null;
   }
 
   /** Один ход брифинга: применяем ответ и задаём следующий вопрос. */
