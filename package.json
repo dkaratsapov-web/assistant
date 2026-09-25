@@ -10,7 +10,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:init": "wrangler d1 execute assistant-db --file=./schema.sql",
-    "db:init:local": "wrangler d1 execute assistant-db --local --file=./schema.sql"
+    "db:init:local": "wrangler d1 execute assistant-db --local --file=./schema.sql",
+    "test": "esbuild src/utils.ts src/intent.ts --bundle --format=esm --platform=neutral --outdir=.test-build --log-level=error && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "grammy": "^1.30.0"

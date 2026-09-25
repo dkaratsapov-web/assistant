@@ -833,7 +833,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     await ctx.replyWithDocument(new InputFile(bytes, fname), { caption: "Готово ✅ Можно открыть в Word и при необходимости экспортировать в PDF." });
   }
 
-  const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|\bкп\b|договор|бриф|отч[её]т в ворд)/i;
+  const DOC_RE = /(сделай|сформируй|подготовь|состав|напиши|сгенерируй)[^.]*(документ|файл|ворд|word|docx|\.doc|коммерческ|(?:^|[^а-яёa-z])кп(?![а-яёa-z])|договор|бриф|отч[её]т в ворд)/i;
   const PRESO_RE = /(презентаци|слайд|pptx|powerpoint|power point|питч[- ]?дек|pitch)/i;
 
   async function makeAndSendPresentation(ctx: MyContext, request: string) {
@@ -998,7 +998,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         if (ctx.from!.id === ownerId) { try { const r = await revertLastSiteEdit(env, db); await ctx.reply(`↩️ Откатил правку ${r.file}.`); } catch (e) { await ctx.reply("⚠️ " + (e as Error).message); } return; }
       }
       // Правка сайта
-      if (/(на сайте|на сайт\b|мой сайт|на лендинге|на странице сайта)/i.test(text) && /(помен|измен|добав|обнов|замен|исправ|удали|напиши|сдел|постав|перепиш)/i.test(text)) {
+      if (/(на сайте|на сайт(?![а-яё])|мой сайт|на лендинге|на странице сайта)/i.test(text) && /(помен|измен|добав|обнов|замен|исправ|удали|напиши|сдел|постав|перепиш)/i.test(text)) {
         return makeSiteEdit(ctx, text);
       }
       // Сводка по питанию (для тренера)

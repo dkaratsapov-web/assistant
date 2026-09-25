@@ -14,6 +14,21 @@ function localToUtcIso(localMs: number, tzOffset: number): string {
 const WEEKDAY_NAMES = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
 
 /** Строка текущих локальных даты/времени для контекста модели, напр. «2026-07-31 16:40, четверг». */
+/**
+ * Границы слова для русского текста. Встроенные \b и \w в JavaScript считают буквами
+ * только латиницу, поэтому шаблоны вида /\bвес\b/ на кириллице молча не срабатывают.
+ * Здесь — класс «буква» с кириллицей и готовые края слова.
+ */
+const LETTER = "A-Za-zА-Яа-яЁё0-9_";
+/** Начало слова: начало строки или любой не-буквенный символ. */
+export const WB_START = `(?:^|[^${LETTER}])`;
+/** Конец слова: дальше не должно идти буквы. */
+export const WB_END = `(?![${LETTER}])`;
+/** Регулярка со «словесными» краями, понимающими кириллицу. */
+export function wordRe(body: string, flags = "i"): RegExp {
+  return new RegExp(`${WB_START}(?:${body})${WB_END}`, flags);
+}
+
 export function nowContext(tzOffset: number): string {
   const d = nowLocal(tzOffset);
   const p = (n: number) => String(n).padStart(2, "0");
@@ -57,7 +72,7 @@ export function parseDue(text: string, tzOffset: number): string | null {
   };
 
   // 1) «через …»
-  const rel = raw.match(/через\s+(полчаса|час|\d+)\s*(минут\w*|мин|час\w*|ч|дн\w*|день|недел\w*)?/);
+  const rel = raw.match(/через\s+(полчаса|час|\d+)\s*(минут[а-яё]*|мин|час[а-яё]*|ч|дн[а-яё]*|день|недел[а-яё]*)?/);
   if (rel) {
     const w = rel[1];
     const unit = rel[2] || "";
@@ -85,7 +100,7 @@ export function parseDue(text: string, tzOffset: number): string | null {
     raw = raw.replace(mt[0], " ");
   }
   if (hour === null && /полдень/.test(raw)) { hour = 12; raw = raw.replace(/полдень/, " "); }
-  if (hour === null && /полноч/.test(raw)) { hour = 0; raw = raw.replace(/полноч\w*/, " "); }
+  if (hour === null && /полноч/.test(raw)) { hour = 0; raw = raw.replace(/полноч[а-яё]*/, " "); }
 
   // 3) дата «15 марта»
   const months: Record<string, number> = {
@@ -94,7 +109,7 @@ export function parseDue(text: string, tzOffset: number): string | null {
   };
   let baseDate: Date | null = null;
   let baseNoYear = false;
-  const mn = raw.match(/\b(\d{1,2})\s+([а-я]+)\b/);
+  const mn = raw.match(new RegExp(`${WB_START}(\\d{1,2})\\s+([а-яё]+)${WB_END}`));
   if (mn && months[mn[2]] !== undefined) {
     baseDate = new Date(Date.UTC(local.getUTCFullYear(), months[mn[2]], parseInt(mn[1], 10)));
     baseNoYear = true;
@@ -118,8 +133,8 @@ export function parseDue(text: string, tzOffset: number): string | null {
   // 5) время словами: «в 15 часов», «в 8 вечера», «в 15», «15 ч»
   if (hour === null) {
     const bh =
-      raw.match(/\b(?:в|во|к|на)\s+(\d{1,2})\s*(?:час\w*|ч)?\s*(утра|дня|вечера|ночи)?\b/) ||
-      raw.match(/\b(\d{1,2})\s*(?:час\w*|ч)\s*(утра|дня|вечера|ночи)?\b/);
+      raw.match(new RegExp(`${WB_START}(?:в|во|к|на)\\s+(\\d{1,2})\\s*(?:час[а-яё]*|ч)?\\s*(утра|дня|вечера|ночи)?${WB_END}`)) ||
+      raw.match(new RegExp(`${WB_START}(\\d{1,2})\\s*(?:час[а-яё]*|ч)\\s*(утра|дня|вечера|ночи)?${WB_END}`));
     if (bh) {
       let h = parseInt(bh[1], 10);
       const suf = bh[2];
@@ -135,7 +150,8 @@ export function parseDue(text: string, tzOffset: number): string | null {
   if (hour === null) {
     const dayparts: Record<string, number> = { утром: 9, утра: 9, днем: 13, обед: 13, вечером: 19, вечера: 19, ночью: 23, ночи: 23 };
     for (const [w, h] of Object.entries(dayparts)) {
-      if (new RegExp("\\b" + w + "\\b").test(raw)) { hour = h; raw = raw.replace(new RegExp("\\b" + w + "\\b"), " "); break; }
+      const re = wordRe(w, "");
+      if (re.test(raw)) { hour = h; raw = raw.replace(re, " "); break; }
     }
   }
 
@@ -269,9 +285,9 @@ export function mealByHour(hour: number): string {
 export function matchWaterMl(text: string): number | null {
   const t = text.toLowerCase();
   const drink = /(вып(и|ь)|попил|попью|выпью|дринк)/.test(t);
-  const waterNoun = /(вод[аыуёе]|стакан|\bмл\b|\d+\s*мл|литр|бутыл)/.test(t);
+  const waterNoun = /(вод[аыуёе]|стакан|\d+\s*мл|литр|бутыл)/.test(t) || wordRe("мл").test(t);
   if (drink && waterNoun) return parseWaterMl(t);
-  if (/^\+?\s*(вода|воды|стакан)\b/.test(t)) return parseWaterMl(t);
+  if (/^\+?\s*(вода|воды|стакан)(?![а-яё])/.test(t)) return parseWaterMl(t);
   return null;
 }
 

@@ -6,11 +6,11 @@
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, WB_START, wordRe } from "./utils";
 
 const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
-const FOOD_RE = /(съел\w*|поел\w*|скушал\w*|позавтракал\w*|пообедал\w*|поужинал\w*|перекусил\w*|на завтрак|на обед|на ужин|съесть)/i;
+const FOOD_RE = /(съел[а-яё]*|поел[а-яё]*|скушал[а-яё]*|позавтракал[а-яё]*|пообедал[а-яё]*|поужинал[а-яё]*|перекусил[а-яё]*|на завтрак|на обед|на ужин|съесть)/i;
 
 /** Выполняет распознанное намерение. Возвращает подтверждение или null (если это не команда). */
 export async function performIntent(
@@ -167,12 +167,12 @@ export function localRoute(text: string): AssistantIntent | null {
   if ((m = t.match(/^(?:заметка|запиши идею|запомни)[:\s]+(.+)/i))) return { action: "note_add", title: m[1].trim() };
 
   // Задачи: удалить / выполнить (без дат — можно локально)
-  if ((m = t.match(/^удал(?:и|ить)\s+задач\w*\s+(.+)/i))) return { action: "task_delete", title: m[1].trim() };
-  if ((m = t.match(/^(?:выполнил\w*|сделал\w*|отметь)\s+(?:задач\w*\s+)?(.+?)(?:\s+выполненн\w+)?$/i)))
+  if ((m = t.match(/^удал(?:и|ить)\s+задач[а-яё]*\s+(.+)/i))) return { action: "task_delete", title: m[1].trim() };
+  if ((m = t.match(/^(?:выполнил[а-яё]*|сделал[а-яё]*|отметь)\s+(?:задач[а-яё]*\s+)?(.+?)(?:\s+выполненн[а-яё]+)?$/i)))
     return { action: "task_done", title: m[1].trim() };
 
   // Клиенты: удалить (только имя — безопасно локально)
-  if ((m = t.match(/^удал(?:и|ить)\s+клиент\w*\s+(.+)/i))) return { action: "client_delete", name: m[1].trim() };
+  if ((m = t.match(/^удал(?:и|ить)\s+клиент[а-яё]*\s+(.+)/i))) return { action: "client_delete", name: m[1].trim() };
 
   return null;
 }
@@ -214,7 +214,10 @@ export async function tryPerformCommand(
     return `🗑 Удалила: ${last.title} (−${last.kcal} ккал).`;
   }
   // Вес
-  const wM = text.match(/\bвес\w*\s*[—:\-]?\s*(\d{2,3}(?:[.,]\d)?)/i) || text.match(/взвес\w+\D{0,6}(\d{2,3}(?:[.,]\d)?)/i);
+  // «вес 82», «вес — 82,5», «взвесился 82.5»; начало слова проверяем явно, чтобы
+  // не ловить «навес» и «привес»
+  const weightRe = new RegExp(`${WB_START}вес[а-яё]*\\s*[—:\\-]?\\s*(\\d{2,3}(?:[.,]\\d)?)`, "i");
+  const wM = text.match(weightRe) || text.match(/взвес[а-яё]+\D{0,6}(\d{2,3}(?:[.,]\d)?)/i);
   if (wM) {
     const kg = parseFloat(wM[1].replace(",", "."));
     if (kg >= 20 && kg <= 400) { await db.addWeight(uid, kg); return `⚖️ Записала вес: ${kg} кг.`; }
@@ -227,7 +230,7 @@ export async function tryPerformCommand(
     await db.addActivity(uid, `Шаги: ${steps}`, kc);
     return `🏃 Записала ${steps} шагов (~${kc} ккал).`;
   }
-  if ((am = text.match(/(?:сж[её]г|сожгла|потратил\w*)\s*(\d{2,4})\s*ккал/i))) {
+  if ((am = text.match(/(?:сж[её]г|сожгла|потратил[а-яё]*)\s*(\d{2,4})\s*ккал/i))) {
     const kc = parseInt(am[1], 10);
     await db.addActivity(uid, "Активность", kc);
     return `🔥 Записала −${kc} ккал (активность).`;
@@ -240,17 +243,20 @@ export async function tryPerformCommand(
     return `🗑 Удалила тренировку: ${last.title} (−${last.kcal} ккал).`;
   }
   // Недельная цель по тренировкам
-  if ((am = text.match(/цел\w*\D{0,15}(\d{1,2})\D{0,15}трениров/i)) || (am = text.match(/(\d{1,2})\s*трениров\w*\s*в\s*недел/i))) {
+  if ((am = text.match(/цел[а-яё]*\D{0,15}(\d{1,2})\D{0,15}трениров/i)) || (am = text.match(/(\d{1,2})\s*трениров[а-яё]*\s*в\s*недел/i))) {
     const n = parseInt(am[1], 10);
     if (n >= 1 && n <= 21) { await db.setSetting(`wgoal:${uid}`, String(n)); return `🎯 Цель: ${n} трениров${n === 1 ? "ка" : n < 5 ? "ки" : "ок"} в неделю.`; }
   }
   // Тренировка/активность
-  if (/(трениров|пробежк|побегал|качал|\bзал\b|йог|плавал|велосипед|отжим|присед|заняти|кардио|силов|растяж|планк)/i.test(text) && ai) {
+  const looksLikeWorkout =
+    /(трениров|пробежк|побегал|качал|йог|плавал|велосипед|отжим|присед|заняти|кардио|силов|растяж|планк)/i.test(text) ||
+    wordRe("зал").test(text);
+  if (looksLikeWorkout && ai) {
     const kc = (await estimateBurn(ai, text)) ?? 0;
     let dur = 0;
     let dm;
     if ((dm = text.match(/(\d{1,3})\s*(?:мин|минут)/i))) dur = parseInt(dm[1], 10);
-    else if ((dm = text.match(/(\d{1,2})\s*(?:час|ч)\b/i))) dur = parseInt(dm[1], 10) * 60;
+    else if ((dm = text.match(/(\d{1,2})\s*(?:час[а-яё]*|ч)(?![а-яёa-z])/i))) dur = parseInt(dm[1], 10) * 60;
     const low = text.toLowerCase();
     const type = /(бег|пробежк|кардио|велосипед|плаван|ходьб)/.test(low) ? "кардио"
       : /(силов|качал|\bзал\b|штанг|жим|присед|отжим|турник)/.test(low) ? "силовая"
@@ -259,7 +265,7 @@ export async function tryPerformCommand(
     await db.addActivity(uid, text.slice(0, 80), kc, type, dur);
     return `🏋️ Тренировка записана: ${text.slice(0, 60)}${dur ? ` · ${dur} мин` : ""}${kc ? ` · ~${kc} ккал` : ""}.`;
   }
-  if ((am = text.match(/спал\w*\s*(\d{1,2}(?:[.,]\d)?)\s*час/i))) {
+  if ((am = text.match(/спал[а-яё]*\s*(\d{1,2}(?:[.,]\d)?)\s*час/i))) {
     const hrs = parseFloat(am[1].replace(",", "."));
     await db.setWellbeing(uid, todayStr, { sleep: hrs });
     return `😴 Записала сон: ${hrs} ч.`;
