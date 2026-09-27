@@ -145,19 +145,6 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  // POST /api/auth/code {code} — вход по одноразовому коду из чата с ботом
-  if (path === "/api/auth/code" && request.method === "POST") {
-    const body = (await request.json().catch(() => ({}))) as { code?: string };
-    const codeUid = await db.redeemLoginCode(body.code ?? "");
-    if (!codeUid) return json({ error: "bad_code" }, 400);
-    const codeUser = await db.getUser(codeUid);
-    if (!codeUser || codeUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
-    const codeToken = await db.webSessionFor(codeUid);
-    return new Response(JSON.stringify({ token: codeToken, role: codeUser.role }), {
-      headers: { "content-type": "application/json", "set-cookie": sessionCookie(codeToken) },
-    });
-  }
-
   // Два способа входа: подпись Telegram initData либо токен сессии, выданный ботом
   // в другом канале (MAX) — там подписи Telegram нет.
   const tgUser = await validateInitData(request.headers.get("X-Telegram-Init-Data") ?? "", env.BOT_TOKEN);

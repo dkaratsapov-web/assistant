@@ -45,7 +45,6 @@ const HELP = `🤖 Сара — команды в MAX:
 /addtask <текст> — новая задача (пример: /addtask Позвонить клиенту завтра 15:00)
 /digest — сводка на сегодня
 /app — открыть приложение (задачи, календарь, здоровье)
-/code — код для входа в приложение
 /id — узнать свой ID в MAX
 /setup — пройти знакомство заново
 /ai <запрос> — спросить ИИ
@@ -144,8 +143,21 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
 
   const { senderId, chatId, text, name, username, audioUrl, callbackId, callbackPayload } = extract(update);
   if (!senderId && !chatId) return;
-  const reply = (t: string, kb?: MaxButton[][]) =>
-    client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, t, kb);
+  const reply = async (t: string, kb?: MaxButton[][]) => {
+    const to = { chatId: chatId ?? undefined, userId: chatId ? undefined : senderId };
+    try {
+      return await client.sendMessage(to, t, kb);
+    } catch (e) {
+      // Платформа может отклонить кнопку мини-приложения. Сообщение важнее кнопки:
+      // убираем спорный ряд и отправляем снова, а не теряем ответ целиком.
+      const safe = (kb ?? []).filter((row) => !row.some((b) => b.type === "open_app"));
+      if (kb && safe.length !== kb.length) {
+        await db.setSetting("max_kb_button", "").catch(() => {});
+        return await client.sendMessage(to, t, safe.length ? safe : undefined);
+      }
+      throw e;
+    }
+  };
 
   // Узнать свой user_id — доступно всем: нужно для MAX_OWNER_ID и для приглашений
   if (["/id", "/whoami", "/whois", "id"].includes((text ?? "").trim().toLowerCase())) {
@@ -194,19 +206,37 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
    * только она, а рабочие кнопки (ссылка и код) остаются: сообщение без единой
    * кнопки хуже, чем без одной.
    */
+  /**
+   * Кнопка приложения для обычных меню. Берём ту форму, которую платформа уже приняла:
+   * иначе одно отклонённое вложение уронило бы всё сообщение.
+   */
   async function appButtons(): Promise<MaxButton[]> {
-    return (await appButtonSets())[0];
+    const sets = await appButtonSets();
+    const okRaw = await db.getSetting("max_kb_button");
+    if (okRaw != null) {
+      if (!okRaw) return sets[sets.length - 1]; // платформа не принимает open_app — только ссылка
+      try {
+        const saved = JSON.parse(okRaw) as MaxButton;
+        const match = sets.find((set) => set[0] && set[0].type === "open_app" && sameAppButton(set[0], saved));
+        if (match) return match;
+      } catch {
+        // настройка испортилась — падаем на общий путь
+      }
+    }
+    return sets[0];
+  }
+
+  /** Совпадение по форме ссылки на мини-приложение: токен в payload у них разный. */
+  function sameAppButton(a: MaxButton, b: MaxButton): boolean {
+    return a.web_app === b.web_app && a.contact_id === b.contact_id;
   }
 
   /** Варианты клавиатуры от полной к простой — пробуем по очереди. */
   async function appButtonSets(): Promise<MaxButton[][]> {
     if (!appUrl) return [[]];
     const token = await db.webSessionFor(uid);
-    const link = `${appUrl}/app?max=${token}`;
-    const base: MaxButton[] = [
-      { type: "link", text: "📲 Открыть приложение", url: link },
-      { type: "callback", text: "🔑 Код входа", payload: "login:code" },
-    ];
+    // запасной путь — та же личная ссылка, вход по ней тоже без кода
+    const base: MaxButton[] = [{ type: "link", text: "📲 Открыть приложение", url: `${appUrl}/app?max=${token}` }];
 
     // open_app открывает приложение внутри мессенджера и передаёт токен в payload.
     // Какую именно ссылку на мини-приложение ждёт MAX — зависит от настроек бота,
@@ -229,7 +259,8 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     if (appUrl) addApp({ type: "open_app", text: "📲 Открыть", web_app: appUrl, payload: token });
     if (me?.user_id) addApp({ type: "open_app", text: "📲 Открыть", contact_id: me.user_id, payload: token });
 
-    const variants: MaxButton[][] = candidates.map((b) => [b, ...base]);
+    // одна кнопка на сообщение: запасная ссылка нужна, только если open_app не принят
+    const variants: MaxButton[][] = candidates.map((b) => [b]);
     variants.push(base);
     return variants;
   }
@@ -247,6 +278,8 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       try {
         await client.sendMessage(to, text, sets[i].length ? [sets[i]] : undefined);
         await db.setSetting("max_kb_used", `${i + 1} из ${sets.length} — ${label}`);
+        const winner = sets[i][0];
+        await db.setSetting("max_kb_button", winner && winner.type === "open_app" ? JSON.stringify(winner) : "");
         if (errors.length) await db.setSetting("max_kb_error", `${new Date().toISOString()}\n${errors.join("\n")}`);
         else await db.setSetting("max_kb_error", "");
         return;
@@ -322,7 +355,6 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
         .catch(() => {});
       return;
     }
-    if (action === "login" && arg === "code") return sendLoginCode();
     if (action === "menu") {
       if (arg === "tasks") return listTasks();
       if (arg === "digest") return sendDigest();
@@ -373,7 +405,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   const low = raw.toLowerCase();
 
   // Идёт брифинг — любой текст и голос считаем ответом на текущий вопрос
-  if (onboardingState(await db.getState(uid)) && !/^\/(start|help|setup|id|code)/i.test(raw)) {
+  if (onboardingState(await db.getState(uid)) && !/^\/(start|help|setup|id)/i.test(raw)) {
     return onbStep(raw);
   }
 
@@ -413,8 +445,6 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       const v = onbView(q);
       return void (await reply(v.text, v.keyboard));
     }
-    case "/code":
-      return sendLoginCode();
     case "/diag":
       return sendDiag();
     case "/tasks":
@@ -454,12 +484,6 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       const status = TASK_STATUS_LABELS[t.status] ?? "";
       await reply(`#${t.id} ${t.title}${due ? `\n⏰ ${due}` : ""}\n${status}`, taskButtons(t.id));
     }
-  }
-
-  /** Код для входа в мини-приложение, когда оно открыто кнопкой MAX (без персональной ссылки). */
-  async function sendLoginCode() {
-    const code = await db.createLoginCode(uid);
-    await reply(`🔑 Код для входа в приложение:\n\n${code}\n\nВведи его в окне «Нужен вход». Код действует час и работает один раз.`);
   }
 
   /** Короткий отчёт о том, почему кнопка «Открыть» могла не появиться. */

@@ -1628,6 +1628,38 @@
       return bridgeScan().initData;
     }
 
+    /** Хранилища мини-приложения MAX: переживают закрытие окна, в отличие от localStorage в webview. */
+    function maxStores() {
+      const w = window.WebApp || window.MAX || {};
+      return [w.SecureStorage, w.DeviceStorage, w.secureStorage, w.deviceStorage].filter(
+        (s) => s && typeof s.getItem === "function"
+      );
+    }
+
+    async function maxStoreGet(key) {
+      for (const st of maxStores()) {
+        try {
+          const r = await st.getItem(key);
+          const v = typeof r === "string" ? r : r && r.value;
+          if (v) return String(v);
+        } catch (e) {}
+      }
+      return "";
+    }
+
+    async function maxStoreSet(key, value) {
+      for (const st of maxStores()) {
+        try { await st.setItem(key, value); } catch (e) {}
+      }
+    }
+
+    /** Запоминаем сессию всеми доступными способами — чтобы вход спрашивали один раз в жизни. */
+    async function saveSession(token) {
+      try { localStorage.setItem(MAX_KEY, token); } catch (e) {}
+      try { document.cookie = `sara_session=${token}; path=/; max-age=15552000; SameSite=None; Secure`; } catch (e) {}
+      await maxStoreSet(MAX_KEY, token);
+    }
+
     /**
      * Автовход без участия человека: сначала стартовый параметр (токен из кнопки бота),
      * затем подпись мини-приложения. Возвращает true, если вошли.
@@ -1641,20 +1673,26 @@
         body: JSON.stringify({ ...scan, ua: navigator.userAgent.slice(0, 200), href: location.href.slice(0, 300) }),
       }).catch(() => {});
 
-      // 1) стартовый параметр — это наш токен сессии
-      if (scan.startParam && scan.startParam.length >= 16) {
-        try {
-          const r = await fetch("/api/me", { headers: { "X-Max-Session": scan.startParam } });
-          if (r.ok) {
-            try { localStorage.setItem(MAX_KEY, scan.startParam); } catch (e) {}
-            document.cookie = `sara_session=${scan.startParam}; path=/; max-age=15552000; SameSite=None; Secure`;
-            location.replace("/app?max=" + encodeURIComponent(scan.startParam));
-            return true;
-          }
-        } catch (e) {}
+      // 1) подпись мини-приложения — вход по id пользователя MAX, ничего вводить не нужно
+      if (await tryBridgeLogin()) return true;
+      // 2) токен из кнопки бота
+      if (await loginWithToken(scan.startParam)) return true;
+      // 3) токен с прошлого запуска в хранилище MAX
+      return loginWithToken(await maxStoreGet(MAX_KEY));
+    }
+
+    /** Проверяем токен на сервере и, если он живой, входим. */
+    async function loginWithToken(token) {
+      if (!token || token.length < 16) return false;
+      try {
+        const r = await fetch("/api/me", { headers: { "X-Max-Session": token } });
+        if (!r.ok) return false;
+        await saveSession(token);
+        location.replace("/app?max=" + encodeURIComponent(token));
+        return true;
+      } catch (e) {
+        return false;
       }
-      // 2) подпись мини-приложения
-      return tryBridgeLogin();
     }
 
     /** Пробуем войти по подписи мини-приложения. true — вошли, страница перезагрузится. */
@@ -1670,7 +1708,7 @@
         if (!res.ok) return false;
         const d = await res.json();
         if (!d.token) return false;
-        localStorage.setItem(MAX_KEY, d.token);
+        await saveSession(d.token);
         location.reload();
         return true;
       } catch (e) {
@@ -1680,67 +1718,34 @@
 
     /** Экран входа: код из чата с ботом. */
     function renderLogin(note) {
-      $("subtitle").textContent = "Нужен вход";
+      $("subtitle").textContent = "Знакомимся";
       view.innerHTML = `
         <div class="card" style="padding:18px;text-align:center">
-          <img src="${SARA}" alt="" style="width:96px;height:96px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
-          <div style="font-size:17px;font-weight:700;margin-bottom:6px">Вход в Сару</div>
+          <img src="${SARA}" alt="" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
+          <div style="font-size:17px;font-weight:700;margin-bottom:6px">Сара пока не узнала тебя</div>
           <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
-            Отправь боту в чате команду <b>/code</b> — он пришлёт код из 8 символов. Ввести нужно один раз: дальше приложение узнаёт тебя само.
+            Открой приложение кнопкой <b>«📲 Открыть»</b> в чате с Сарой — дальше вход запомнится, и это окно больше не появится.
           </div>
-          <button class="btn primary" style="width:100%;margin-bottom:10px" onclick="openBotChat()">Открыть чат с Сарой</button>
-          <div style="color:var(--muted);font-size:12px;margin-bottom:12px">Нажми «📲 Открыть» в чате — приложение запомнит тебя.</div>
-          <div class="field" style="text-align:left">
-            <label>Или код из чата</label>
-            <input id="login-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
-                   placeholder="Например, K7QM4XZP" style="text-transform:uppercase;letter-spacing:2px;font-weight:700">
-          </div>
-          <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-bottom:10px">${note ? esc(note) : ""}</div>
-          <button class="btn primary" style="width:100%" onclick="submitLoginCode()">Войти</button>
-          <div id="login-build" style="color:var(--muted);font-size:11px;margin-top:10px;opacity:.7"></div>
+          <button class="btn primary" style="width:100%;margin-bottom:8px" onclick="openBotChat()">Открыть чат с Сарой</button>
+          <button class="btn" style="width:100%" onclick="retryLogin()">Попробовать ещё раз</button>
+          <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-top:10px">${note ? esc(note) : ""}</div>
+          <div id="login-build" style="color:var(--muted);font-size:11px;margin-top:6px;opacity:.7"></div>
         </div>`;
       fetch("/version", { cache: "no-store" })
         .then((r) => r.text())
         .then((v) => { const el = $("login-build"); if (el) el.textContent = "сборка " + v; })
         .catch(() => {});
-      const input = $("login-code");
-      if (input) {
-        input.focus();
-        input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitLoginCode(); });
-      }
     }
 
     window.openBotChat = () => {
       try { tg.openLink("https://max.ru/se14086067_bot"); } catch (e) { location.href = "https://max.ru/se14086067_bot"; }
     };
 
-    window.submitLoginCode = async () => {
-      const input = $("login-code");
+    window.retryLogin = async () => {
       const msg = $("login-msg");
-      const code = (input?.value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (code.length !== 8) { if (msg) msg.textContent = "Код состоит из 8 символов."; return; }
       if (msg) msg.textContent = "Проверяю…";
-      try {
-        const res = await fetch("/api/auth/code", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok || !d.token) {
-          if (msg) {
-            msg.textContent =
-              d.error === "no_access"
-                ? "Доступ ещё не подтверждён владельцем."
-                : "Код не подошёл: он действует час и работает один раз. Отправь боту /code и введи новый.";
-          }
-          return;
-        }
-        localStorage.setItem(MAX_KEY, d.token);
-        location.reload();
-      } catch (e) {
-        if (msg) msg.textContent = "Не получилось. Попробуй ещё раз.";
-      }
+      if (await tryAutoLogin()) return;
+      if (msg) msg.textContent = "Пока не вышло. Открой приложение кнопкой «📲 Открыть» в чате.";
     };
 
     (async () => {

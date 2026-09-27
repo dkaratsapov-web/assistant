@@ -208,10 +208,3 @@ CREATE TABLE IF NOT EXISTS web_session (
 );
 CREATE INDEX IF NOT EXISTS idx_web_session_user ON web_session(user_id);
 
--- Одноразовые коды входа в Mini App (бот выдаёт их в чате командой /code)
-CREATE TABLE IF NOT EXISTS login_code (
-  code       TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
