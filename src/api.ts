@@ -123,6 +123,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // ---------- Публичные эндпоинты входа (до проверки авторизации) ----------
 
+  // POST /api/diag/client-error — приложение упало у человека; храним последние отчёты
+  if (path === "/api/diag/client-error" && request.method === "POST") {
+    const raw = (await request.text().catch(() => "")).slice(0, 1000);
+    const prev = (await db.getSetting("client_errors")) ?? "";
+    // держим только последние пять — этого хватает, чтобы понять причину
+    const lines = [`${new Date().toISOString()} ${raw}`, ...prev.split("\n").filter(Boolean)].slice(0, 5);
+    await db.setSetting("client_errors", lines.join("\n"));
+    return json({ ok: true });
+  }
+
   // POST /api/diag/bridge — приложение рассказывает, что ему дал мессенджер при запуске.
   // Без этого автовход в MAX не наладить: документация платформы недоступна, а гадать нельзя.
   if (path === "/api/diag/bridge" && request.method === "POST") {
@@ -217,6 +227,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     // Что мессенджер передал приложению при последнем запуске
     if (path === "/api/admin/bridge-report" && request.method === "GET") {
       return json({
+        clientErrors: await db.getSetting("client_errors"),
         at: await db.getSetting("bridge_report_at"),
         report: await db.getSetting("bridge_report"),
       });

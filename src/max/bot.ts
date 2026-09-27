@@ -498,8 +498,17 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       `сработал вариант клавиатуры: ${(await db.getSetting("max_kb_used")) ?? "первый"}`,
       `последний отказ платформы:\n${(await db.getSetting("max_kb_error")) || "нет"}`,
       await bridgeLine(),
+      await clientErrorsLine(),
     ];
     return void (await reply(lines.join("\n")));
+  }
+
+  /** Последние падения приложения у людей — приходят с их устройств сами. */
+  async function clientErrorsLine(): Promise<string> {
+    const raw = await db.getSetting("client_errors");
+    if (!raw) return "падений приложения: нет";
+    const lines = raw.split("\n").filter(Boolean);
+    return `падений приложения: ${lines.length}\n  ${lines[0].slice(0, 220)}`;
   }
 
   /** Что мессенджер передал мини-приложению при последнем запуске — ключ к входу без кода. */

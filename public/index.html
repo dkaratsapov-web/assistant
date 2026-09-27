@@ -267,6 +267,55 @@
   <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
 
   <script>
+    /**
+     * Страховка от «вечной загрузки». Приложение запоминает настройки на устройстве,
+     * поэтому одна ошибка при старте повторялась бы при каждом запуске, и человек
+     * не смог бы ни выйти, ни рассказать, что случилось. Ловим такую ошибку,
+     * показываем понятный экран с кнопкой сброса и шлём отчёт себе.
+     */
+    (function () {
+      var booted = false;
+      window.__appBooted = function () { booted = true; };
+      function report(what) {
+        try {
+          navigator.sendBeacon
+            ? navigator.sendBeacon("/api/diag/client-error", new Blob([JSON.stringify(what)], { type: "application/json" }))
+            : fetch("/api/diag/client-error", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(what) });
+        } catch (e) {}
+      }
+      function rescue(message) {
+        report({ message: String(message).slice(0, 500), href: location.href.slice(0, 200), ua: navigator.userAgent.slice(0, 200), at: new Date().toISOString() });
+        if (booted) return;                       // приложение уже работает — не мешаем
+        var view = document.getElementById("view");
+        if (!view) return;
+        view.innerHTML =
+          '<div style="padding:24px;text-align:center;font-family:system-ui,sans-serif">' +
+          '<div style="font-size:17px;font-weight:700;margin-bottom:8px">Приложение не смогло открыться</div>' +
+          '<div style="color:#86868b;font-size:13.5px;line-height:1.5;margin-bottom:18px">Скорее всего, виноваты сохранённые настройки внешнего вида. Сбрось их — данные, задачи и здоровье это не затронет.</div>' +
+          '<button id="rescue-reset" style="width:100%;padding:14px;border:0;border-radius:12px;background:#0a0a0a;color:#fff;font-weight:700;font-size:15px">Сбросить настройки и перезапустить</button>' +
+          '<div style="color:#86868b;font-size:11px;margin-top:14px;word-break:break-all">' + String(message).slice(0, 200) + '</div></div>';
+        var btn = document.getElementById("rescue-reset");
+        if (btn) btn.onclick = function () {
+          btn.textContent = "Сбрасываю…";
+          try { localStorage.removeItem("sara-prefs"); } catch (e) {}
+          // Серверную копию тоже надо вернуть к норме: иначе она приедет обратно
+          // при первом же запуске и человек снова упрётся в этот экран.
+          var restart = function () { location.replace(location.pathname); };
+          try {
+            fetch("/api/prefs", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto", motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара" }),
+            }).then(restart, restart);
+            setTimeout(restart, 3000);            // сеть молчит — всё равно перезапускаемся
+          } catch (e) { restart(); }
+        };
+      }
+      window.addEventListener("error", function (e) { rescue(e.message || e.error); });
+      window.addEventListener("unhandledrejection", function (e) { rescue((e.reason && e.reason.message) || e.reason); });
+    })();
+  </script>
+  <script>
     // Приложение открывается и в Telegram, и по ссылке из MAX (там объекта Telegram нет) —
     // подставляем заглушку с теми же методами, чтобы код ниже не расходился на две ветки.
     const noop = () => {};
@@ -2043,6 +2092,7 @@
       tab = start; navStack.length = 0; navStack.push(start);
       applyHiddenTabs();
       renderTab(start); updateBack();
+      if (window.__appBooted) window.__appBooted();
     })();
   </script>
 </body>

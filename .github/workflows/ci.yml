@@ -22,3 +22,12 @@ jobs:
         run: npm test
       - name: Build (wrangler dry-run)
         run: npx wrangler deploy --dry-run --outdir=dist
+
+      # Дымовой тест приложения: поднимаем страницу с разными сохранёнными
+      # настройками и проверяем, что она открывается без ошибок JS. Появился
+      # после случая, когда спрятанный в настройках раздел убивал приложение
+      # намертво у всех, кто его спрятал.
+      - name: Install Chromium for smoke test
+        run: npx playwright install --with-deps chromium
+      - name: Smoke (браузер)
+        run: npm run smoke
