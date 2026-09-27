@@ -843,7 +843,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const ai = aiConfig(env);
     if (!ai) return json({ error: "ai_not_configured", message: "ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID." }, 400);
     if (!visionEnabled(ai)) {
-      return json({ error: "vision_not_configured", message: "Разбор фото не подключён: нужна мультимодальная модель в переменной YANDEX_VISION_MODEL." }, 400);
+      return json({ error: "vision_not_configured", message: "Счёт калорий по фото ещё дорабатывается. Опиши блюдо словами — посчитаю." }, 400);
     }
     const mediaType = request.headers.get("content-type") || "image/jpeg";
     const bytes = await request.arrayBuffer();

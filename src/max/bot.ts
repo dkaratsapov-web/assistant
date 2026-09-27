@@ -399,7 +399,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   if (imageUrl) {
     if (!ai) return void (await reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
     if (!visionEnabled(ai)) {
-      return void (await reply("Разбор фото пока не подключён — нужна мультимодальная модель (переменная YANDEX_VISION_MODEL).\nОпиши блюдо словами, и я посчитаю: например «съел борщ с хлебом»."));
+      return void (await reply("📷 Счёт калорий по фото ещё дорабатываю — скоро включу.\n\nПока опиши блюдо словами или наговори голосовое: «съел борщ с хлебом» — посчитаю не хуже."));
     }
     await reply("📷 Смотрю, что на тарелке…");
     try {

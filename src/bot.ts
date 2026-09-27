@@ -664,7 +664,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   async function handleFoodPhoto(ctx: MyContext, fileId: string, mediaType: string, caption: string) {
     if (!ai) { await ctx.reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."); return; }
     if (!visionEnabled(ai)) {
-      await ctx.reply("Разбор фото пока не подключён (нужна мультимодальная модель — переменная YANDEX_VISION_MODEL).\nОпиши блюдо текстом или голосом — посчитаю калории: например «съел борщ с хлебом».");
+      await ctx.reply("📷 Счёт калорий по фото ещё дорабатываю — скоро включу.\n\nПока опиши блюдо словами или наговори голосовое: «съел борщ с хлебом» — посчитаю не хуже.");
       return;
     }
     const status = await ctx.reply("📷 Оцениваю блюдо по фото…");
