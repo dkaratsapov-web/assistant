@@ -2325,7 +2325,7 @@
     function bridgeScan() {
       // адрес чистится сразу после старта, поэтому запоминаем разбор первого вызова
       if (launchScan) return launchScan;
-      const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "", initKeys: "" };
+      const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "", initKeys: "", userId: 0 };
       try {
         const q = new URLSearchParams(location.search);
         for (const [k, v] of q.entries()) out.params[k] = String(v).slice(0, 200);
@@ -2361,6 +2361,20 @@
         }
         if (!out.initData && /(^|&)hash=/.test(out.hash.replace(/^#/, ""))) out.initData = out.hash.replace(/^#/, "");
         out.initKeys = out.initData ? [...new URLSearchParams(out.initData).keys()].join(",") : "";
+        // Токен может лежать не в адресе, а внутри данных запуска — полем start_param.
+        // Так его кладёт MAX, когда открывает приложение кнопкой бота.
+        if (out.initData) {
+          const inner = new URLSearchParams(out.initData);
+          for (const k of ["start_param", "startapp", "payload"]) {
+            const v = inner.get(k);
+            if (!out.startParam && v) out.startParam = v;
+          }
+          // id пользователя пригодится для входа с подтверждением в чате
+          try {
+            const u = JSON.parse(inner.get("user") || "{}");
+            if (u && u.id) out.userId = u.id;
+          } catch (e) {}
+        }
       } catch (e) {
         out.error = String(e);
       }
@@ -2500,6 +2514,7 @@
         "подпись: " + (scan.initData ? scan.initData.length + " симв." : "нет"),
         keys.length ? "  поля: " + keys.join(" · ") : "",
         "токен из кнопки: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
+        "id пользователя из данных запуска: " + (scan.userId || "нет"),
         "параметры адреса: " + (Object.keys(scan.params).join(", ") || "нет"),
         lastAuthError ? "ответ сервера: " + lastAuthError : "",
       ].filter(Boolean).join("\n");
