@@ -27,12 +27,24 @@ const API = {
 };
 
 export function startStubServer(prefs, port = 8977) {
+  // Настройки держим в памяти и возвращаем изменённые: заглушка, которая молча
+  // откатывает только что сохранённое, показывает несуществующие ошибки.
+  let current = { ...prefs };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     const p = url.pathname;
     if (p.startsWith("/api/")) {
       res.setHeader("content-type", "application/json; charset=utf-8");
-      if (p === "/api/prefs") return res.end(JSON.stringify(prefs));
+      if (p === "/api/prefs") {
+        if (req.method !== "POST") return res.end(JSON.stringify(current));
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          try { current = { ...current, ...JSON.parse(body) }; } catch (e) {}
+          res.end(JSON.stringify(current));
+        });
+        return;
+      }
       const key = Object.keys(API).find((k) => p === k);
       if (key) return res.end(JSON.stringify(API[key]));
       return res.end(JSON.stringify({ ok: true }));

@@ -434,7 +434,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       callMe: typeof b.callMe === "string" ? b.callMe.trim().slice(0, 40) : cur.callMe,
       botName: typeof b.botName === "string" && b.botName.trim() ? b.botName.trim().slice(0, 24) : cur.botName,
       // аватар берём только по http(s): чужие схемы в webview небезопасны
-      avatar: typeof b.avatar === "string" ? (/^https:\/\/\S+$/.test(b.avatar.trim()) ? b.avatar.trim().slice(0, 300) : "") : cur.avatar,
+      // либо готовое лицо («face:nika»), либо своя картинка по https
+      avatar: typeof b.avatar === "string"
+        ? (/^face:[a-z]{2,12}$/.test(b.avatar.trim()) || /^https:\/\/\S+$/.test(b.avatar.trim()) ? b.avatar.trim().slice(0, 300) : "")
+        : cur.avatar,
       tone: oneOf(b.tone, ["friendly", "business", "brief"] as const, cur.tone),
       address: oneOf(b.address, ["ty", "vy"] as const, cur.address),
       emoji: typeof b.emoji === "boolean" ? b.emoji : cur.emoji,
