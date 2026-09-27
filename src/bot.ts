@@ -321,7 +321,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
 
   // --- Клиенты ---
   bot.command("clients", async (ctx) => {
-    const text = await buildClientsOverview(db);
+    const text = await buildClientsOverview(db, ctx.from!.id);
     await ctx.reply(text + "\n\nДобавить: /addclient");
   });
   bot.command("client", async (ctx) => {
@@ -330,7 +330,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       await ctx.reply("Использование: /client <номер>. Список — /clients");
       return;
     }
-    const c = await db.getClient(id);
+    const c = await db.getClient(id, ctx.from!.id);
     if (!c) {
       await ctx.reply("Клиент не найден.");
       return;
@@ -449,7 +449,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   bot.command("report", async (ctx) => {
     const name = ctx.match.trim();
     if (!name) { await ctx.reply("Использование: /report <клиент>\nПример: /report Ромашка"); return; }
-    const client = await db.findClientByName(name);
+    const client = await db.findClientByName(ctx.from!.id, name);
     if (!client) { await ctx.reply(`Клиент «${name}» не найден.`); return; }
     await sendMetrikaReport(ctx, client);
   });
@@ -564,7 +564,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     const map: Record<string, string> = { done: TASK_DONE, progress: TASK_IN_PROGRESS, reopen: TASK_OPEN };
     await db.setTaskStatus(id, map[action], me);
     const updated = (await db.getTask(id, me))!;
-    const client = updated.client_id ? await db.getClient(updated.client_id) : null;
+    const client = updated.client_id ? await db.getClient(updated.client_id, ctx.from!.id) : null;
     await ctx.editMessageText(taskLine(updated, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(id, updated.status) });
     await ctx.answerCallbackQuery({ text: action === "done" ? "Готово ✅" : "Обновлено" });
   });
@@ -589,7 +589,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     const dueTxt = formatDue(draft.due, tz);
     let suffix = dueTxt ? `\nДедлайн: ${dueTxt}` : "";
     if (clientId) {
-      const c = await db.getClient(clientId);
+      const c = await db.getClient(clientId, ctx.from!.id);
       if (c) suffix += `\nКлиент: ${c.name}`;
     }
     await ctx.editMessageText(`✅ Задача #${taskId} создана: ${escapeHtml(draft.title)}${suffix}`);
@@ -624,13 +624,13 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
   bot.callbackQuery(/^client:(tasks|togglestatus|del|delconfirm|delcancel):(\d+)$/, async (ctx) => {
     const action = ctx.match![1];
     const id = parseInt(ctx.match![2], 10);
-    const c = await db.getClient(id);
+    const c = await db.getClient(id, ctx.from!.id);
     if (!c) {
       await ctx.answerCallbackQuery({ text: "Клиент не найден.", show_alert: true });
       return;
     }
     if (action === "tasks") {
-      const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], clientId: id });
+      const tasks = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], clientId: id, visibleTo: ctx.from!.id });
       if (!tasks.length) await ctx.reply(`У «${c.name}» нет активных задач.`);
       else {
         const lines = [`📋 Задачи «${c.name}»:\n`];
@@ -641,15 +641,15 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
         await ctx.reply(lines.join("\n"));
       }
     } else if (action === "togglestatus") {
-      await db.updateClientStatus(id, c.status === "active" ? "paused" : "active");
-      const updated = (await db.getClient(id))!;
+      await db.updateClientStatus(id, c.status === "active" ? "paused" : "active", ctx.from!.id);
+      const updated = (await db.getClient(id, ctx.from!.id))!;
       await ctx.editMessageText(clientCard(updated), { ...HTML, reply_markup: clientActions(id) });
     } else if (action === "del") {
       await ctx.editMessageText(`Удалить клиента «${c.name}»? Задачи останутся, но отвяжутся.`, {
         reply_markup: new InlineKeyboard().text("✅ Да, удалить", `client:delconfirm:${id}`).text("Отмена", `client:delcancel:${id}`),
       });
     } else if (action === "delconfirm") {
-      await db.deleteClient(id);
+      await db.deleteClient(id, ctx.from!.id);
       await ctx.editMessageText(`🗑 Клиент «${c.name}» удалён.`);
     } else if (action === "delcancel") {
       await ctx.editMessageText(clientCard(c), { ...HTML, reply_markup: clientActions(id) });
@@ -780,7 +780,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       case BTN_ADD_TASK: return startAddTask(ctx);
       case BTN_TASKS: return listTasks(ctx);
       case BTN_CLIENTS: {
-        const t = await buildClientsOverview(db);
+        const t = await buildClientsOverview(db, ctx.from!.id);
         await ctx.reply(t + "\n\nДобавить: /addclient");
         return;
       }
@@ -835,7 +835,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     }
     await ctx.reply(`📋 Активные задачи: ${tasks.length}`);
     // имена клиентов достаём одним запросом, а не по клиенту на задачу
-    const names = new Map((await db.listClients()).map((c) => [c.id, c.name]));
+    const names = new Map((await db.listClients(ctx.from!.id)).map((c) => [c.id, c.name]));
     for (const t of tasks.slice(0, 12)) {
       const client = t.client_id ? names.get(t.client_id) ?? null : null;
       await ctx.reply(taskLine(t, client, tz), { ...HTML, reply_markup: taskActions(t.id, t.status) });
@@ -1001,7 +1001,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       }
       const draft = { ...(state.draft as object), due };
       await db.setState(ctx.from!.id, { step: "addtask_client", draft });
-      const clients = await db.listClients();
+      const clients = await db.listClients(ctx.from!.id);
       const kb = new InlineKeyboard().text("Без клиента", "taskclient:none").row();
       clients.filter((c) => c.status === "active").slice(0, 20).forEach((c) => kb.text(c.name, `taskclient:${c.id}`).row());
       await ctx.reply("Привязать к клиенту?", { reply_markup: kb });
@@ -1022,9 +1022,9 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     if (step === "addclient_contact") {
       const draft = state.draft as { name: string; platforms: string[]; budget: string };
       const contact = ["-", "нет"].includes(low.trim()) ? "" : text.trim();
-      const id = await db.addClient(draft.name, [...draft.platforms].sort().join(","), draft.budget ?? "", { contact });
+      const id = await db.addClient(ctx.from!.id, draft.name, [...draft.platforms].sort().join(","), draft.budget ?? "", { contact });
       await db.clearState(ctx.from!.id);
-      const c = (await db.getClient(id))!;
+      const c = (await db.getClient(id, ctx.from!.id))!;
       await ctx.reply("✅ Клиент добавлен:\n\n" + clientCard(c), HTML);
       return;
     }
@@ -1058,7 +1058,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       }
       // Запрос отчёта по клиенту → сводка Метрики
       if (REPORT_RE.test(text)) {
-        const clients = await db.listClients();
+        const clients = await db.listClients(ctx.from!.id);
         const low2 = text.toLowerCase();
         const client = clients.find((c) => c.name && low2.includes(c.name.toLowerCase()));
         if (client) return sendMetrikaReport(ctx, client);

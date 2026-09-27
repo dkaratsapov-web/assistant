@@ -113,8 +113,8 @@ export async function buildDigest(db: DB, userId: number, role: string, tzOffset
   return lines.join("\n");
 }
 
-export async function buildClientsOverview(db: DB): Promise<string> {
-  const clients = await db.listClients();
+export async function buildClientsOverview(db: DB, ownerId: number): Promise<string> {
+  const clients = await db.listClients(ownerId);
   if (!clients.length) return "Клиентов пока нет. Добавь первого через /addclient.";
   const lines = [`👥 Клиенты (${clients.length})\n`];
   for (const c of clients.filter((c) => c.status === "active")) {

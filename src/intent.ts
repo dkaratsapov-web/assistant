@@ -94,7 +94,7 @@ export async function performIntent(
   if (intent.action === "client_add") {
     const name = (intent.name ?? intent.title ?? "").trim();
     if (!name) return null;
-    const id = await db.addClient(name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
+    const id = await db.addClient(uid, name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
       payAmount: (intent.fee ?? "").trim(),
       payDue: (intent.pay_due ?? "").trim(),
     });
@@ -110,16 +110,16 @@ export async function performIntent(
   if (intent.action === "client_delete") {
     const name = (intent.name ?? intent.title ?? "").trim();
     if (!name) return null;
-    const client = await db.findClientByName(name);
+    const client = await db.findClientByName(uid, name);
     if (!client) return `Не нашла клиента «${name}». Проверь название — точнее: /clients в боте.`;
-    await db.deleteClient(client.id);
+    await db.deleteClient(client.id, uid);
     return `🗑 Клиент удалён: ${client.name} (#${client.id})`;
   }
 
   if (intent.action === "client_edit") {
     const name = (intent.name ?? "").trim();
     if (!name) return null;
-    const client = await db.findClientByName(name);
+    const client = await db.findClientByName(uid, name);
     if (!client) return `Не нашла клиента «${name}».`;
     const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
     if (intent.new_name && intent.new_name.trim()) fields.name = intent.new_name.trim();
@@ -128,7 +128,7 @@ export async function performIntent(
     if (intent.fee && intent.fee.trim()) fields.payAmount = intent.fee.trim();
     if (intent.pay_due && intent.pay_due.trim()) fields.payDue = intent.pay_due.trim();
     if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи название, площадки, бюджет, сумму ведения или дедлайн оплаты.`;
-    await db.updateClient(client.id, fields);
+    await db.updateClient(client.id, uid, fields);
     const changes = [
       fields.name && `название → ${fields.name}`,
       fields.platforms && `площадки → ${fields.platforms}`,

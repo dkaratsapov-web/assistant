@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS clients (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id   INTEGER,                             -- чья это база клиентов
   name       TEXT NOT NULL,
   platforms  TEXT DEFAULT '',
   status     TEXT NOT NULL DEFAULT 'active',      -- active | paused
@@ -85,6 +86,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks(scope);
+CREATE INDEX IF NOT EXISTS idx_clients_owner ON clients(owner_id);
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
 CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at);

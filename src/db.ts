@@ -25,7 +25,7 @@ const nowIso = () => new Date().toISOString();
  * на каждый запрос, и поля экземпляра заставляли гонять DDL при каждом обращении.
  * Изолят Worker'а живёт между запросами, поэтому CREATE TABLE / ALTER выполняются один раз.
  */
-const ready = { schema: false, ai: false, settings: false, supp: false, health: false, web: false };
+const ready = { schema: false, ai: false, settings: false, supp: false, health: false, web: false, legacyClients: false };
 
 export class DB {
   constructor(private d1: D1Database) {}
@@ -41,6 +41,22 @@ export class DB {
         .run();
     } else if (row.role !== ROLE_OWNER) {
       await this.d1.prepare("UPDATE users SET role = ? WHERE user_id = ?").bind(ROLE_OWNER, ownerId).run();
+    }
+    await this.claimLegacyClients(ownerId);
+  }
+
+  /**
+   * База клиентов раньше была общей. Карточки без владельца достаются владельцу бота —
+   * иначе после разделения они пропали бы у всех.
+   */
+  private async claimLegacyClients(ownerId: number): Promise<void> {
+    if (ready.legacyClients) return;
+    await this.ensureSchema();
+    try {
+      await this.d1.prepare("UPDATE clients SET owner_id = ? WHERE owner_id IS NULL").bind(ownerId).run();
+      ready.legacyClients = true;
+    } catch {
+      // таблицы ещё нет — разберёмся на следующем запросе
     }
   }
 
@@ -186,50 +202,57 @@ export class DB {
 
   // ---------- Клиенты ----------
 
-  async addClient(name: string, platforms = "", budget = "", opts: { contact?: string; payAmount?: string; payDue?: string } = {}): Promise<number> {
+  async addClient(ownerId: number, name: string, platforms = "", budget = "", opts: { contact?: string; payAmount?: string; payDue?: string } = {}): Promise<number> {
     await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO clients (name, platforms, status, budget, contact, notes, pay_amount, pay_due, created_at)
-         VALUES (?, ?, 'active', ?, ?, '', ?, ?, ?)`
+        `INSERT INTO clients (owner_id, name, platforms, status, budget, contact, notes, pay_amount, pay_due, created_at)
+         VALUES (?, ?, ?, 'active', ?, ?, '', ?, ?, ?)`
       )
-      .bind(name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", nowIso())
+      .bind(ownerId, name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
 
-  async getClient(id: number): Promise<Client | null> {
-    return await this.d1.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first<Client>();
+  async getClient(id: number, ownerId: number): Promise<Client | null> {
+    await this.ensureSchema();
+    return await this.d1.prepare("SELECT * FROM clients WHERE id = ? AND owner_id = ?").bind(id, ownerId).first<Client>();
   }
 
-  async listClients(): Promise<Client[]> {
+  async listClients(ownerId: number): Promise<Client[]> {
     await this.ensureSchema();
-    const { results } = await this.d1.prepare("SELECT * FROM clients ORDER BY name").all<Client>();
+    const { results } = await this.d1.prepare("SELECT * FROM clients WHERE owner_id = ? ORDER BY name").bind(ownerId).all<Client>();
     return results ?? [];
   }
 
-  async updateClientStatus(id: number, status: string): Promise<void> {
-    await this.d1.prepare("UPDATE clients SET status = ? WHERE id = ?").bind(status, id).run();
+  async updateClientStatus(id: number, status: string, ownerId: number): Promise<boolean> {
+    await this.ensureSchema();
+    const res = await this.d1.prepare("UPDATE clients SET status = ? WHERE id = ? AND owner_id = ?").bind(status, id, ownerId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
-  async deleteClient(id: number): Promise<void> {
-    await this.d1.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
+  async deleteClient(id: number, ownerId: number): Promise<boolean> {
+    await this.ensureSchema();
+    const res = await this.d1.prepare("DELETE FROM clients WHERE id = ? AND owner_id = ?").bind(id, ownerId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
-  /** Поиск клиента по имени (для удаления/правки голосом). */
-  async findClientByName(name: string): Promise<Client | null> {
+  /** Поиск клиента по имени (для удаления/правки голосом) — только в своей базе. */
+  async findClientByName(ownerId: number, name: string): Promise<Client | null> {
+    await this.ensureSchema();
     const n = name.trim().toLowerCase();
     return await this.d1
-      .prepare("SELECT * FROM clients WHERE lower(name) LIKE ? ORDER BY (lower(name) = ?) DESC, name LIMIT 1")
-      .bind(`%${n}%`, n)
+      .prepare("SELECT * FROM clients WHERE owner_id = ? AND lower(name) LIKE ? ORDER BY (lower(name) = ?) DESC, name LIMIT 1")
+      .bind(ownerId, `%${n}%`, n)
       .first<Client>();
   }
 
   /** Частичное обновление клиента. */
   async updateClient(
     id: number,
+    ownerId: number,
     fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string; notes?: string }
-  ): Promise<void> {
+  ): Promise<boolean> {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -241,9 +264,10 @@ export class DB {
     if (fields.metrikaCounter !== undefined) { sets.push("metrika_counter = ?"); binds.push(fields.metrikaCounter); }
     if (fields.directLogin !== undefined) { sets.push("direct_login = ?"); binds.push(fields.directLogin); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
-    if (!sets.length) return;
-    binds.push(id);
-    await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+    if (!sets.length) return false;
+    binds.push(id, ownerId);
+    const res = await this.d1.prepare(`UPDATE clients SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).bind(...binds).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   /** Безопасная авто-миграция: добавляет колонку done_at, если базу создавали из старой схемы. */
@@ -251,6 +275,8 @@ export class DB {
     if (ready.schema) return;
     const alters = [
       "ALTER TABLE tasks ADD COLUMN done_at TEXT",
+      // владелец карточки клиента: база клиентов у каждого аккаунта своя
+      "ALTER TABLE clients ADD COLUMN owner_id INTEGER",
       "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN pay_due TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN metrika_counter TEXT DEFAULT ''",
@@ -445,8 +471,9 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteNote(id: number, userId: number): Promise<void> {
-    await this.d1.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  async deleteNote(id: number, userId: number): Promise<boolean> {
+    const res = await this.d1.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   // ---------- События / встречи ----------
@@ -489,8 +516,9 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteEvent(id: number, userId: number): Promise<void> {
-    await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  async deleteEvent(id: number, userId: number): Promise<boolean> {
+    const res = await this.d1.prepare("DELETE FROM events WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   /** Встречи клиента (последние + будущие). */
@@ -517,7 +545,7 @@ export class DB {
     id: number,
     userId: number,
     fields: { title?: string; startsAt?: string; location?: string; notes?: string; clientId?: number | null }
-  ): Promise<void> {
+  ): Promise<boolean> {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -526,9 +554,10 @@ export class DB {
     if (fields.location !== undefined) { sets.push("location = ?"); binds.push(fields.location); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
     if (fields.clientId !== undefined) { sets.push("client_id = ?"); binds.push(fields.clientId); }
-    if (!sets.length) return;
+    if (!sets.length) return false;
     binds.push(id, userId);
-    await this.d1.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    const res = await this.d1.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   async eventsDueForReminder(nowIso: string): Promise<Event[]> {
@@ -572,7 +601,7 @@ export class DB {
     id: number,
     userId: number,
     fields: { name?: string; birthday?: string | null; phone?: string; tags?: string; notes?: string }
-  ): Promise<void> {
+  ): Promise<boolean> {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -581,9 +610,10 @@ export class DB {
     if (fields.phone !== undefined) { sets.push("phone = ?"); binds.push(fields.phone); }
     if (fields.tags !== undefined) { sets.push("tags = ?"); binds.push(fields.tags); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
-    if (!sets.length) return;
+    if (!sets.length) return false;
     binds.push(id, userId);
-    await this.d1.prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    const res = await this.d1.prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   async listContacts(userId: number): Promise<Contact[]> {
@@ -595,8 +625,9 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteContact(id: number, userId: number): Promise<void> {
-    await this.d1.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  async deleteContact(id: number, userId: number): Promise<boolean> {
+    const res = await this.d1.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   /** Дни рождения на заданную дату MM-DD, по которым в этом году ещё не напоминали. */
@@ -791,7 +822,7 @@ export class DB {
     return results ?? [];
   }
 
-  async updateSupplement(id: number, userId: number, fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number }): Promise<void> {
+  async updateSupplement(id: number, userId: number, fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number }): Promise<boolean> {
     await this.ensureSupp();
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -801,15 +832,17 @@ export class DB {
     if (fields.days !== undefined) { sets.push("days = ?"); binds.push(fields.days); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
     if (fields.active !== undefined) { sets.push("active = ?"); binds.push(fields.active); }
-    if (!sets.length) return;
+    if (!sets.length) return false;
     binds.push(id, userId);
-    await this.d1.prepare(`UPDATE supplement SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    const res = await this.d1.prepare(`UPDATE supplement SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
-  async deleteSupplement(id: number, userId: number): Promise<void> {
+  async deleteSupplement(id: number, userId: number): Promise<boolean> {
     await this.ensureSupp();
-    await this.d1.prepare("DELETE FROM supplement WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    const res = await this.d1.prepare("DELETE FROM supplement WHERE id = ? AND user_id = ?").bind(id, userId).run();
     await this.d1.prepare("DELETE FROM supplement_log WHERE sup_id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   /** Переключить отметку приёма (принял/отменил). Возвращает true, если теперь принято. */
@@ -928,9 +961,10 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteActivity(id: number, userId: number): Promise<void> {
+  async deleteActivity(id: number, userId: number): Promise<boolean> {
     await this.ensureHealth();
-    await this.d1.prepare("DELETE FROM activity_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    const res = await this.d1.prepare("DELETE FROM activity_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   async lastActivity(userId: number): Promise<ActivityRow | null> {
@@ -1007,9 +1041,10 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteHealthNote(id: number, userId: number): Promise<void> {
+  async deleteHealthNote(id: number, userId: number): Promise<boolean> {
     await this.ensureHealth();
-    await this.d1.prepare("DELETE FROM health_note WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    const res = await this.d1.prepare("DELETE FROM health_note WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   async addFood(userId: number, f: { title: string; kcal: number; protein: number; fat: number; carbs: number; meal?: string }): Promise<number> {
@@ -1030,9 +1065,10 @@ export class DB {
     return results ?? [];
   }
 
-  async deleteFood(id: number, userId: number): Promise<void> {
+  async deleteFood(id: number, userId: number): Promise<boolean> {
     await this.ensureHealth();
-    await this.d1.prepare("DELETE FROM food_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    const res = await this.d1.prepare("DELETE FROM food_log WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return (res.meta.changes ?? 0) > 0;
   }
 
   /** Частые/недавние блюда (уникальные по названию), для быстрого повтора. */

@@ -385,14 +385,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (b.days !== undefined) fields.days = Math.max(0, Math.round(+b.days || 0));
       if (b.notes !== undefined) fields.notes = b.notes;
       if (b.active !== undefined) fields.active = b.active ? 1 : 0;
-      await db.updateSupplement(parseInt(supEdit[1], 10), uid, fields);
+      if (!(await db.updateSupplement(parseInt(supEdit[1], 10), uid, fields))) return json({ error: "not_found" }, 404);
       return json({ ok: true });
     }
 
     // DELETE /api/supplements/{id}
     const supDel = path.match(/^\/api\/supplements\/(\d+)$/);
     if (supDel && request.method === "DELETE") {
-      await db.deleteSupplement(parseInt(supDel[1], 10), uid);
+      if (!(await db.deleteSupplement(parseInt(supDel[1], 10), uid))) return json({ error: "not_found" }, 404);
       return json({ ok: true });
     }
   }
@@ -549,7 +549,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   const hnoteDel = path.match(/^\/api\/health\/note\/(\d+)$/);
   if (hnoteDel && request.method === "DELETE") {
-    await db.deleteHealthNote(parseInt(hnoteDel[1], 10), uid);
+    if (!(await db.deleteHealthNote(parseInt(hnoteDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -604,7 +604,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   const foodDel = path.match(/^\/api\/health\/food\/(\d+)$/);
   if (foodDel && request.method === "DELETE") {
-    await db.deleteFood(parseInt(foodDel[1], 10), uid);
+    if (!(await db.deleteFood(parseInt(foodDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -669,7 +669,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   const actDel = path.match(/^\/api\/health\/activity\/(\d+)$/);
   if (actDel && request.method === "DELETE") {
-    await db.deleteActivity(parseInt(actDel[1], 10), uid);
+    if (!(await db.deleteActivity(parseInt(actDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
   if (path === "/api/health/wellbeing" && request.method === "POST") {
@@ -722,7 +722,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const u = new URL(request.url);
     const clientId = parseInt(u.searchParams.get("client") ?? "", 10);
     const days = Math.min(365, Math.max(1, parseInt(u.searchParams.get("days") ?? "30", 10)));
-    const client = clientId ? await db.getClient(clientId) : null;
+    const client = clientId ? await db.getClient(clientId, uid) : null;
     if (!client) return json({ error: "not_found" }, 404);
     if (!client.metrika_counter) return json({ error: "no_counter" }, 400);
     if (!(await telemostConnected(db))) return json({ error: "yandex_not_connected" }, 400);
@@ -788,7 +788,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, orderByDone: filter === "done" });
     const out = [];
     for (const t of tasks) {
-      const client = t.client_id ? await db.getClient(t.client_id) : null;
+      const client = t.client_id ? await db.getClient(t.client_id, uid) : null;
       out.push({
         id: t.id, title: t.title, description: t.description, scope: t.scope,
         status: t.status, priority: t.priority, due_at: t.due_at, done_at: t.done_at, client: client?.name ?? null,
@@ -850,7 +850,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/clients
   if (path === "/api/clients" && request.method === "GET") {
-    const clients = await db.listClients();
+    const clients = await db.listClients(uid);
     return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due, metrika_counter: c.metrika_counter, direct_login: c.direct_login })) });
   }
 
@@ -859,7 +859,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string };
     const name = (body.name ?? "").trim();
     if (!name) return json({ error: "empty_name" }, 400);
-    const id = await db.addClient(name, (body.platforms ?? "").trim(), (body.budget ?? "").trim(), {
+    const id = await db.addClient(uid, name, (body.platforms ?? "").trim(), (body.budget ?? "").trim(), {
       payAmount: (body.pay_amount ?? "").trim(),
       payDue: (body.pay_due ?? "").trim(),
     });
@@ -871,7 +871,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (clStatus && request.method === "POST") {
     const body = (await request.json()) as { status?: string };
     const status = body.status === "paused" ? "paused" : "active";
-    await db.updateClientStatus(parseInt(clStatus[1], 10), status);
+    if (!(await db.updateClientStatus(parseInt(clStatus[1], 10), status, uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -879,9 +879,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const clGet = path.match(/^\/api\/clients\/(\d+)$/);
   if (clGet && request.method === "GET") {
     const id = parseInt(clGet[1], 10);
-    const c = await db.getClient(id);
+    const c = await db.getClient(id, uid);
     if (!c) return json({ error: "not_found" }, 404);
-    const tasks = await db.listTasks({ clientId: id, statuses: [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED] });
+    const tasks = await db.listTasks({ clientId: id, visibleTo: uid, statuses: [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED] });
     const events = await db.listEventsByClient(uid, id, 20);
     const counts = { open: 0, in_progress: 0, done: 0, failed: 0 } as Record<string, number>;
     tasks.forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
@@ -914,14 +914,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.metrika_counter !== undefined) fields.metrikaCounter = body.metrika_counter;
     if (body.direct_login !== undefined) fields.directLogin = body.direct_login;
     if (body.notes !== undefined) fields.notes = body.notes;
-    await db.updateClient(parseInt(clEdit[1], 10), fields);
+    if (!(await db.updateClient(parseInt(clEdit[1], 10), uid, fields))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
   // DELETE /api/clients/{id}
   const clDel = path.match(/^\/api\/clients\/(\d+)$/);
   if (clDel && request.method === "DELETE") {
-    await db.deleteClient(parseInt(clDel[1], 10));
+    if (!(await db.deleteClient(parseInt(clDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -994,7 +994,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, overdue: new Date(t.due_at!).getTime() < nowMs }));
 
     const evAll = await db.listEvents(uid, startOfLocalDayIso(tz));
-    const clientsForEv = await db.listClients();
+    const clientsForEv = await db.listClients(uid);
     const cName = (id: number | null) => (id ? clientsForEv.find((c) => c.id === id)?.name ?? null : null);
     const evDay = (e: { starts_at: string }) => Math.floor((new Date(e.starts_at).getTime() + tz * 3600_000) / 86400_000);
     const mapEv = (e: { id: number; title: string; starts_at: string; location: string; client_id: number | null }) => ({
@@ -1047,7 +1047,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const events = await db.listEvents(uid, startOfLocalDayIso(tz));
     const out = [];
     for (const e of events) {
-      const client = e.client_id ? await db.getClient(e.client_id) : null;
+      const client = e.client_id ? await db.getClient(e.client_id, uid) : null;
       out.push({ id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, notes: e.notes, client_id: e.client_id, client: client?.name ?? null });
     }
     return json({ events: out });
@@ -1093,14 +1093,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.location !== undefined) fields.location = body.location;
     if (body.notes !== undefined) fields.notes = body.notes;
     if (body.client_id !== undefined) fields.clientId = body.client_id;
-    await db.updateEvent(parseInt(evEdit[1], 10), uid, fields);
+    if (!(await db.updateEvent(parseInt(evEdit[1], 10), uid, fields))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
   // DELETE /api/events/{id}
   const evDel = path.match(/^\/api\/events\/(\d+)$/);
   if (evDel && request.method === "DELETE") {
-    await db.deleteEvent(parseInt(evDel[1], 10), uid);
+    if (!(await db.deleteEvent(parseInt(evDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
@@ -1138,14 +1138,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (body.phone !== undefined) fields.phone = body.phone;
     if (body.tags !== undefined) fields.tags = body.tags.trim();
-    await db.updateContact(parseInt(ctEdit[1], 10), uid, fields);
+    if (!(await db.updateContact(parseInt(ctEdit[1], 10), uid, fields))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
   // DELETE /api/contacts/{id}
   const cDel = path.match(/^\/api\/contacts\/(\d+)$/);
   if (cDel && request.method === "DELETE") {
-    await db.deleteContact(parseInt(cDel[1], 10), uid);
+    if (!(await db.deleteContact(parseInt(cDel[1], 10), uid))) return json({ error: "not_found" }, 404);
     return json({ ok: true });
   }
 
