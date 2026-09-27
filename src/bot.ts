@@ -7,7 +7,7 @@ import { editSite, revertLastSiteEdit, siteConfigured } from "./site";
 import { tryPerformCommand } from "./intent";
 import { onboardingAnswer, onboardingDone, onboardingStart, onboardingState, OnbQuestion } from "./onboarding";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
-import { transcribeVoice } from "./speech";
+import { sttKey, transcribeVoice } from "./speech";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
 import {
@@ -729,7 +729,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       const file = await ctx.getFile();
       if (!file.file_path) throw new Error("нет файла");
       const audio = await (await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`)).arrayBuffer();
-      transcript = await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio);
+      transcript = await transcribeVoice(sttKey(env), env.YANDEX_FOLDER_ID, audio);
     } catch (e) {
       const msg = (e as Error).message || "";
       const hint = /403|permission|forbidden|unauthorized|denied/i.test(msg)

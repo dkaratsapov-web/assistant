@@ -2,7 +2,7 @@ import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutrition, estimateBur
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
-import { transcribeVoice } from "./speech";
+import { sttKey, transcribeVoice } from "./speech";
 import { validateMaxInitData } from "./max/auth";
 import { CHANNEL_MAX, maxUid } from "./max/ids";
 import { MaxClient } from "./max/client";
@@ -169,7 +169,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
-    return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID) });
+    return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(sttKey(env) && env.YANDEX_FOLDER_ID) });
   }
 
   // ---------- Админка владельца ----------
@@ -231,7 +231,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         model: cfg?.model ?? null,
         router: cfg?.router ?? null,
         vision: cfg?.vision || null,
-        voice: !!(env.YANDEX_API_KEY && env.YANDEX_FOLDER_ID),
+        voice: !!(sttKey(env) && env.YANDEX_FOLDER_ID),
       };
       if (!cfg) {
         out.test = "не настроено: нужны YANDEX_API_KEY и YANDEX_FOLDER_ID";
@@ -789,11 +789,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // POST /api/voice — распознать речь (PCM 16кГц из вебапа) → текст
   if (path === "/api/voice" && request.method === "POST") {
-    if (!env.YANDEX_API_KEY || !env.YANDEX_FOLDER_ID) return json({ error: "stt_not_configured" }, 400);
+    if (!sttKey(env) || !env.YANDEX_FOLDER_ID) return json({ error: "stt_not_configured" }, 400);
     const audio = await request.arrayBuffer();
     if (!audio || audio.byteLength < 800) return json({ error: "empty_audio" }, 400);
     try {
-      const text = await transcribeVoice(env.YANDEX_API_KEY, env.YANDEX_FOLDER_ID, audio, { format: "lpcm", sampleRateHertz: 16000 });
+      const text = await transcribeVoice(sttKey(env), env.YANDEX_FOLDER_ID, audio, { format: "lpcm", sampleRateHertz: 16000 });
       return json({ text });
     } catch (e) {
       return json({ error: "stt_failed", message: (e as Error).message }, 502);

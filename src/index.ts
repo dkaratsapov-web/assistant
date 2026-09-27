@@ -375,6 +375,8 @@ export default {
       const body: Record<string, unknown> = {
         hasApiKey: !!env.YANDEX_API_KEY,
         hasFolderId: !!env.YANDEX_FOLDER_ID,
+        // ключ для распознавания речи: отдельный, если задан, иначе общий
+        sttKey: env.YANDEX_STT_API_KEY ? "отдельный" : env.YANDEX_API_KEY ? "общий" : "нет",
         folderId: env.YANDEX_FOLDER_ID ? `${env.YANDEX_FOLDER_ID.slice(0, 6)}…` : null,
         model: cfg?.model ?? null,
         router: cfg?.router ?? null,

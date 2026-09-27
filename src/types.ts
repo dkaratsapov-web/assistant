@@ -11,6 +11,7 @@ export interface Env {
   BOT_NAME?: string;      // отображаемое имя бота
   // ИИ-«мозги» и голос — Yandex Cloud (YandexGPT + SpeechKit), один API-ключ на оба сервиса
   YANDEX_API_KEY?: string;         // секрет: API-ключ сервисного аккаунта
+  YANDEX_STT_API_KEY?: string;     // секрет: отдельный ключ для распознавания речи, если у ключей одна область действия
   YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
   YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"
   YANDEX_GPT_ROUTER_MODEL?: string;// дешёвая модель для разбора команд, по умолчанию "yandexgpt-lite/latest"

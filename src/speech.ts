@@ -13,6 +13,15 @@ interface SttResponse {
 }
 
 /** Распознаёт русскую речь из аудио. По умолчанию OGG/Opus (голос Telegram); для вебапа — lpcm 16кГц. */
+/**
+ * Ключ для распознавания речи. В Yandex Cloud у API-ключа бывает одна область
+ * действия, поэтому текст и голос иногда приходится разводить по двум ключам.
+ * Отдельный не задан — работаем общим.
+ */
+export function sttKey(env: { YANDEX_STT_API_KEY?: string; YANDEX_API_KEY?: string }): string {
+  return env.YANDEX_STT_API_KEY || env.YANDEX_API_KEY || "";
+}
+
 export async function transcribeVoice(
   apiKey: string,
   folderId: string,
