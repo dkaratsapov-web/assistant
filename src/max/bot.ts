@@ -472,9 +472,33 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       `адрес приложения: ${appUrl || "не задан"}`,
       `MAX_APP_NAME: ${env.MAX_APP_NAME || "не задан"}`,
       `сработал вариант клавиатуры: ${(await db.getSetting("max_kb_used")) ?? "первый"}`,
-      `последний отказ платформы:\n${(await db.getSetting("max_kb_error")) ?? "нет"}`,
+      `последний отказ платформы:\n${(await db.getSetting("max_kb_error")) || "нет"}`,
+      await bridgeLine(),
     ];
     return void (await reply(lines.join("\n")));
+  }
+
+  /** Что мессенджер передал мини-приложению при последнем запуске — ключ к входу без кода. */
+  async function bridgeLine(): Promise<string> {
+    const at = await db.getSetting("bridge_report_at");
+    if (!at) return "запуск приложения: отчётов ещё не было";
+    let r: Record<string, unknown> = {};
+    try {
+      r = JSON.parse((await db.getSetting("bridge_report")) || "{}") as Record<string, unknown>;
+    } catch {
+      return `запуск приложения: ${at}, отчёт нечитаем`;
+    }
+    const sp = typeof r.startParam === "string" ? r.startParam : "";
+    const initData = typeof r.initData === "string" ? r.initData : "";
+    const bridges = r.bridges && typeof r.bridges === "object" ? Object.keys(r.bridges as object) : [];
+    const params = r.params && typeof r.params === "object" ? Object.keys(r.params as object) : [];
+    return [
+      `запуск приложения: ${at}`,
+      `  токен из кнопки: ${sp ? `есть, ${sp.length} симв.` : "НЕ ПРИШЁЛ"}`,
+      `  подпись мини-приложения: ${initData ? `есть, ${initData.length} симв.` : "нет"}`,
+      `  мосты: ${bridges.length ? bridges.join(", ") : "не найдены"}`,
+      `  параметры адреса: ${params.length ? params.join(", ") : "нет"}`,
+    ].join("\n");
   }
 
   async function sendDigest() {
