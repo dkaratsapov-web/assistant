@@ -1621,7 +1621,7 @@
      * поэтому перебираем всё, что похоже на мост, плюс параметры адреса и хеш.
      */
     function bridgeScan() {
-      const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "" };
+      const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "", initKeys: "" };
       try {
         const q = new URLSearchParams(location.search);
         for (const [k, v] of q.entries()) out.params[k] = String(v).slice(0, 200);
@@ -1641,11 +1641,22 @@
           const sp = src.startParam || src.start_param || src.initDataUnsafe?.start_param;
           if (!out.startParam && typeof sp === "string" && sp) out.startParam = sp;
         }
-        // стартовый параметр часто кладут прямо в адрес
-        for (const k of ["max", "startapp", "start_param", "startParam", "tgWebAppStartParam", "payload", "token"]) {
-          if (!out.startParam && out.params[k]) out.startParam = out.params[k];
+        // MAX отдаёт данные запуска в адресе: токен кнопки — в параметре
+        // WebAppStartParam, подпись — в хеше #WebAppData=…
+        const startKeys = ["webappstartparam", "tgwebappstartparam", "max", "startapp", "start_param", "startparam", "payload", "token"];
+        const lowered = {};
+        for (const k of Object.keys(out.params)) lowered[k.toLowerCase()] = out.params[k];
+        for (const k of startKeys) {
+          if (!out.startParam && lowered[k]) out.startParam = lowered[k];
+        }
+        const hashParams = new URLSearchParams(out.hash.replace(/^#/, ""));
+        for (const [k, v] of hashParams.entries()) {
+          const lk = k.toLowerCase();
+          if (!out.initData && (lk === "webappdata" || lk === "tgwebappdata")) out.initData = v;
+          if (!out.startParam && startKeys.includes(lk)) out.startParam = v;
         }
         if (!out.initData && /(^|&)hash=/.test(out.hash.replace(/^#/, ""))) out.initData = out.hash.replace(/^#/, "");
+        out.initKeys = out.initData ? [...new URLSearchParams(out.initData).keys()].join(",") : "";
       } catch (e) {
         out.error = String(e);
       }
@@ -1713,11 +1724,11 @@
         body: JSON.stringify({ ...scan, ua: navigator.userAgent.slice(0, 200), href: location.href.slice(0, 300) }),
       }).catch(() => {});
 
-      // 1) подпись мини-приложения — вход по id пользователя MAX, ничего вводить не нужно
-      if (await tryBridgeLogin()) return true;
-      // 2) токен из кнопки бота
+      // 1) токен из кнопки бота — он выдан лично этому аккаунту и проверяется у нас
       if (await loginWithToken(scan.startParam)) return true;
-      // 3) токен с прошлого запуска в хранилище MAX
+      // 2) подпись мини-приложения — вход по id пользователя в мессенджере
+      if (await tryBridgeLogin()) return true;
+      // 3) токен с прошлого запуска — в хранилище мессенджера он переживает перезапуск
       return loginWithToken(await maxStoreGet(MAX_KEY));
     }
 
@@ -1788,7 +1799,7 @@
       el.textContent = [
         "SDK MAX: " + (sdk.loaded || "не загрузился (" + sdk.tried.length + " попыток)"),
         "мосты: " + (Object.keys(scan.bridges).join(", ") || "нет"),
-        "подпись: " + (scan.initData ? scan.initData.length + " симв." : "нет"),
+        "подпись: " + (scan.initData ? scan.initData.length + " симв. [" + scan.initKeys + "]" : "нет"),
         "токен: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
         "параметры: " + (Object.keys(scan.params).join(", ") || "нет"),
         "хеш: " + (scan.hash ? scan.hash.slice(0, 60) : "нет"),
