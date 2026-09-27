@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status      TEXT NOT NULL DEFAULT 'open',         -- open | in_progress | done
   priority    INTEGER NOT NULL DEFAULT 0,           -- 0 обычный, 1 важный
   due_at      TEXT,
+  repeat_rule TEXT DEFAULT '',                -- daily | weekdays | weekly | monthly | w:1..w:7
   created_at  TEXT NOT NULL,
   done_at     TEXT,
   reminded_at TEXT

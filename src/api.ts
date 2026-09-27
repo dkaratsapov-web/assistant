@@ -838,6 +838,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       out.push({
         id: t.id, title: t.title, description: t.description, scope: t.scope,
         status: t.status, priority: t.priority, due_at: t.due_at, done_at: t.done_at, client: client?.name ?? null,
+        repeat_rule: t.repeat_rule ?? "",
       });
     }
     return json({ tasks: out });
@@ -846,7 +847,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/tasks
   if (path === "/api/tasks" && request.method === "POST") {
     const body = (await request.json()) as {
-      title?: string; due?: string; client_id?: number | null; scope?: string; priority?: number;
+      title?: string; description?: string; due?: string; client_id?: number | null; scope?: string; priority?: number; repeat?: string;
     };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
@@ -859,8 +860,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       : null;
     const scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const id = await db.addTask({
-      title, creatorId: uid, assigneeId: uid, scope,
+      title, description: (body.description ?? "").trim().slice(0, 2000), creatorId: uid, assigneeId: uid, scope,
       clientId: body.client_id ?? null, priority: body.priority ? 1 : 0, dueAt,
+      repeat: validRepeat(body.repeat),
     });
     return json({ ok: true, id });
   }
@@ -872,7 +874,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (![TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED].includes(body.status ?? "")) return json({ error: "bad_status" }, 400);
     const task = await db.getTask(parseInt(statusMatch[1], 10), uid);
     if (!task) return json({ error: "not_found" }, 404);
-    await db.setTaskStatus(task.id, body.status!, uid);
+    await db.setTaskStatus(task.id, body.status!, uid, tz);
     return json({ ok: true });
   }
 
@@ -1207,4 +1209,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   return json({ error: "not_found" }, 404);
+}
+
+/** Правило повтора принимаем только из известного набора. */
+function validRepeat(v: unknown): string {
+  if (typeof v !== "string") return "";
+  return /^(daily|weekdays|weekly|monthly|w:[1-7])$/.test(v) ? v : "";
 }

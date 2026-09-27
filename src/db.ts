@@ -20,6 +20,8 @@ import {
   User,
 } from "./types";
 
+import { nextDue } from "./utils";
+
 const nowIso = () => new Date().toISOString();
 
 /**
@@ -277,6 +279,8 @@ export class DB {
     if (ready.schema) return;
     const alters = [
       "ALTER TABLE tasks ADD COLUMN done_at TEXT",
+      // правило повтора: "" — разовая задача
+      "ALTER TABLE tasks ADD COLUMN repeat_rule TEXT DEFAULT ''",
       // владелец карточки клиента: база клиентов у каждого аккаунта своя
       "ALTER TABLE clients ADD COLUMN owner_id INTEGER",
       "ALTER TABLE clients ADD COLUMN pay_amount TEXT DEFAULT ''",
@@ -310,11 +314,13 @@ export class DB {
     assigneeId?: number | null;
     priority?: number;
     dueAt?: string | null;
+    repeat?: string;
   }): Promise<number> {
+    await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO tasks (title, description, scope, client_id, creator_id, assignee_id, priority, due_at, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+        `INSERT INTO tasks (title, description, scope, client_id, creator_id, assignee_id, priority, due_at, repeat_rule, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
       )
       .bind(
         opts.title,
@@ -325,6 +331,7 @@ export class DB {
         opts.assigneeId ?? null,
         opts.priority ?? 0,
         opts.dueAt ?? null,
+        opts.repeat ?? "",
         nowIso()
       )
       .run();
@@ -392,14 +399,40 @@ export class DB {
   }
 
   /** Смена статуса своей задачи. Возвращает false, если задача чужая или её нет. */
-  async setTaskStatus(id: number, status: string, userId: number): Promise<boolean> {
+  async setTaskStatus(id: number, status: string, userId: number, tz = 3): Promise<boolean> {
     await this.ensureSchema();
     const doneAt = status === TASK_DONE ? nowIso() : null;
     const res = await this.d1
       .prepare("UPDATE tasks SET status = ?, done_at = ? WHERE id = ? AND (creator_id = ? OR assignee_id = ?)")
       .bind(status, doneAt, id, userId, userId)
       .run();
-    return (res.meta.changes ?? 0) > 0;
+    const changed = (res.meta.changes ?? 0) > 0;
+    if (changed && status === TASK_DONE) await this.repeatTask(id, userId, tz);
+    return changed;
+  }
+
+  /**
+   * Закрыли повторяющуюся задачу — сразу заводим следующую. Так список дел не
+   * пустеет и не приходится каждый раз создавать одно и то же руками.
+   * Возвращает id новой задачи или null.
+   */
+  private async repeatTask(id: number, userId: number, tz: number): Promise<number | null> {
+    const t = await this.getTask(id, userId);
+    if (!t || !t.repeat_rule) return null;
+    const from = t.due_at || nowIso();
+    const due = nextDue(t.repeat_rule, from, tz);
+    if (!due) return null;
+    return await this.addTask({
+      title: t.title,
+      description: t.description ?? "",
+      scope: t.scope,
+      clientId: t.client_id ?? null,
+      creatorId: t.creator_id,
+      assigneeId: t.assignee_id ?? null,
+      priority: t.priority,
+      dueAt: due,
+      repeat: t.repeat_rule,
+    });
   }
 
   /** Частичное обновление своей задачи (редактирование). */

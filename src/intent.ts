@@ -6,7 +6,7 @@
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, WB_END, WB_START, wordRe } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, WB_END, WB_START, wordRe } from "./utils";
 
 const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -82,12 +82,15 @@ export async function performIntent(
     const dueAt = intent.due ? resolveWhen(intent.due, tz, 10) : null;
     const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const client = scope === SCOPE_PERSONAL ? null : await findClient();
-    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null });
+    // «каждый вторник», «по будням» — задача должна возвращаться сама
+    const repeat = parseRepeat(`${rawText} ${title}`);
+    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null, repeat });
     await remember("task", id);
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
     const cl = client ? `\n🤝 ${client.name}` : "";
-    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}${cl}`;
+    const rp = repeat ? `\n🔁 ${repeatLabel(repeat)}` : "";
+    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}${cl}${rp}`;
   }
 
   if (intent.action === "task_done") {
@@ -95,7 +98,7 @@ export async function performIntent(
     if (!q) return null;
     const task = await db.findTaskByTitle(uid, q);
     if (!task) return `Не нашла активную задачу «${q}».`;
-    await db.setTaskStatus(task.id, TASK_DONE, uid);
+    await db.setTaskStatus(task.id, TASK_DONE, uid, tz);
     return `✅ Задача #${task.id} «${task.title}» отмечена выполненной. Молодец!`;
   }
 

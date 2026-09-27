@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDue, matchWaterMl, mealFromText, wordRe } from "../.test-build/utils.js";
+import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
@@ -206,4 +206,47 @@ test("найденное уходит в подсказку со ссылкам�
   assert.ok(out.includes("https://e.com/x"), "источник должен быть в подсказке");
   assert.ok(/не придумывай/i.test(out), "модель надо прямо просить не выдумывать");
   assert.equal(renderHits([], "сейчас"), "", "без находок подсказка пустая");
+});
+
+test("правило повтора читается из фразы", () => {
+  assert.equal(parseRepeat("платить за хостинг каждый месяц"), "monthly");
+  assert.equal(parseRepeat("каждый день пить витамины"), "daily");
+  assert.equal(parseRepeat("по будням планёрка в 10"), "weekdays");
+  assert.equal(parseRepeat("каждый вторник созвон"), "w:2");
+  assert.equal(parseRepeat("каждую среду отчёт"), "w:3");
+  assert.equal(parseRepeat("каждую неделю подводить итоги"), "weekly");
+  assert.equal(parseRepeat("еженедельно смотреть метрику"), "weekly");
+  // разовые задачи правил не получают
+  assert.equal(parseRepeat("позвонить в банк завтра"), "");
+  assert.equal(parseRepeat("купить каждому подарок"), "");
+});
+
+test("следующий срок повтора считается верно", () => {
+  const TZ3 = 3;
+  const at = (iso) => nextDue.bind(null, iso);
+  // среда 2026-09-30 10:00 по Москве = 07:00 UTC
+  const wed = "2026-09-30T07:00:00.000Z";
+  assert.equal(nextDue("daily", wed, TZ3), "2026-10-01T07:00:00.000Z");
+  assert.equal(nextDue("weekly", wed, TZ3), "2026-10-07T07:00:00.000Z");
+  assert.equal(nextDue("w:1", wed, TZ3), "2026-10-05T07:00:00.000Z", "со среды до понедельника — пять дней");
+  assert.equal(nextDue("w:3", wed, TZ3), "2026-10-07T07:00:00.000Z", "тот же день недели — значит через неделю");
+  // пятница по будням прыгает через выходные
+  const fri = "2026-10-02T07:00:00.000Z";
+  assert.equal(nextDue("weekdays", fri, TZ3), "2026-10-05T07:00:00.000Z");
+  // конец месяца не должен уезжать: 31 января + месяц = 28 февраля
+  assert.equal(nextDue("monthly", "2026-01-31T07:00:00.000Z", TZ3).slice(0, 10), "2026-02-28");
+  // время дня сохраняется
+  assert.ok(nextDue("daily", wed, TZ3).endsWith("07:00:00.000Z"));
+  // мусор не ломает
+  assert.equal(nextDue("", wed, TZ3), null);
+  assert.equal(nextDue("непонятно", wed, TZ3), null);
+  assert.equal(nextDue("daily", "не дата", TZ3), null);
+});
+
+test("правило повтора подписывается по-русски", () => {
+  assert.equal(repeatLabel("daily"), "каждый день");
+  assert.equal(repeatLabel("weekdays"), "по будням");
+  assert.equal(repeatLabel("w:2"), "каждый вторник");
+  assert.equal(repeatLabel("w:3"), "каждую среду");
+  assert.equal(repeatLabel(""), "");
 });

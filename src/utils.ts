@@ -297,3 +297,75 @@ export function formatEventTime(iso: string, tzOffset: number): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(local.getUTCDate())}.${pad(local.getUTCMonth() + 1)} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`;
 }
+
+
+/* ---------- Повторяющиеся задачи ---------- */
+
+/** Дни недели по-русски: понимаем «каждый вторник» и подписываем правило. */
+const WEEKDAYS: [RegExp, number][] = [
+  [/понедельник/i, 1], [/вторник/i, 2], [/сред[ауы]/i, 3], [/четверг/i, 4],
+  [/пятниц/i, 5], [/суббот/i, 6], [/воскресень|воскресен/i, 7],
+];
+const WEEKDAY_RU = ["", "понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"];
+
+/**
+ * Правило повтора из фразы: «каждый день», «по будням», «каждый вторник»,
+ * «каждую неделю», «каждый месяц». Пустая строка — задача разовая.
+ */
+export function parseRepeat(text: string): string {
+  const t = text.toLowerCase();
+  if (/(по\s+будн|каждый\s+будний)/i.test(t)) return "weekdays";
+  if (/кажд(ый|ую|ое)\s+(месяц|мес\b)/i.test(t) || /ежемесячно/i.test(t)) return "monthly";
+  if (/ежедневно/i.test(t) || /кажд(ый|ые)\s+(день|дня)/i.test(t)) return "daily";
+  for (const [re, n] of WEEKDAYS) {
+    if (new RegExp(`кажд(ый|ую|ое)\\s+${re.source}`, "i").test(t)) return `w:${n}`;
+  }
+  if (/еженедельно/i.test(t) || /кажд(ую|ый)\s+недел/i.test(t)) return "weekly";
+  return "";
+}
+
+/** Человеческая подпись правила — её видно на карточке задачи. */
+export function repeatLabel(rule: string): string {
+  if (rule === "daily") return "каждый день";
+  if (rule === "weekdays") return "по будням";
+  if (rule === "weekly") return "каждую неделю";
+  if (rule === "monthly") return "каждый месяц";
+  const m = rule.match(/^w:([1-7])$/);
+  return m ? `каждый${m[1] === "3" ? "" : ""} ${WEEKDAY_RU[+m[1]]}`.replace("каждый среду", "каждую среду") : "";
+}
+
+/**
+ * Следующий срок для повторяющейся задачи. Считаем в местном времени, чтобы
+ * «каждый день в 10:00» не уползало на час при переводе в UTC.
+ * Возвращает ISO или null, если правило пустое или незнакомое.
+ */
+export function nextDue(rule: string, fromIso: string, tz: number): string | null {
+  if (!rule || !fromIso) return null;
+  const base = new Date(fromIso);
+  if (isNaN(base.getTime())) return null;
+  const local = new Date(base.getTime() + tz * 3600_000);
+  const add = (days: number) => new Date(local.getTime() + days * 86400_000);
+
+  let next: Date | null = null;
+  if (rule === "daily") next = add(1);
+  else if (rule === "weekly") next = add(7);
+  else if (rule === "weekdays") {
+    const dow = local.getUTCDay();                 // 0 — воскресенье
+    next = add(dow === 5 ? 3 : dow === 6 ? 2 : 1); // с пятницы прыгаем на понедельник
+  } else if (rule === "monthly") {
+    next = new Date(local.getTime());
+    const day = next.getUTCDate();
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    // 31 января + месяц: держим последний день месяца, а не уезжаем в март
+    if (next.getUTCDate() !== day) next.setUTCDate(0);
+  } else {
+    const m = rule.match(/^w:([1-7])$/);
+    if (!m) return null;
+    const want = +m[1] % 7;                        // 7 (вс) → 0
+    const dow = local.getUTCDay();
+    let delta = (want - dow + 7) % 7;
+    if (delta === 0) delta = 7;                    // тот же день — значит через неделю
+    next = add(delta);
+  }
+  return new Date(next.getTime() - tz * 3600_000).toISOString();
+}

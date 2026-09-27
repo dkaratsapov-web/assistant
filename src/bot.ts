@@ -562,7 +562,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       return;
     }
     const map: Record<string, string> = { done: TASK_DONE, progress: TASK_IN_PROGRESS, reopen: TASK_OPEN };
-    await db.setTaskStatus(id, map[action], me);
+    await db.setTaskStatus(id, map[action], me, tz);
     const updated = (await db.getTask(id, me))!;
     const client = updated.client_id ? await db.getClient(updated.client_id, ctx.from!.id) : null;
     await ctx.editMessageText(taskLine(updated, client?.name ?? null, tz), { ...HTML, reply_markup: taskActions(id, updated.status) });

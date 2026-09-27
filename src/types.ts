@@ -104,6 +104,7 @@ export interface Task {
   created_at: string;
   done_at: string | null;
   reminded_at: string | null;
+  repeat_rule?: string;                // правило повтора: "" — разовая задача
 }
 
 export interface Note {

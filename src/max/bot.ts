@@ -366,7 +366,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       if (arg === "help") return void (await reply(HELP));
     }
     if (action === "task_done") {
-      const ok = await db.setTaskStatus(parseInt(arg, 10), TASK_DONE, uid);
+      const ok = await db.setTaskStatus(parseInt(arg, 10), TASK_DONE, uid, tz);
       return void (await reply(ok ? `✅ Задача #${arg} закрыта.` : "Не нашла такую задачу."));
     }
     if (action === "task_del") {
