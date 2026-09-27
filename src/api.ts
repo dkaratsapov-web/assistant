@@ -122,6 +122,15 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // ---------- Публичные эндпоинты входа (до проверки авторизации) ----------
 
+  // POST /api/diag/bridge — приложение рассказывает, что ему дал мессенджер при запуске.
+  // Без этого автовход в MAX не наладить: документация платформы недоступна, а гадать нельзя.
+  if (path === "/api/diag/bridge" && request.method === "POST") {
+    const body = await request.text();
+    await db.setSetting("bridge_report", body.slice(0, 4000));
+    await db.setSetting("bridge_report_at", new Date().toISOString());
+    return json({ ok: true });
+  }
+
   // POST /api/auth/max {initData} — вход внутри мини-приложения MAX по подписи
   if (path === "/api/auth/max" && request.method === "POST") {
     const body = (await request.json().catch(() => ({}))) as { initData?: string };
@@ -215,6 +224,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (target === uid) return json({ error: "self" }, 400);
       await db.deleteUser(target);
       return json({ ok: true });
+    }
+
+    // Что мессенджер передал приложению при последнем запуске
+    if (path === "/api/admin/bridge-report" && request.method === "GET") {
+      return json({
+        at: await db.getSetting("bridge_report_at"),
+        report: await db.getSetting("bridge_report"),
+      });
     }
 
     // Проверка ИИ: делаем настоящий запрос и показываем ответ Яндекса как есть

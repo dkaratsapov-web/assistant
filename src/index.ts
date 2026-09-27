@@ -356,6 +356,15 @@ export default {
       }
       return new Response(null, { status: 302, headers });
     }
+    if (url.pathname === "/diag/bridge") {
+      if (!maxAdminAllowed(url, env)) return new Response("forbidden: добавь ?secret=…", { status: 403 });
+      const ddb = new DB(env.DB);
+      const body = {
+        at: await ddb.getSetting("bridge_report_at"),
+        report: JSON.parse((await ddb.getSetting("bridge_report")) || "null"),
+      };
+      return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
     if (url.pathname === "/ai/status") {
       if (!maxAdminAllowed(url, env)) {
         return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET (подойдёт и MAX_WEBHOOK_SECRET)", { status: 403 });

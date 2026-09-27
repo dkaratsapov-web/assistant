@@ -1588,17 +1588,73 @@
 
     document.querySelectorAll(".nav a").forEach((a) => a.onclick = () => { haptic(); switchTab(a.dataset.tab, true); });
 
-    /** Сырые initData мини-приложения: у разных сборок MAX объект называется по-разному. */
-    function bridgeInitData() {
+    /**
+     * Данные запуска от мессенджера. Названия объектов у разных сборок MAX отличаются,
+     * поэтому перебираем всё, что похоже на мост, плюс параметры адреса и хеш.
+     */
+    function bridgeScan() {
+      const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "" };
       try {
-        const b = window.WebApp || window.MAX || window.maxWebApp || window.maxBridge || null;
-        const raw = b && (b.initData || b.initDataRaw || b.initDataUnsafe?.raw);
-        if (raw && typeof raw === "string") return raw;
-        const h = (location.hash || "").replace(/^#/, "");
-        return /(^|&)hash=/.test(h) ? h : "";
+        const q = new URLSearchParams(location.search);
+        for (const [k, v] of q.entries()) out.params[k] = String(v).slice(0, 200);
+        out.hash = (location.hash || "").slice(0, 400);
+
+        const names = ["WebApp", "MAX", "Max", "maxWebApp", "maxBridge", "MaxWebApp", "Telegram", "webApp", "miniApp", "MiniApp", "AppBridge", "bridge"];
+        for (const n of names) {
+          const o = window[n];
+          if (!o || typeof o !== "object") continue;
+          const keys = Object.keys(o).slice(0, 25);
+          out.bridges[n] = keys;
+          const nested = o.WebApp && typeof o.WebApp === "object" ? o.WebApp : null;
+          if (nested) out.bridges[n + ".WebApp"] = Object.keys(nested).slice(0, 25);
+          const src = nested || o;
+          const raw = src.initData || src.initDataRaw || src.initDataUnsafe?.raw;
+          if (!out.initData && typeof raw === "string" && raw) out.initData = raw;
+          const sp = src.startParam || src.start_param || src.initDataUnsafe?.start_param;
+          if (!out.startParam && typeof sp === "string" && sp) out.startParam = sp;
+        }
+        // стартовый параметр часто кладут прямо в адрес
+        for (const k of ["max", "startapp", "start_param", "startParam", "tgWebAppStartParam", "payload", "token"]) {
+          if (!out.startParam && out.params[k]) out.startParam = out.params[k];
+        }
+        if (!out.initData && /(^|&)hash=/.test(out.hash.replace(/^#/, ""))) out.initData = out.hash.replace(/^#/, "");
       } catch (e) {
-        return "";
+        out.error = String(e);
       }
+      return out;
+    }
+
+    function bridgeInitData() {
+      return bridgeScan().initData;
+    }
+
+    /**
+     * Автовход без участия человека: сначала стартовый параметр (токен из кнопки бота),
+     * затем подпись мини-приложения. Возвращает true, если вошли.
+     */
+    async function tryAutoLogin() {
+      const scan = bridgeScan();
+      // отправляем отчёт о запуске — по нему налаживается автовход в конкретной сборке MAX
+      fetch("/api/diag/bridge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...scan, ua: navigator.userAgent.slice(0, 200), href: location.href.slice(0, 300) }),
+      }).catch(() => {});
+
+      // 1) стартовый параметр — это наш токен сессии
+      if (scan.startParam && scan.startParam.length >= 16) {
+        try {
+          const r = await fetch("/api/me", { headers: { "X-Max-Session": scan.startParam } });
+          if (r.ok) {
+            try { localStorage.setItem(MAX_KEY, scan.startParam); } catch (e) {}
+            document.cookie = `sara_session=${scan.startParam}; path=/; max-age=15552000; SameSite=None; Secure`;
+            location.replace("/app?max=" + encodeURIComponent(scan.startParam));
+            return true;
+          }
+        } catch (e) {}
+      }
+      // 2) подпись мини-приложения
+      return tryBridgeLogin();
     }
 
     /** Пробуем войти по подписи мини-приложения. true — вошли, страница перезагрузится. */
@@ -1632,8 +1688,10 @@
           <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
             Отправь боту в чате команду <b>/code</b> — он пришлёт код из 8 символов. Ввести нужно один раз: дальше приложение узнаёт тебя само.
           </div>
+          <button class="btn primary" style="width:100%;margin-bottom:10px" onclick="openBotChat()">Открыть чат с Сарой</button>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:12px">Нажми «📲 Открыть» в чате — приложение запомнит тебя.</div>
           <div class="field" style="text-align:left">
-            <label>Код из чата</label>
+            <label>Или код из чата</label>
             <input id="login-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
                    placeholder="Например, K7QM4XZP" style="text-transform:uppercase;letter-spacing:2px;font-weight:700">
           </div>
@@ -1651,6 +1709,10 @@
         input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitLoginCode(); });
       }
     }
+
+    window.openBotChat = () => {
+      try { tg.openLink("https://max.ru/se14086067_bot"); } catch (e) { location.href = "https://max.ru/se14086067_bot"; }
+    };
 
     window.submitLoginCode = async () => {
       const input = $("login-code");
@@ -1699,7 +1761,7 @@
         const m = String(e.message || e);
         if (m === "unauthorized") {
           // Открыли кнопкой мини-приложения в MAX: сначала пробуем подпись, иначе — код из чата
-          if (await tryBridgeLogin()) return;
+          if (await tryAutoLogin()) return;
           renderLogin("");
         } else {
           $("subtitle").textContent = "Нет доступа";
