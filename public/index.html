@@ -5,6 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Sara</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // SDK мини-приложения MAX (max-web-app.js) даёт initData, SecureStorage и DeviceStorage.
+    // Точный адрес у MAX не опубликован, поэтому пробуем кандидатов по очереди и
+    // запоминаем сработавший — от него зависит вход без кодов.
+    window.__maxSdk = { tried: [], loaded: "" };
+    (function loadMaxSdk() {
+      var urls = [
+        "https://st.max.ru/max-web-app.js",
+        "https://web.max.ru/max-web-app.js",
+        "https://max.ru/js/max-web-app.js",
+        "https://cdn.max.ru/max-web-app.js",
+        "https://dev.max.ru/js/max-web-app.js"
+      ];
+      var i = 0;
+      function next() {
+        if (window.WebApp || i >= urls.length) return;
+        var url = urls[i++];
+        window.__maxSdk.tried.push(url);
+        var el = document.createElement("script");
+        el.src = url;
+        el.async = false;
+        el.onload = function () { window.__maxSdk.loaded = url; };
+        el.onerror = next;
+        document.head.appendChild(el);
+      }
+      next();
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1628,6 +1656,17 @@
       return bridgeScan().initData;
     }
 
+    /** SDK MAX подключается асинхронно — даём ему домчаться, иначе initData ещё нет. */
+    function waitForMaxSdk(ms) {
+      return new Promise((resolve) => {
+        const t0 = Date.now();
+        (function tick() {
+          if (window.WebApp || Date.now() - t0 > ms) return resolve();
+          setTimeout(tick, 100);
+        })();
+      });
+    }
+
     /** Хранилища мини-приложения MAX: переживают закрытие окна, в отличие от localStorage в webview. */
     function maxStores() {
       const w = window.WebApp || window.MAX || {};
@@ -1665,6 +1704,7 @@
      * затем подпись мини-приложения. Возвращает true, если вошли.
      */
     async function tryAutoLogin() {
+      await waitForMaxSdk(2000);
       const scan = bridgeScan();
       // отправляем отчёт о запуске — по нему налаживается автовход в конкретной сборке MAX
       fetch("/api/diag/bridge", {
@@ -1729,12 +1769,30 @@
           <button class="btn primary" style="width:100%;margin-bottom:8px" onclick="openBotChat()">Открыть чат с Сарой</button>
           <button class="btn" style="width:100%" onclick="retryLogin()">Попробовать ещё раз</button>
           <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-top:10px">${note ? esc(note) : ""}</div>
+          <div id="login-diag" style="color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px;text-align:left;white-space:pre-wrap;word-break:break-all;opacity:.85"></div>
           <div id="login-build" style="color:var(--muted);font-size:11px;margin-top:6px;opacity:.7"></div>
         </div>`;
       fetch("/version", { cache: "no-store" })
         .then((r) => r.text())
         .then((v) => { const el = $("login-build"); if (el) el.textContent = "сборка " + v; })
         .catch(() => {});
+      showLoginDiag();
+    }
+
+    /** Что страница увидела при запуске — по этим строкам налаживается вход без кодов. */
+    function showLoginDiag() {
+      const el = $("login-diag");
+      if (!el) return;
+      const scan = bridgeScan();
+      const sdk = window.__maxSdk || { tried: [], loaded: "" };
+      el.textContent = [
+        "SDK MAX: " + (sdk.loaded || "не загрузился (" + sdk.tried.length + " попыток)"),
+        "мосты: " + (Object.keys(scan.bridges).join(", ") || "нет"),
+        "подпись: " + (scan.initData ? scan.initData.length + " симв." : "нет"),
+        "токен: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
+        "параметры: " + (Object.keys(scan.params).join(", ") || "нет"),
+        "хеш: " + (scan.hash ? scan.hash.slice(0, 60) : "нет"),
+      ].join("\n");
     }
 
     window.openBotChat = () => {
