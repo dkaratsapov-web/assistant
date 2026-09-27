@@ -268,6 +268,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         lastUpdateType: await db.getSetting("max_last_update_type"),
         lastUpdateFrom: await db.getSetting("max_last_update_from"),
         lastRejectAt: await db.getSetting("max_last_reject_at"),
+        keyboardError: await db.getSetting("max_kb_error"),
+        keyboardUsed: await db.getSetting("max_kb_used"),
       };
       if (env.MAX_BOT_TOKEN) {
         const mc = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);

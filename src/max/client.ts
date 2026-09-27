@@ -96,26 +96,18 @@ export class MaxClient {
 
   /**
    * Отправить текстовое сообщение пользователю или в чат.
-   * Если платформа не приняла клавиатуру (например, не поддержала open_app),
-   * повторяем без неё: сообщение важнее кнопок.
+   * Ошибку не глушим: вызывающий код сам решает, чем заменить клавиатуру, —
+   * иначе сообщение молча уходит вообще без кнопок.
    */
   async sendMessage(
     to: { userId?: number; chatId?: number },
     text: string,
     keyboard?: MaxButton[][]
   ): Promise<void> {
-    const send = (kb?: MaxButton[][]) =>
-      this.request("POST", "/messages", {
-        query: { user_id: to.userId, chat_id: to.chatId },
-        body: { text, attachments: this.keyboardAttachment(kb) },
-      });
-    try {
-      await send(keyboard);
-    } catch (e) {
-      if (!keyboard?.length) throw e;
-      console.error("max sendMessage with keyboard failed, retrying without it", e);
-      await send(undefined);
-    }
+    await this.request("POST", "/messages", {
+      query: { user_id: to.userId, chat_id: to.chatId },
+      body: { text, attachments: this.keyboardAttachment(keyboard) },
+    });
   }
 
   /** Ответить на нажатие callback-кнопки (всплывающее уведомление или замена сообщения). */
