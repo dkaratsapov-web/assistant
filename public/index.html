@@ -5,34 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Sara</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script>
-    // SDK мини-приложения MAX (max-web-app.js) даёт initData, SecureStorage и DeviceStorage.
-    // Точный адрес у MAX не опубликован, поэтому пробуем кандидатов по очереди и
-    // запоминаем сработавший — от него зависит вход без кодов.
-    window.__maxSdk = { tried: [], loaded: "" };
-    (function loadMaxSdk() {
-      var urls = [
-        "https://st.max.ru/max-web-app.js",
-        "https://web.max.ru/max-web-app.js",
-        "https://max.ru/js/max-web-app.js",
-        "https://cdn.max.ru/max-web-app.js",
-        "https://dev.max.ru/js/max-web-app.js"
-      ];
-      var i = 0;
-      function next() {
-        if (window.WebApp || i >= urls.length) return;
-        var url = urls[i++];
-        window.__maxSdk.tried.push(url);
-        var el = document.createElement("script");
-        el.src = url;
-        el.async = false;
-        el.onload = function () { window.__maxSdk.loaded = url; };
-        el.onerror = next;
-        document.head.appendChild(el);
-      }
-      next();
-    })();
-  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -168,6 +140,22 @@
     .empty .big { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -.02em; }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-weight: 500; }
 
+    /* Каркас загрузки: держит форму будущего контента, поэтому при появлении
+       данных ничего не прыгает. Переливается медленно, чтобы не рябило. */
+    .skel { border-radius: var(--radius-sm); background: var(--surface-2); position: relative; overflow: hidden; }
+    .skel::after {
+      content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(128,128,140,.14), transparent);
+      animation: skel 1.4s ease-in-out infinite;
+    }
+    @keyframes skel { 100% { transform: translateX(100%); } }
+    .skel-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: var(--s4); margin-bottom: var(--s3); }
+    .skel-line { height: 13px; margin-bottom: var(--s2); }
+    .skel-line:last-child { margin-bottom: 0; }
+    .skel-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
+    .skel-tile { height: 82px; border-radius: var(--radius); }
+    @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+
     /* FAB */
     .fab { position: fixed; right: calc(50% - 300px); bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
       width: 46px; height: 46px; border-radius: 50%; background: var(--fg); color: var(--fg-contrast); border: none; cursor: pointer;
@@ -284,20 +272,19 @@
     // На мобильном Telegram перехватывает вертикальный свайп и мешает вводу в поля — отключаем
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
     const INIT = tg.initData || "";
+    // Разбор данных запуска кэшируем. Объявление именно здесь: bridgeScan зовут
+    // при старте, выше по файлу, и «let» ниже по коду был бы ещё не инициализирован.
+    let launchScan = null;
     // Токен сессии из MAX: приходит в ссылке (?max=…) и запоминается на устройстве
     const MAX_KEY = "sara-max-session";
     const MAX_SESSION = (() => {
       try {
-        // 1) токен в ссылке из чата, 2) стартовый параметр мини-приложения MAX,
-        // 3) сохранённый с прошлого входа
-        const q = new URLSearchParams(location.search);
-        let t = q.get("max") || q.get("startapp") || "";
-        if (!t) {
-          const bridges = [window.WebApp, window.MAX, window.maxWebApp];
-          for (const b of bridges) {
-            const p = b && (b.initDataUnsafe?.start_param || b.startParam);
-            if (p) { t = String(p); break; }
-          }
+        // 1) токен из кнопки бота — как его ни назови, его находит bridgeScan,
+        // 2) сохранённый с прошлого входа. Важно взять его ДО первого запроса:
+        // иначе /api/me получит 401 и приложение уйдёт на лишнюю перезагрузку.
+        let t = bridgeScan().startParam || "";
+        if (t.length < 16) {
+          t = "";
         }
         if (t) {
           localStorage.setItem(MAX_KEY, t);
@@ -400,15 +387,55 @@
     function err(e) {
       const m = String(e.message || e);
       if (m === "no_access") return emptyBox("Нет доступа", "Получи доступ у владельца бота.");
-      return `<div class="empty"><div class="big">Ошибка</div><div>${esc(m)}</div></div>`;
+      return `<div class="empty errbox"><div class="big">Ошибка</div><div>${esc(m)}</div></div>`;
     }
     const ARROW = '<svg class="arw" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
 
+    /* ---------- Переходы между вкладками ---------- */
+    // Вкладка помнит, как выглядела в прошлый раз. При возврате показываем её
+    // сразу и молча обновляем данные — вместо белого экрана «Загрузка…».
+    const tabHtml = {};
+    function restoreTab(t) {
+      const cached = tabHtml[t];
+      if (!cached) return false;
+      view.innerHTML = cached;
+      return true;
+    }
+    function rememberTab(t) {
+      // ИИ-вкладку не кэшируем: там живой обработчик ввода, разметкой его не вернуть
+      // не запоминаем каркас и экран ошибки — иначе они прилипнут к вкладке
+      if (t === "ai" || tab !== t) return;
+      if (view.querySelector(".loading, .skel, .errbox")) return;
+      tabHtml[t] = view.innerHTML;
+    }
+
+    /**
+     * Каркас под конкретный экран. Показываем только при первом заходе:
+     * дальше вкладка помнит свой прошлый вид и подменять его нечем.
+     */
+    function skeleton(kind) {
+      const line = (w) => `<div class="skel skel-line" style="width:${w}"></div>`;
+      const card = (...ws) => `<div class="skel-card">${ws.map(line).join("")}</div>`;
+      if (kind === "home") {
+        return `<div class="skel-tiles"><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div>` +
+               `<div class="skel skel-tile" style="height:64px;margin-bottom:var(--s3)"></div>` +
+               card("62%", "38%") + card("70%", "44%");
+      }
+      if (kind === "list") return card("74%", "40%") + card("58%", "34%") + card("66%", "42%");
+      if (kind === "health") {
+        return `<div class="skel-tiles"><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div>` +
+               card("54%", "80%", "40%") + card("64%", "36%");
+      }
+      return card("70%", "45%") + card("55%", "35%");
+    }
+
     /* ---------- Экраны ---------- */
-    async function renderHome() {
-      view.innerHTML = '<div class="loading">Загрузка…</div>';
+    async function renderHome(warm = tabHtml.home !== undefined) {
+      const mine = tab;
+      if (!warm) view.innerHTML = skeleton("home");
       try {
         const d = await api("/home");
+        if (tab !== mine) return;
         let h = `<div class="tiles">
           <div class="tile accent" onclick="go('tasks','work')"><div class="n">${d.counts.work}</div><div class="l">Рабочие задачи</div></div>
           <div class="tile" onclick="go('tasks','personal')"><div class="n">${d.counts.personal}</div><div class="l">Личные задачи</div></div>
@@ -463,7 +490,8 @@
           h += `<div class="card" onclick="openContacts()"><div style="color:var(--muted);text-align:center;padding:6px">Нет ближайших ДР. Нажми, чтобы добавить контакт.</div></div>`;
         }
         view.innerHTML = h;
-        renderHealthCard();
+        // дожидаемся карточки здоровья: иначе вкладка запомнится с заглушкой внутри
+        await renderHealthCard();
       } catch (e) { view.innerHTML = err(e); }
     }
 
@@ -531,8 +559,8 @@
     let healthOffset = 0; // 0 — сегодня, -1 — вчера …
     const healthDateStr = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`; };
     window.healthNav = (delta) => { const n = healthOffset + delta; if (n > 0) return; healthOffset = n; renderHealth(); };
-    async function renderHealth() {
-      view.innerHTML = '<div class="loading">Загрузка…</div>';
+    async function renderHealth(warm = tabHtml.health !== undefined) {
+      if (!warm) view.innerHTML = skeleton("health");
       try {
         const d = await api(`/health?date=${healthDateStr(healthOffset)}`);
         if (tab !== "health") return;
@@ -829,12 +857,14 @@
         </div>
         <div class="actions">${taskActions(t)}</div></div>`;
     }
-    async function renderTasks() {
-      view.innerHTML =
+    async function renderTasks(warm = tabHtml.tasks !== undefined) {
+      const mine = tab;
+      if (!warm) view.innerHTML =
         `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">Личные</div></div>
-         <div class="chips" id="task-stages"></div><div id="tasklist"><div class="loading">Загрузка…</div></div>`;
+         <div class="chips" id="task-stages"></div><div id="tasklist">${skeleton("list")}</div>`;
       try {
         const { tasks } = await api(`/tasks?scope=${taskScope}&status=all`);
+        if (tab !== mine) return;
         tasksCache = tasks;
         const groups = { open: [], in_progress: [], done: [], failed: [] };
         tasks.forEach((t) => { (groups[t.status] || (groups[t.status] = [])).push(t); });
@@ -853,14 +883,15 @@
     const MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
     const WD = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 
-    async function renderCalendar() {
+    async function renderCalendar(warm = tabHtml.calendar !== undefined) {
       const tmBanner = me.telemost === false
         ? `<div class="card" style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">🎥 Телемост не подключён</div><div style="color:var(--muted);font-size:13px;margin-bottom:10px">Подключи — и Сара будет добавлять ссылку на видеовстречу в события.</div><button class="btn primary" onclick="telemostConnect()">Подключить Телемост</button></div>`
         : "";
-      view.innerHTML =
+      const mine = tab;
+      if (!warm) view.innerHTML =
         tmBanner +
         `<div class="seg"><div class="${calView==='list'?'on':''}" onclick="calSetView('list')">Список</div><div class="${calView==='month'?'on':''}" onclick="calSetView('month')">Месяц</div></div>
-         <div id="calbody"><div class="loading">Загрузка…</div></div>`;
+         <div id="calbody">${skeleton("list")}</div>`;
       try {
         const [ev, tk] = await Promise.all([api("/events"), api("/tasks?status=active")]);
         eventsCache = ev.events;
@@ -972,11 +1003,13 @@
     };
     function afterContactChange() { openContacts(); if (tab === "home") renderHome(); }
 
-    async function renderClients() {
-      view.innerHTML = '<div class="section-title">Клиенты и проекты</div><div id="cllist"><div class="loading">Загрузка…</div></div>';
+    async function renderClients(warm = tabHtml.clients !== undefined) {
+      const mine = tab;
+      if (!warm) view.innerHTML = '<div class="section-title">Клиенты и проекты</div><div id="cllist">' + skeleton("list") + '</div>';
       const PLAT = { direct: "Директ", google: "Google Ads", tg: "TG Ads", vk: "VK", avito: "Авито", site: "Сайт" };
       try {
         const { clients } = await api("/clients");
+        if (tab !== mine) return;
         clientsCache = clients;
         const el = $("cllist");
         if (!el) return;
@@ -1586,12 +1619,10 @@
       tab = t;
       document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === t));
       updateFab();
-      if (t === "home") renderHome();
-      else if (t === "tasks") renderTasks();
-      else if (t === "calendar") renderCalendar();
-      else if (t === "health") renderHealth();
-      else if (t === "clients") renderClients();
-      else if (t === "ai") renderAI();
+      const draw = { home: renderHome, tasks: renderTasks, calendar: renderCalendar, health: renderHealth, clients: renderClients, ai: renderAI }[t];
+      if (!draw) return;
+      const warm = restoreTab(t);
+      Promise.resolve(draw(warm)).then(() => rememberTab(t)).catch(() => {});
     }
     // viaNav=true — переход по нижнему меню (сбрасывает историю); иначе — вглубь (можно вернуться)
     function switchTab(t, viaNav) {
@@ -1621,6 +1652,8 @@
      * поэтому перебираем всё, что похоже на мост, плюс параметры адреса и хеш.
      */
     function bridgeScan() {
+      // адрес чистится сразу после старта, поэтому запоминаем разбор первого вызова
+      if (launchScan) return launchScan;
       const out = { params: {}, hash: "", bridges: {}, initData: "", startParam: "", initKeys: "" };
       try {
         const q = new URLSearchParams(location.search);
@@ -1660,22 +1693,12 @@
       } catch (e) {
         out.error = String(e);
       }
+      launchScan = out;
       return out;
     }
 
     function bridgeInitData() {
       return bridgeScan().initData;
-    }
-
-    /** SDK MAX подключается асинхронно — даём ему домчаться, иначе initData ещё нет. */
-    function waitForMaxSdk(ms) {
-      return new Promise((resolve) => {
-        const t0 = Date.now();
-        (function tick() {
-          if (window.WebApp || Date.now() - t0 > ms) return resolve();
-          setTimeout(tick, 100);
-        })();
-      });
     }
 
     /** Хранилища мини-приложения MAX: переживают закрытие окна, в отличие от localStorage в webview. */
@@ -1715,7 +1738,6 @@
      * затем подпись мини-приложения. Возвращает true, если вошли.
      */
     async function tryAutoLogin() {
-      await waitForMaxSdk(2000);
       const scan = bridgeScan();
       // отправляем отчёт о запуске — по нему налаживается автовход в конкретной сборке MAX
       fetch("/api/diag/bridge", {
@@ -1795,9 +1817,7 @@
       const el = $("login-diag");
       if (!el) return;
       const scan = bridgeScan();
-      const sdk = window.__maxSdk || { tried: [], loaded: "" };
       el.textContent = [
-        "SDK MAX: " + (sdk.loaded || "не загрузился (" + sdk.tried.length + " попыток)"),
         "мосты: " + (Object.keys(scan.bridges).join(", ") || "нет"),
         "подпись: " + (scan.initData ? scan.initData.length + " симв. [" + scan.initKeys + "]" : "нет"),
         "токен: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
