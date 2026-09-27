@@ -213,6 +213,10 @@ export interface AppPrefs {
   hidden: string[];                    // спрятанные разделы нижнего меню
   callMe: string;                      // как обращаться к человеку
   botName: string;                     // как зовут ассистента
+  avatar: string;                      // ссылка на аватар ассистента ("" — стандартный)
+  tone: "friendly" | "business" | "brief";  // манера общения
+  address: "ty" | "vy";                // на «ты» или на «вы»
+  emoji: boolean;                      // разрешены ли эмодзи в ответах
 }
 
 export const DEFAULT_PREFS: AppPrefs = {
@@ -227,4 +231,8 @@ export const DEFAULT_PREFS: AppPrefs = {
   hidden: [],
   callMe: "",
   botName: "Сара",
+  avatar: "",
+  tone: "friendly",
+  address: "ty",
+  emoji: true,
 };

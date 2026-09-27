@@ -8,6 +8,7 @@
  * Авторизация — тот же API-ключ сервисного аккаунта, что и у SpeechKit
  * (YANDEX_API_KEY + YANDEX_FOLDER_ID), роль `ai.languageModels.user`.
  */
+import { Lesson, renderExamples } from "./phrases";
 import { Env } from "./types";
 
 const COMPLETION_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion";
@@ -240,11 +241,13 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 Отвечай ТОЛЬКО одной строкой JSON, без markdown, без \`\`\`, без пояснений.`;
 
 /** Определяет намерение (действие или обычный вопрос). Возвращает null при ошибке разбора. */
-export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string): Promise<AssistantIntent | null> {
+export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string, lessons: Lesson[] = []): Promise<AssistantIntent | null> {
   const raw = await complete(
     cfg,
     [
-      { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.` },
+      // К правилам подмешиваем живые примеры, похожие на фразу: дешёвая модель
+      // следует образцам заметно точнее, чем описанию правил.
+      { role: "system", text: `${ROUTER_SYSTEM}\nСейчас: ${nowStr}.${renderExamples(text, 6, lessons)}` },
       { role: "user", text },
     ],
     cfg.router,

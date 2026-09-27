@@ -756,6 +756,23 @@ export class DB {
    * Компактная сводка профиля (+ актуальный вес) для подстановки в промпты ИИ.
    * Пустая строка, если профиль не заполнен.
    */
+  /**
+   * Как Саре себя вести: имя, манера, обращение, эмодзи. Настраивается в
+   * приложении по клику на её аватар и подмешивается к каждому ответу ИИ.
+   */
+  async personaContext(userId: number): Promise<string> {
+    const p = await this.getPrefs(userId);
+    const tone =
+      p.tone === "business" ? "Говори по-деловому: сухо, по существу, без лишней теплоты."
+      : p.tone === "brief" ? "Отвечай максимально коротко: одна-две фразы, только суть."
+      : "Говори дружелюбно и живо, как хороший помощник, который давно с человеком работает.";
+    const addr = p.address === "vy" ? "Обращайся на «вы»." : "Обращайся на «ты».";
+    const emoji = p.emoji ? "Эмодзи уместны, но не больше одного-двух на ответ." : "Не используй эмодзи вообще.";
+    const name = p.botName && p.botName !== "Сара" ? `Тебя зовут ${p.botName}.` : "Тебя зовут Сара.";
+    const callMe = p.callMe ? ` К человеку обращайся по имени: ${p.callMe}.` : "";
+    return `${name}${callMe} ${tone} ${addr} ${emoji}`;
+  }
+
   async profileContext(userId: number): Promise<string> {
     const p = await this.getProfile(userId);
     const weights = await this.listWeights(userId, 1);
@@ -909,6 +926,31 @@ export class DB {
 
   async setNotif(userId: number, s: NotifSettings): Promise<void> {
     await this.setSetting(`notif:${userId}`, JSON.stringify(s));
+  }
+
+  // ---------- Уроки: чему человек научил Сару ----------
+  /**
+   * Запоминаем исправление: «это была еда, а не задача». Такие пары уходят в
+   * подсказку маршрутизатора, поэтому одна и та же ошибка не повторяется.
+   * Держим последние двадцать — этого хватает, а подсказка не раздувается.
+   */
+  async addLesson(userId: number, phrase: string, action: string): Promise<void> {
+    const clean = phrase.trim().slice(0, 200);
+    if (!clean) return;
+    const prev = await this.listLessons(userId);
+    const next = [{ phrase: clean, action }, ...prev.filter((l) => l.phrase.toLowerCase() !== clean.toLowerCase())].slice(0, 20);
+    await this.setSetting(`lessons:${userId}`, JSON.stringify(next));
+  }
+
+  async listLessons(userId: number): Promise<{ phrase: string; action: string }[]> {
+    const raw = await this.getSetting(`lessons:${userId}`);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((l) => l && typeof l.phrase === "string" && typeof l.action === "string") : [];
+    } catch {
+      return [];
+    }
   }
 
   // ---------- Внешний вид приложения (на пользователя) ----------

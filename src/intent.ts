@@ -6,7 +6,7 @@
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, WB_START, wordRe } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, WB_END, WB_START, wordRe } from "./utils";
 
 const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -59,6 +59,12 @@ export async function performIntent(
    * Чей это клиент. Сначала верим ИИ (он мог вытащить имя), иначе ищем имя
    * своего клиента прямо в исходной фразе: «встреча с айпапа» → карточка «АйПапа».
    */
+  /** Что Сара только что создала: нужно, если человек скажет «не то, это еда». */
+  const remember = async (kind: string, id: number) => {
+    if (!rawText) return;
+    await db.setSetting(`last:${uid}`, JSON.stringify({ phrase: rawText, kind, id }));
+  };
+
   const findClient = async (): Promise<{ id: number; name: string } | null> => {
     const named = (intent.client ?? "").trim();
     if (named) {
@@ -77,6 +83,7 @@ export async function performIntent(
     const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const client = scope === SCOPE_PERSONAL ? null : await findClient();
     const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null });
+    await remember("task", id);
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
     const cl = client ? `\n🤝 ${client.name}` : "";
@@ -112,6 +119,7 @@ export async function performIntent(
     }
     const client = await findClient();
     const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "", clientId: client?.id ?? null });
+    await remember("event", id);
     const loc = intent.location ? `\n📍 ${intent.location}` : "";
     const cl = client ? `\n🤝 ${client.name}` : "";
     return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
@@ -196,6 +204,7 @@ export async function performIntent(
     const text = (intent.title ?? "").trim();
     if (!text) return null;
     const id = await db.addNote(uid, text);
+    await remember("note", id);
     return `📝 Заметка сохранена (#${id})\n«${text}»`;
   }
 
@@ -208,6 +217,35 @@ const ACTION_RE = /(добав|запланир|напомн|созда|запи
  * Локальный разбор частых команд БЕЗ обращения к ИИ (экономия расхода).
  * Возвращает намерение для однозначных шаблонов без дат, иначе null (тогда — YandexGPT).
  */
+
+/**
+ * Разбирает поправку человека: «не то, это еда», «это была встреча», «нет, заметка».
+ * Возвращает, чем на самом деле была прошлая фраза, или null.
+ *
+ * Зачем: маршрутизатор иногда промахивается, и раньше человеку оставалось
+ * только удалить запись и переписать фразу иначе. Теперь он говорит, как надо,
+ * — Сара переделывает и запоминает урок на будущее.
+ */
+export function parseCorrection(text: string): "food" | "event" | "task" | "note" | "water" | null {
+  const t = text.trim().toLowerCase();
+  // Поправка — короткая реплика вида «нет, это …». Голое «не» в начале не годится:
+  // под него попадает обычное «не забудь купить еду».
+  // WB_END вместо \b: в JavaScript \b не считает кириллицу буквами, поэтому
+  // «нет,» и «не то,» через \b не совпадали бы — на этом уже обжигались.
+  const opener = new RegExp(
+    `^(?:это|нет|не\\s+то|не\\s+так|не\\s+(?:задач|встреч|заметк|ед|вод)[а-яё]*|неправильно|ошиб[а-яё]+|(?:я\\s+)?имел[а-яё]*\\s+в\\s+виду)${WB_END}`,
+    "i"
+  );
+  if (!opener.test(t)) return null;
+  if (t.length > 80) return null;
+  if (/(ед[аыуе]|питани|калори|рацион|бжу|блюд)/i.test(t)) return "food";
+  if (/(встреч|созвон|событи|календар)/i.test(t)) return "event";
+  if (/(задач|дело|напомин)/i.test(t)) return "task";
+  if (/(заметк|запис[ька])/i.test(t)) return "note";
+  if (/(вод[аыуе]|попил|выпил)/i.test(t)) return "water";
+  return null;
+}
+
 export function localRoute(text: string): AssistantIntent | null {
   const t = text.trim();
   let m: RegExpMatchArray | null;
@@ -246,6 +284,13 @@ export async function tryPerformCommand(
   const ai = aiConfig(env);
   const dayStart = startOfLocalDayIso(tz);
   const dayEnd = startOfLocalDayOffsetIso(tz, 1);
+
+  // 0-fix) Поправка к прошлой фразе: «не то, это еда». Переделываем и запоминаем урок.
+  const fix = parseCorrection(text);
+  if (fix) {
+    const applied = await applyCorrection(env, db, uid, tz, fix);
+    if (applied) return applied;
+  }
 
   // 0-health) Правки раздела «Здоровье» — локально, без ИИ
   // Цель по калориям
@@ -343,7 +388,8 @@ export async function tryPerformCommand(
     if (n) {
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       const meal = mealFromText(text) || mealByHour(localHour);
-      await db.addFood(uid, { ...n, meal });
+      const foodId = await db.addFood(uid, { ...n, meal });
+      await db.setSetting(`last:${uid}`, JSON.stringify({ phrase: text, kind: "food", id: foodId }));
       return `🍽 Записала (${MEAL_RU[meal]}): ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`;
     }
   }
@@ -359,7 +405,7 @@ export async function tryPerformCommand(
   const now = nowContext(tz);
 
   // 1) Иначе — распознавание команды на дешёвой модели (yandexgpt-lite)
-  const intent = await routeAssistant(ai, text, now);
+  const intent = await routeAssistant(ai, text, now, await db.listLessons(uid));
   let action = await performIntent(intent, db, uid, tz, text);
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
@@ -377,3 +423,84 @@ export async function tryPerformCommand(
   }
   return action;
 }
+
+/**
+ * Переделывает прошлую фразу так, как поправил человек, и запоминает урок.
+ * Возвращает ответ или null, если переделывать нечего.
+ */
+async function applyCorrection(
+  env: Env,
+  db: DB,
+  uid: number,
+  tz: number,
+  kind: "food" | "event" | "task" | "note" | "water"
+): Promise<string | null> {
+  const raw = await db.getSetting(`last:${uid}`);
+  if (!raw) return "Не помню, что поправлять. Напиши фразу заново — разберу как надо.";
+  let last: { phrase?: string; kind?: string; id?: number };
+  try {
+    last = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const phrase = (last.phrase ?? "").trim();
+  if (!phrase) return null;
+
+  // убираем то, что создали по ошибке
+  if (last.kind === "task" && last.id) await db.deleteTask(last.id, uid);
+  if (last.kind === "event" && last.id) await db.deleteEvent(last.id, uid);
+  if (last.kind === "note" && last.id) await db.deleteNote(last.id, uid);
+  if (last.kind === "food" && last.id) await db.deleteFood(last.id, uid);
+  await db.setSetting(`last:${uid}`, "");
+  await db.addLesson(uid, phrase, kind);
+
+  const learned = "\n\n🧠 Запомнила: такие фразы разбираю как " + KIND_RU[kind] + ".";
+
+  if (kind === "water") {
+    const ml = parseWaterMl(phrase) || 250;
+    await db.addWater(uid, ml);
+    const total = await db.waterTotal(uid, startOfLocalDayIso(tz), startOfLocalDayOffsetIso(tz, 1));
+    return `💧 Исправила: +${ml} мл. Сегодня: ${(total / 1000).toFixed(1)} л.${learned}`;
+  }
+  if (kind === "note") {
+    const id = await db.addNote(uid, phrase);
+    return `📝 Исправила: заметка #${id}\n«${phrase}»${learned}`;
+  }
+  const ai = aiConfig(env);
+  if (kind === "food") {
+    if (!ai) return "Чтобы посчитать калории, нужен ИИ — добавь YANDEX_API_KEY и YANDEX_FOLDER_ID.";
+    const n = await estimateNutrition(ai, phrase);
+    if (!n) return "Не смогла разобрать блюдо. Напиши, что именно съел и сколько.";
+    const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
+    const meal = mealFromText(phrase) || mealByHour(localHour);
+    const id = await db.addFood(uid, { ...n, meal });
+    await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "food", id }));
+    return `🍽 Исправила (${MEAL_RU[meal]}): ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г${learned}`;
+  }
+  if (kind === "event") {
+    const startsAt = resolveWhen(phrase, tz, 12);
+    if (!startsAt) return `Понадобится время встречи. Скажи, например: «${phrase} завтра в 15:00».`;
+    const clients = await db.listClients(uid);
+    const client = mentionedClient(clients, phrase);
+    const id = await db.addEvent({ userId: uid, title: phrase, startsAt, location: "", notes: "", clientId: client?.id ?? null });
+    await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "event", id }));
+    const cl = client ? `\n🤝 ${client.name}` : "";
+    return `📅 Исправила: встреча #${id}\n«${phrase}»\n🕒 ${formatEventTime(startsAt, tz)}${cl}${learned}`;
+  }
+  // задача
+  const dueAt = resolveWhen(phrase, tz, 10);
+  const clients = await db.listClients(uid);
+  const client = mentionedClient(clients, phrase);
+  const id = await db.addTask({ title: phrase, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt, clientId: client?.id ?? null });
+  await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "task", id }));
+  const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
+  return `✅ Исправила: задача #${id}\n«${phrase}»${due}${learned}`;
+}
+
+const KIND_RU: Record<string, string> = {
+  food: "запись еды",
+  event: "встречу",
+  task: "задачу",
+  note: "заметку",
+  water: "воду",
+};

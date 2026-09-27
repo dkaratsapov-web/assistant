@@ -553,7 +553,9 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     await reply("💭 Думаю…");
     const history = await db.listAiMessages(uid, 20);
     const pctx = await db.profileContext(uid);
+    const persona = await db.personaContext(uid);
     const msgs: ChatMessage[] = [
+      { role: "system" as const, text: persona },
       ...(pctx ? [{ role: "system" as const, text: pctx }] : []),
       ...history
         .filter((m) => m.role === "user" || m.role === "assistant")

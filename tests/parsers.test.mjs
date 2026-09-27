@@ -8,7 +8,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseDue, matchWaterMl, mealFromText, wordRe } from "../.test-build/utils.js";
-import { localRoute, looksLikeFoodText, mentionedClient } from "../.test-build/intent.js";
+import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
+import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -91,4 +92,70 @@ test("клиент узнаётся в тексте по своему имени
   assert.equal(mentionedClient(names, "встреча с клиентом"), null);
   // слишком короткие имена не ловим — иначе «АП» найдётся в любом слове
   assert.equal(mentionedClient([{ id: 1, name: "АП" }], "напомни про апрель"), null);
+});
+
+test("база формулировок цела и согласована с кодом", () => {
+  const ACTIONS = new Set(["task", "task_done", "task_delete", "event", "event_delete", "contact", "client_add", "client_delete", "client_edit", "note_add", "none"]);
+  assert.ok(PHRASES.length >= 30, "примеров должно быть достаточно для подсказки");
+  const seen = new Set();
+  for (const p of PHRASES) {
+    const obj = JSON.parse(p.json);                       // разбор не должен падать
+    assert.ok(ACTIONS.has(obj.action), `неизвестное действие: ${obj.action} в «${p.text}»`);
+    if (obj.action !== "none") assert.ok(obj.title || obj.name, `пример без названия: «${p.text}»`);
+    assert.ok(!seen.has(p.text), `повтор примера: «${p.text}»`);
+    seen.add(p.text);
+  }
+  // действия, ради которых база и нужна, должны быть покрыты
+  const covered = new Set(PHRASES.map((p) => JSON.parse(p.json).action));
+  for (const a of ["task", "task_done", "event", "client_add", "note_add", "none"]) {
+    assert.ok(covered.has(a), `в базе нет ни одного примера для «${a}»`);
+  }
+});
+
+test("к фразе подбираются примеры по смыслу", () => {
+  const forEvent = pickExamples("встреча с айпапа в пятницу в 12").map((p) => JSON.parse(p.json).action);
+  assert.ok(forEvent.includes("event"), "для встречи не нашлось примера встречи");
+  const forFood = pickExamples("добавь в еду гречку с курицей").map((p) => p.text);
+  assert.ok(forFood.some((t) => /в еду|рацион|калори/i.test(t)), "для еды не нашлось примера про еду");
+  // «не команда» подмешивается всегда — иначе модель всё считает задачей
+  for (const q of ["напомни завтра позвонить", "встреча в среду", "удали клиента Ромашка"]) {
+    const acts = pickExamples(q).map((p) => JSON.parse(p.json).action);
+    assert.ok(acts.includes("none"), `для «${q}» не добавлен пример «не команда»`);
+  }
+  // подсказка не должна распухать
+  assert.ok(pickExamples("напомни завтра позвонить в банк", 6).length <= 6);
+});
+
+test("примеры про еду не спорят с локальным разбором", () => {
+  // Если база говорит «это еда» — гейт тоже обязан так считать, иначе фраза
+  // уйдёт в маршрутизатор и снова станет задачей.
+  const foodPhrases = PHRASES.filter((p) => /в еду|рацион|калори|съел/i.test(p.text)).map((p) => p.text);
+  assert.ok(foodPhrases.length >= 3);
+  for (const t of foodPhrases) assert.equal(looksLikeFoodText(t), true, `гейт не признал едой: «${t}»`);
+});
+
+test("поправка человека распознаётся, а обычные фразы — нет", () => {
+  // человек поправляет Сару
+  assert.equal(parseCorrection("не то, это еда"), "food");
+  assert.equal(parseCorrection("нет, это была встреча"), "event");
+  assert.equal(parseCorrection("это заметка"), "note");
+  assert.equal(parseCorrection("неправильно, это задача"), "task");
+  assert.equal(parseCorrection("я имел в виду воду"), "water");
+  // а это обычные сообщения, их принимать за поправку нельзя
+  assert.equal(parseCorrection("не забудь купить еду"), null);
+  assert.equal(parseCorrection("встреча с клиентом завтра"), null);
+  assert.equal(parseCorrection("добавь в еду рис"), null);
+  assert.equal(parseCorrection("это интересная идея, распиши её подробнее и предложи варианты"), null);
+  assert.equal(parseCorrection(""), null);
+});
+
+test("личные уроки подмешиваются в подсказку раньше общих примеров", () => {
+  const lessons = [{ phrase: "накинь 200 риса", action: "food" }, { phrase: "созвон с подрядчиком", action: "event" }];
+  const out = renderExamples("накинь 200 риса и котлету", 6, lessons);
+  assert.ok(out.includes("уже поправлял тебя"), "нет блока с личными уроками");
+  assert.ok(out.indexOf("накинь 200 риса") < out.indexOf("Похожие примеры"), "уроки должны идти перед общими примерами");
+  // без уроков блока быть не должно
+  assert.ok(!renderExamples("напомни позвонить", 6, []).includes("уже поправлял"));
+  // похожий урок выбирается точнее случайного
+  assert.equal(pickLessons("накинь 200 риса", lessons, 1)[0].phrase, "накинь 200 риса");
 });

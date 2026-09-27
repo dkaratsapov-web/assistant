@@ -431,6 +431,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       hidden: Array.isArray(b.hidden) ? b.hidden.filter((x): x is string => typeof x === "string").slice(0, 8) : cur.hidden,
       callMe: typeof b.callMe === "string" ? b.callMe.trim().slice(0, 40) : cur.callMe,
       botName: typeof b.botName === "string" && b.botName.trim() ? b.botName.trim().slice(0, 24) : cur.botName,
+      // аватар берём только по http(s): чужие схемы в webview небезопасны
+      avatar: typeof b.avatar === "string" ? (/^https:\/\/\S+$/.test(b.avatar.trim()) ? b.avatar.trim().slice(0, 300) : "") : cur.avatar,
+      tone: oneOf(b.tone, ["friendly", "business", "brief"] as const, cur.tone),
+      address: oneOf(b.address, ["ty", "vy"] as const, cur.address),
+      emoji: typeof b.emoji === "boolean" ? b.emoji : cur.emoji,
     };
     await db.setPrefs(uid, next);
     return json(next);
@@ -842,7 +847,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
-    const dueAt = body.due ? parseDue(body.due, tz) : null;
+    // Из формы дедлайн приходит как «2026-09-28T14:00», голосом и текстом —
+    // словами («завтра», «в пятницу»). Понимаем оба вида.
+    const dueAt = body.due
+      ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.due)
+        ? localInputToUtc(body.due, tz)
+        : parseDue(body.due, tz)
+      : null;
     const scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const id = await db.addTask({
       title, creatorId: uid, assigneeId: uid, scope,
@@ -995,7 +1006,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       // 2) Обычный диалог с историей
       const history = await db.listAiMessages(uid, 20);
       const ctx = await db.profileContext(uid);
+      const persona = await db.personaContext(uid);
       const msgs: ChatMessage[] = [
+        { role: "system" as const, text: persona },
         ...(ctx ? [{ role: "system" as const, text: ctx }] : []),
         ...history
           .filter((m) => m.role === "user" || m.role === "assistant")

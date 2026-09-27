@@ -195,6 +195,29 @@
       max-height: 88vh; max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     .sheet .grabber { position: sticky; top: 0; z-index: 2; background: var(--bg); }
     .sheet-bg.show .sheet { transform: translateY(0); }
+    /* Свой диалог подтверждения. Системное окно браузера выбивалось из интерфейса
+       и в webview мессенджера выглядело как предупреждение о взломе. */
+    .ask-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(3px);
+      display: none; align-items: center; justify-content: center; z-index: 80; padding: 24px;
+      opacity: 0; transition: opacity .16s ease; }
+    .ask-bg.show { display: flex; opacity: 1; }
+    .ask { background: var(--surface); width: 100%; max-width: 340px; border-radius: 18px; padding: 20px;
+      box-shadow: var(--shadow); border: 1px solid var(--border); text-align: center;
+      transform: scale(.94); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
+    .ask-bg.show .ask { transform: scale(1); }
+    .ask-title { font-size: 16px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
+    .ask-text { color: var(--muted); font-size: 13.5px; line-height: 1.45; margin-bottom: 18px; }
+    .ask-row { display: flex; flex-direction: column; gap: 8px; }
+    .ask-row .btn { width: 100%; }
+    /* Кнопка диктовки рядом с полем: тот же рост, что у поля, ничего не съезжает. */
+    .mic-btn { flex: none; width: 46px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); cursor: pointer; display: flex; align-items: center;
+      justify-content: center; transition: all .15s ease; }
+    .mic-btn:active { transform: scale(.96); }
+    .mic-btn.rec { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+    .with-mic { display: flex; gap: 8px; align-items: stretch; }
+    .with-mic > :first-child { flex: 1; min-width: 0; }
+    .btn.danger { background: #ff3b30; color: #fff; border-color: #ff3b30; }
     .grabber { width: 38px; height: 4px; border-radius: 3px; background: var(--border-strong); margin: 4px auto 16px; }
     .sheet h3 { margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -.03em; }
     .field { margin-bottom: 13px; }
@@ -237,10 +260,10 @@
 <body>
   <header>
     <div class="hrow">
-      <img id="avatar" class="avatar" alt="Sara">
+      <img id="avatar" class="avatar" alt="Сара" style="cursor:pointer" onclick="openSara()" title="Настройки Сары">
       <div class="hello">
         <div class="h1" id="greeting">Sara</div>
-        <div class="sub" id="subtitle">Загрузка…</div>
+        <div class="sub" id="subtitle"></div>
       </div>
       <button class="icon-btn" id="notif-btn" aria-label="Уведомления" onclick="openNotif()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
       <button class="icon-btn" id="admin-btn" aria-label="Доступы" style="display:none" onclick="openAdmin()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M17 8v6M14 11h6"/></svg></button>
@@ -265,6 +288,14 @@
   </div></nav>
 
   <div class="sheet-bg" id="sheet"><div class="sheet" id="sheet-body"></div></div>
+
+  <div class="ask-bg" id="ask-bg" role="dialog" aria-modal="true">
+    <div class="ask">
+      <div class="ask-title" id="ask-title"></div>
+      <div class="ask-text" id="ask-text"></div>
+      <div class="ask-row" id="ask-row"></div>
+    </div>
+  </div>
 
   <script>
     /**
@@ -329,7 +360,7 @@
       BackButton: { show: noop, hide: noop, onClick: noop, offClick: noop },
       MainButton: { show: noop, hide: noop, setText: noop, onClick: noop },
       showAlert: (msg, cb) => { toast(msg); if (cb) cb(); },
-      showConfirm: (msg, cb) => cb(typeof confirm === "function" ? confirm(msg) : true),
+      showConfirm: (msg, cb) => ask(msg).then((ok) => cb(ok)),
       openLink: (url) => window.open(url, "_blank", "noopener"),
     };
     tg.ready(); tg.expand();
@@ -382,10 +413,37 @@
     const view = $("view");
     const setHTML = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
     // Надёжное подтверждение (в Telegram window.confirm часто не работает)
-    const ask = (msg) => new Promise((res) => { try { if (tg.showConfirm) { tg.showConfirm(msg, (ok) => res(!!ok)); return; } } catch (e) {} res(typeof confirm === "function" ? confirm(msg) : true); });
+    /**
+     * Спросить подтверждение своим диалогом. Раньше показывалось системное окно
+     * браузера — в мессенджере оно выглядело чужеродно и пугало адресом сайта.
+     * @param msg вопрос; @param opts.ok надпись на кнопке действия; @param opts.danger красная кнопка
+     */
+    function ask(msg, opts = {}) {
+      return new Promise((res) => {
+        const bg = $("ask-bg"), row = $("ask-row");
+        if (!bg || !row) { res(true); return; }
+        const [title, ...rest] = String(msg).split("\n");
+        $("ask-title").textContent = title;
+        $("ask-text").textContent = rest.join(" ") || opts.text || "";
+        $("ask-text").style.display = $("ask-text").textContent ? "" : "none";
+        row.innerHTML =
+          `<button class="btn ${opts.danger ? "danger" : "primary"}" id="ask-ok">${esc(opts.ok || "Да")}</button>` +
+          `<button class="btn" id="ask-no">${esc(opts.cancel || "Отмена")}</button>`;
+        const close = (v) => {
+          bg.classList.remove("show");
+          document.removeEventListener("keydown", onKey);
+          res(v);
+        };
+        const onKey = (e) => { if (e.key === "Escape") close(false); if (e.key === "Enter") close(true); };
+        $("ask-ok").onclick = () => { haptic(); close(true); };
+        $("ask-no").onclick = () => close(false);
+        bg.onclick = (e) => { if (e.target === bg) close(false); };
+        document.addEventListener("keydown", onKey);
+        bg.classList.add("show");
+      });
+    }
     const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const haptic = (t = "light") => { if (prefs && !prefs.haptic) return; try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
-    $("avatar").src = SARA;
 
     /* ---------- Тема ---------- */
     const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>';
@@ -414,6 +472,7 @@
     const PREFS_DEFAULT = {
       scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto",
       motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара",
+      avatar: "", tone: "friendly", address: "ty", emoji: true,
     };
     // из памяти устройства — чтобы применить до ответа сервера и не мигать
     let prefs = (() => {
@@ -437,6 +496,22 @@
       const want = prefs.theme === "auto" ? systemTheme() : prefs.theme;
       if (want !== theme) { theme = want; applyTheme(theme); }
       applyHiddenTabs();
+      applyGreeting();
+      const ava = document.getElementById("avatar");
+      if (ava) ava.src = prefs.avatar || SARA;
+    }
+
+    /**
+     * Приветствие в шапке. Имя берём из настроек — поэтому зовём и при запуске,
+     * и сразу после их изменения, иначе новое имя появлялось бы только назавтра.
+     */
+    function applyGreeting() {
+      const el = document.getElementById("greeting");
+      if (!el) return;
+      const name = (prefs.callMe || "").trim() || tg.initDataUnsafe?.user?.first_name || "";
+      const hour = new Date().getHours();
+      const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
+      el.textContent = `${hi}${name ? ", " + name : ""}`;
     }
 
     /** Прячет разделы, которые человек отключил, но никогда — тот, где он сейчас. */
@@ -569,7 +644,7 @@
         </div>`;
         h += `<div class="cta" onclick="go('ai')">
           <div class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15.5l-1.8-4.7L5.5 9l4.7-1.3L12 3Z"/></svg></div>
-          <div><div class="tx">Спросить Сару</div><div class="sm">Задачи, встречи и помощь по рекламе</div></div>${ARROW}</div>`;
+          <div><div class="tx">Спросить Сару</div><div class="sm">Задачи, встречи, здоровье и любой вопрос</div></div>${ARROW}</div>`;
         const tOnly = (iso) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
         const overdue = d.tasks.filter((t) => t.overdue);
         const todayTasks = d.tasks.filter((t) => !t.overdue);
@@ -652,7 +727,7 @@
       const md = mealDefault();
       const opt = (v, l) => `<option value="${v}" ${v === md ? "selected" : ""}>${l}</option>`;
       openSheet(`<h3>Что съели?</h3>
-        <div class="field"><label>Опиши блюдо — калории и БЖУ оценит ИИ</label><input id="f-food" placeholder="напр. тарелка борща с хлебом" autocomplete="off"></div>
+        <div class="field"><label>Опиши блюдо — калории и БЖУ оценит ИИ</label><div class="with-mic"><input id="f-food" placeholder="напр. тарелка борща с хлебом" autocomplete="off">${micButton("f-food")}</div></div>
         <div class="field"><label>Приём пищи</label><select id="f-meal">${opt("breakfast","🌅 Завтрак")}${opt("lunch","☀️ Обед")}${opt("dinner","🌙 Ужин")}${opt("snack","🍎 Перекус")}</select></div>
         <div id="food-recent"></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" id="food-save" onclick="saveFood()">Добавить</button></div>`);
@@ -809,7 +884,7 @@
       closeSheet(); if (tab === "health") renderHealth();
     };
     window.addHealthNote = () => {
-      openSheet(`<h3>Заметка о самочувствии</h3><div class="field"><label>Например: плохо спал, тренировка, болит голова</label><input id="hn-text" placeholder="заметка" autocomplete="off"></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveHealthNote()">Добавить</button></div>`);
+      openSheet(`<h3>Заметка о самочувствии</h3><div class="field"><label>Например: плохо спал, тренировка, болит голова</label><div class="with-mic"><input id="hn-text" placeholder="заметка" autocomplete="off">${micButton("hn-text")}</div></div><div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveHealthNote()">Добавить</button></div>`);
       setTimeout(() => { const i = $("hn-text"); if (i) i.focus(); }, 150);
     };
     window.saveHealthNote = async () => {
@@ -822,7 +897,7 @@
     window.openActivity = (from) => {
       activityReturn = from || "";
       openSheet(`<h3>Тренировка / активность</h3>
-        <div class="field"><label>Что делал — Сара оценит калории</label><input id="a-title" placeholder="напр. бег 30 минут / силовая" autocomplete="off"></div>
+        <div class="field"><label>Что делал — Сара оценит калории</label><div class="with-mic"><input id="a-title" placeholder="напр. бег 30 минут / силовая" autocomplete="off">${micButton("a-title")}</div></div>
         <div style="display:flex;gap:8px"><div class="field" style="flex:1"><label>Тип</label><select id="a-type"><option value="">— тип —</option><option value="кардио">🏃 Кардио</option><option value="силовая">🏋️ Силовая</option><option value="растяжка">🧘 Растяжка</option><option value="другое">Другое</option></select></div><div class="field" style="flex:1"><label>Длит., мин</label><input id="a-dur" type="number" inputmode="numeric" placeholder="мин"></div></div>
         <div style="display:flex;gap:8px"><div class="field" style="flex:1"><label>Калории вручную</label><input id="a-kcal" type="number" inputmode="numeric" placeholder="ккал"></div><div class="field" style="flex:1"><label>или шаги</label><input id="a-steps" type="number" inputmode="numeric" placeholder="шаги"></div></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" id="a-save" onclick="saveActivity()">Добавить</button></div>`);
@@ -924,7 +999,7 @@
     window.toggleSup = async (supId, slot) => { haptic(); try { await api("/supplements/check", { method: "POST", body: JSON.stringify({ supId, slot }) }); } catch (e) {} loadSupplements(); };
     function supForm(title, c, save) {
       openSheet(`<h3>${title}</h3>
-        <div class="field"><label>Название</label><input id="s-name" value="${c?esc(c.name):''}" placeholder="напр. Витамин D"></div>
+        <div class="field"><label>Название</label><div class="with-mic"><input id="s-name" value="${c?esc(c.name):''}" placeholder="напр. Витамин D">${micButton("s-name")}</div></div>
         <div class="field"><label>Дозировка</label><input id="s-dose" value="${c?esc(c.dose||''):''}" placeholder="напр. 5000 МЕ, 1 капсула"></div>
         <div class="field"><label>Время приёма (через запятую)</label><input id="s-times" value="${c?(c.times||[]).join(', '):'09:00'}" placeholder="09:00, 21:00"></div>
         <div class="field"><label>Длительность, дней (0 — бессрочно)</label><input id="s-days" type="number" inputmode="numeric" value="${c?c.days:0}"></div>
@@ -935,7 +1010,7 @@
     window.saveSup = async () => { const b = supBody(); if (!b.name) return tg.showAlert("Введи название"); try { await api("/supplements", { method: "POST", body: JSON.stringify(b) }); } catch (e) { return tg.showAlert("Ошибка"); } openSupplements(); };
     window.editSup = (id) => { const c = supCache.find((x) => x.id === id); if (c) supForm("Изменить курс", c, `saveSupEdit(${id})`); };
     window.saveSupEdit = async (id) => { const b = supBody(); if (!b.name) return tg.showAlert("Введи название"); try { await api(`/supplements/${id}`, { method: "POST", body: JSON.stringify(b) }); } catch (e) { return tg.showAlert("Ошибка"); } openSupplements(); };
-    window.delSup = async (id) => { if (!(await ask("Удалить курс?"))) return; try { await api(`/supplements/${id}`, { method: "DELETE" }); } catch (e) {} openSupplements(); };
+    window.delSup = async (id) => { if (!(await ask("Удалить курс?\nОтметки о приёме тоже пропадут.", { ok: "Удалить", danger: true }))) return; try { await api(`/supplements/${id}`, { method: "DELETE" }); } catch (e) {} openSupplements(); };
 
     const TASK_STAGES = [["open", "Неразобранное"], ["in_progress", "В работе"], ["done", "Выполнено"], ["failed", "Не выполнено"]];
     const T_ED = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg>';
@@ -1185,6 +1260,54 @@
     }
 
     /* ---------- Уведомления ---------- */
+    /* ---------- Кто такая Сара ---------- */
+    // Готовые лица: ссылки на уже загруженные картинки, чтобы не заводить хранилище.
+    const SARA_FACES = [
+      ["Сара", SARA],
+    ];
+
+    window.openSara = () => {
+      haptic();
+      const seg = (key, opts) =>
+        `<div class="seg" style="margin:0">${opts.map(([v, label]) => `<div class="${prefs[key] === v ? "on" : ""}" onclick="setSara('${key}','${v}')">${label}</div>`).join("")}</div>`;
+      const block = (title, body) =>
+        `<div class="card" style="padding:12px;margin-bottom:8px"><div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">${title}</div>${body}</div>`;
+
+      openSheet(`<h3>Кто такая ${esc(prefs.botName || "Сара")}</h3>
+        <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 12px">Имя, лицо и манера общения. Это влияет и на то, как она отвечает в чате.</div>
+        <div style="text-align:center;margin-bottom:14px">
+          <img src="${esc(prefs.avatar || SARA)}" onerror="this.src='${SARA}'" alt=""
+               style="width:96px;height:96px;border-radius:50%;object-fit:cover;border:1px solid var(--border)">
+        </div>
+        ${block("Имя", `<div class="field" style="margin:0"><div class="with-mic"><input id="sara-name" value="${esc(prefs.botName)}" placeholder="Сара" onchange="setSara('botName', this.value)">${micButton("sara-name")}</div></div>`)}
+        ${block("Лицо",
+          `<div class="field" style="margin:0"><label>Ссылка на картинку</label>
+             <input id="sara-ava" value="${esc(prefs.avatar)}" placeholder="https://… (пусто — стандартное лицо)" onchange="setSara('avatar', this.value.trim())">
+             <div style="color:var(--muted);font-size:11.5px;margin-top:6px">Подойдёт любая ссылка на картинку по https. Пустое поле вернёт стандартное лицо.</div>
+           </div>`)}
+        ${block("Манера общения", seg("tone", [["friendly", "Дружелюбно"], ["business", "По-деловому"], ["brief", "Кратко"]]))}
+        ${block("Обращение", seg("address", [["ty", "На «ты»"], ["vy", "На «вы»"]]))}
+        ${block("Эмодзи в ответах",
+          `<label class="check" style="justify-content:space-between;width:100%">
+             <span>Разрешить эмодзи</span>
+             <input type="checkbox" ${prefs.emoji ? "checked" : ""} onchange="setSara('emoji', this.checked)">
+           </label>`)}
+        ${block("Как обращаться ко мне",
+          `<div class="field" style="margin:0"><input id="sara-callme" value="${esc(prefs.callMe)}" placeholder="например, Дмитрий" onchange="setSara('callMe', this.value.trim())"></div>`)}
+        <div class="actions" style="margin-top:4px">
+          <button class="btn" onclick="openProfile()">Что она обо мне знает</button>
+          <button class="btn primary" onclick="closeSheet()">Готово</button>
+        </div>`);
+    };
+
+    window.setSara = (key, value) => {
+      haptic();
+      savePrefs({ [key]: value });
+        const y = sheetBody.scrollTop;
+      openSara();
+      sheetBody.scrollTop = y;
+    };
+
     /* ---------- Настройки ---------- */
     window.openSettings = () => {
       const seg = (key, opts) =>
@@ -1229,11 +1352,7 @@
           `<div class="field" style="margin:8px 0 0"><label>Открывать на экране</label>
              <select onchange="setPref('startTab', this.value)">${startOpts}</select></div>`)}
         ${block("Разделы внизу", `<div style="color:var(--muted);font-size:12px;margin:-4px 0 6px">Лишнее можно убрать из меню — данные останутся.</div>${tabsList}`)}
-        ${block("Обращение",
-          `<div class="field"><label>Как обращаться ко мне</label>
-             <input id="pref-callme" value="${esc(prefs.callMe)}" placeholder="например, Дмитрий" onchange="setPref('callMe', this.value)"></div>
-           <div class="field" style="margin-bottom:0"><label>Имя ассистента</label>
-             <input id="pref-botname" value="${esc(prefs.botName)}" placeholder="Сара" onchange="setPref('botName', this.value)"></div>`)}
+        ${block("Сама Сара", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Имя, лицо и манера общения — на отдельном экране.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(openSara, 180)">Открыть настройки Сары</button>`)}
         <div class="actions" style="margin-top:4px">
           <button class="btn" onclick="resetPrefs()">Сбросить</button>
           <button class="btn primary" onclick="closeSheet()">Готово</button>
@@ -1262,7 +1381,7 @@
       savePrefs({ hidden });
     };
     window.resetPrefs = () => {
-      tg.showConfirm("Вернуть внешний вид по умолчанию?", (ok) => {
+      ask("Вернуть внешний вид по умолчанию?\nЗадачи, встречи и здоровье это не затронет.", { ok: "Сбросить" }).then((ok) => {
         if (!ok) return;
         savePrefs({ ...PREFS_DEFAULT });
         openSettings();
@@ -1470,7 +1589,7 @@
     };
 
     window.removeUser = async (uid) => {
-      if (!(await ask("Отозвать доступ у этого пользователя? Его записи останутся в базе, но войти он больше не сможет."))) return;
+      if (!(await ask("Отозвать доступ?\nЗаписи этого человека останутся в базе, но войти он больше не сможет.", { ok: "Отозвать", danger: true }))) return;
       try { await api(`/admin/users/${uid}`, { method: "DELETE" }); } catch (e) { return tg.showAlert("Ошибка: " + (e.message || e)); }
       renderAdmin();
     };
@@ -1572,21 +1691,48 @@
       setTimeout(() => { const i = $("ai-input"); if (i) i.focus(); }, 150);
     }
     window.aiClear = async () => {
-      if (!(await ask("Очистить переписку с Сарой?"))) return;
+      if (!(await ask("Очистить переписку с Сарой?\nСообщения удалятся, задачи и записи останутся.", { ok: "Очистить", danger: true }))) return;
       haptic(); try { await api("/ai/history", { method: "DELETE" }); } catch (e) {}
       aiHistory = []; aiRenderMessages();
     };
     /* ---------- Голосовой ввод (запись PCM 16кГц → SpeechKit) ---------- */
     let micRec = null;
+    let micTarget = null;          // куда положить распознанное: id поля или "ai"
+
+    const MIC_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>';
+
+    /**
+     * Кнопка диктовки рядом с полем. Ставим её везде, где можно ввести руками:
+     * говорить быстрее, чем печатать, особенно на ходу.
+     * Если распознавание не настроено — кнопки нет, чтобы не обещать лишнего.
+     */
+    function micButton(inputId) {
+      if (!me.voice) return "";
+      return `<button type="button" class="mic-btn" id="mic-${inputId}" aria-label="Надиктовать" onclick="dictate('${inputId}')">${MIC_SVG}</button>`;
+    }
+
+    /** Поле с кнопкой диктовки одной строкой — чтобы не повторять разметку. */
+    function fieldWithMic(inputHtml, inputId) {
+      return `<div class="with-mic">${inputHtml}${micButton(inputId)}</div>`;
+    }
+
+    /** Нажали микрофон у поля: первый раз — пишем, второй — распознаём и вставляем. */
+    window.dictate = async (inputId) => {
+      if (micRec) { await stopDictation(); return; }
+      micTarget = inputId;
+      await startDictation(inputId === "ai" ? $("ai-mic") : $("mic-" + inputId));
+    };
+
     function downsampleTo16k(data, from) {
       if (from <= 16000) return data;
       const ratio = from / 16000, outLen = Math.floor(data.length / ratio), out = new Float32Array(outLen);
       for (let i = 0; i < outLen; i++) out[i] = data[Math.floor(i * ratio)];
       return out;
     }
-    window.toggleMic = async () => {
-      const mic = $("ai-mic");
-      if (micRec) { if (mic) mic.style.color = "var(--muted)"; const bytes = await micRec.stop(); micRec = null; await sendVoice(bytes); return; }
+    window.toggleMic = () => dictate("ai");
+
+    /** Начинаем запись с микрофона. btn — кнопка, которую подсвечиваем красным. */
+    async function startDictation(btn) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -1594,7 +1740,7 @@
         const proc = ac.createScriptProcessor(4096, 1, 1); const buf = [];
         proc.onaudioprocess = (e) => buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
         src.connect(proc); proc.connect(ac.destination);
-        micRec = { stop: async () => {
+        micRec = { btn, stop: async () => {
           proc.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop());
           const rate = ac.sampleRate; await ac.close();
           let len = buf.reduce((s, a) => s + a.length, 0); const flat = new Float32Array(len); let o = 0;
@@ -1603,20 +1749,47 @@
           for (let i = 0; i < ds.length; i++) { const s = Math.max(-1, Math.min(1, ds[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
           return new Uint8Array(i16.buffer);
         } };
-        if (mic) mic.style.color = "#e5484d"; haptic();
-      } catch (e) { tg.showAlert("Микрофон недоступен. Разреши доступ в настройках или используй голос в чате бота."); }
-    };
-    async function sendVoice(bytes) {
-      if (!bytes || bytes.byteLength < 1600) return;
-      const input = $("ai-input"); if (input) input.placeholder = "Распознаю…";
+        if (btn) { btn.classList.add("rec"); btn.style.color = ""; }
+        haptic();
+      } catch (e) {
+        tg.showAlert("Микрофон недоступен. Разреши доступ в настройках или продиктуй голосовым в чате бота.");
+      }
+    }
+
+    /** Останавливаем запись и раскладываем распознанный текст по назначению. */
+    async function stopDictation() {
+      if (!micRec) return;
+      const btn = micRec.btn;
+      if (btn) btn.classList.remove("rec");
+      const bytes = await micRec.stop();
+      micRec = null;
+      if (btn) btn.classList.add("busy");
+      const text = await recognize(bytes);
+      if (btn) btn.classList.remove("busy");
+      if (!text) return;
+      if (micTarget === "ai") { aiSend(text); return; }
+      const input = $(micTarget);
+      if (!input) return;
+      // дописываем, а не затираем: можно надиктовать в несколько приёмов
+      input.value = input.value ? `${input.value.trim()} ${text}` : text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    }
+
+    /** Отправляет запись на распознавание. Возвращает текст или пустую строку. */
+    async function recognize(bytes) {
+      if (!bytes || bytes.byteLength < 1600) return "";
       try {
         const res = await fetch("/api/voice", { method: "POST", headers: AUTH_HEADERS, body: bytes });
         const d = await res.json().catch(() => ({}));
-        if (input) input.placeholder = "Сообщение Саре…";
-        if (res.ok && d.text) aiSend(d.text);
-        else tg.showAlert(d.message || "Не расслышала, попробуй ещё раз ближе к микрофону.");
-      } catch (e) { if (input) input.placeholder = "Сообщение Саре…"; tg.showAlert("Ошибка распознавания."); }
+        if (res.ok && d.text) return d.text;
+        tg.showAlert(d.message || "Не расслышала, попробуй ещё раз ближе к микрофону.");
+      } catch (e) {
+        tg.showAlert("Ошибка распознавания.");
+      }
+      return "";
     }
+
     window.aiSend = async (text) => {
       text = (text || "").trim();
       if (!text || tab !== "ai") return;
@@ -1651,9 +1824,9 @@
     window.setScope = (s) => { taskScope = s; renderTasks(); };
     window.setStage = (s) => { taskStage = s; renderTasks(); };
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
-    window.delTask = async (id) => { if (!(await ask("Удалить задачу?"))) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTab(tab); };
-    window.delEvent = async (id) => { if (!(await ask("Удалить встречу?"))) return; await api(`/events/${id}`, { method: "DELETE" }); renderTab(tab); };
-    window.delContact = async (id) => { if (!(await ask("Удалить контакт?"))) return; await api(`/contacts/${id}`, { method: "DELETE" }); afterContactChange(); };
+    window.delTask = async (id) => { if (!(await ask("Удалить задачу?", { ok: "Удалить", danger: true }))) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTab(tab); };
+    window.delEvent = async (id) => { if (!(await ask("Удалить встречу?", { ok: "Удалить", danger: true }))) return; await api(`/events/${id}`, { method: "DELETE" }); renderTab(tab); };
+    window.delContact = async (id) => { if (!(await ask("Удалить контакт?", { ok: "Удалить", danger: true }))) return; await api(`/contacts/${id}`, { method: "DELETE" }); afterContactChange(); };
 
     /* ---------- Шторки ---------- */
     const sheet = $("sheet"), sheetBody = $("sheet-body");
@@ -1666,20 +1839,49 @@
       const opts = ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)).join("");
       openSheet(`<h3>Новая задача</h3>
         <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">Личная</div></div></div>
-        <div class="field"><label>Что нужно сделать</label><input id="f-title" placeholder="Название задачи"></div>
-        <div class="field"><label>Дедлайн</label><input id="f-due" placeholder="завтра, в пятницу, 15.03 14:00"></div>
+        <div class="field"><label>Что нужно сделать</label>
+          <div class="with-mic"><input id="f-title" placeholder="Название задачи">${micButton("f-title")}</div>
+        </div>
+        <div class="field"><label>Дедлайн</label>
+          <div class="chips" style="margin-bottom:8px">
+            <div class="chip" onclick="dueQuick(0)">Сегодня</div>
+            <div class="chip" onclick="dueQuick(1)">Завтра</div>
+            <div class="chip" onclick="dueQuick(7)">Через неделю</div>
+            <div class="chip" onclick="dueQuick(null)">Без срока</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input id="f-due-date" type="date" style="flex:1.4">
+            <input id="f-due-time" type="time" step="300" style="flex:1" value="10:00">
+          </div>
+        </div>
         <div class="field"><label class="check"><input type="checkbox" id="f-prio">Важная задача</label></div>
         <div class="field" id="f-client-wrap"><label>Клиент</label><select id="f-client">${opts}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTask()">Создать</button></div>`);
+      /** Быстрый выбор дня: 0 — сегодня, 1 — завтра, null — убрать срок. */
+      window.dueQuick = (days) => {
+        haptic();
+        const d = $("f-due-date"), t = $("f-due-time");
+        if (days === null) { d.value = ""; return; }
+        const dt = new Date(); dt.setDate(dt.getDate() + days);
+        d.value = `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())}`;
+        if (!t.value) t.value = "10:00";
+      };
       window.__ts = taskScope;
       window.tsSet = (s) => { window.__ts = s; $("ts-work").classList.toggle("on", s === "work"); $("ts-personal").classList.toggle("on", s === "personal"); $("f-client-wrap").style.display = s === "personal" ? "none" : "block"; };
       tsSet(window.__ts);
     }
     window.saveTask = async () => {
       const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
-      await api("/tasks", { method: "POST", body: JSON.stringify({ title, due: $("f-due").value, scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
+      await api("/tasks", { method: "POST", body: JSON.stringify({ title, due: dueValue(), scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
       closeSheet(); taskScope = window.__ts; switchTab("tasks", true);
     };
+
+    /** Дедлайн из полей формы: «2026-09-28T14:00» или пусто, если день не выбран. */
+    function dueValue() {
+      const d = $("f-due-date"), t = $("f-due-time");
+      if (!d || !d.value) return "";
+      return `${d.value}T${(t && t.value) || "10:00"}`;
+    }
 
     async function ensureClients() { if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} } }
     function clientOptions(sel) { return ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}" ${String(sel) === String(c.id) ? "selected" : ""}>${esc(c.name)}</option>`)).join(""); }
@@ -1687,12 +1889,12 @@
       await ensureClients();
       const tm = me.telemost ? `<div class="field"><label class="check"><input type="checkbox" id="f-tm">🎥 Создать ссылку Телемост</label></div>` : "";
       openSheet(`<h3>Новая встреча</h3>
-        <div class="field"><label>Название</label><input id="f-title" placeholder="Встреча с клиентом"></div>
+        <div class="field"><label>Название</label><div class="with-mic"><input id="f-title" placeholder="Встреча с клиентом">${micButton("f-title")}</div></div>
         <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
         <div class="field"><label>Клиент</label><select id="f-eclient">${clientOptions("")}</select></div>
-        <div class="field"><label>Место</label><input id="f-loc" placeholder="офис / адрес / ссылка"></div>
+        <div class="field"><label>Место</label><div class="with-mic"><input id="f-loc" placeholder="офис / адрес / ссылка">${micButton("f-loc")}</div></div>
         ${tm}
-        <div class="field"><label>Заметки</label><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea></div>
+        <div class="field"><label>Заметки</label><div class="with-mic"><textarea id="f-notes" placeholder="Повестка, ссылки…"></textarea>${micButton("f-notes")}</div></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveEvent()">Создать</button></div>`);
     }
     window.saveEvent = async () => {
@@ -1707,7 +1909,7 @@
 
     function contactSheet(title, c, saveCall) {
       openSheet(`<h3>${title}</h3>
-        <div class="field"><label>Имя</label><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Имя Фамилия"></div>
+        <div class="field"><label>Имя</label><div class="with-mic"><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Имя Фамилия">${micButton("f-name")}</div></div>
         <div class="field"><label>День рождения</label><input id="f-bd" type="date" value="${c && c.birthday && c.birthday.length === 10 ? esc(c.birthday) : ''}"></div>
         <div class="field"><label>Телефон / контакт</label><input id="f-phone" value="${c ? esc(c.phone||'') : ''}" placeholder="+7… / @ник"></div>
         <div class="field"><label>Теги (через запятую)</label><input id="f-tags" value="${c ? esc(c.tags||'') : ''}" placeholder="клиент, друг, партнёр, VIP"></div>
@@ -1795,7 +1997,7 @@
     /* Клиенты */
     function clientSheet(title, c, saveCall) {
       openSheet(`<h3>${title}</h3>
-        <div class="field"><label>Название</label><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Компания / проект"></div>
+        <div class="field"><label>Название</label><div class="with-mic"><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Компания / проект">${micButton("f-name")}</div></div>
         <div class="field"><label>Площадки / услуги</label><input id="f-plat" value="${c ? esc(c.platforms||'') : ''}" placeholder="Директ, VK, сайт"></div>
         <div class="field"><label>Рекламный бюджет</label><input id="f-budget" value="${c ? esc(c.budget||'') : ''}" placeholder="напр. 100 000 ₽/мес"></div>
         <div class="field"><label>Сумма за ведение</label><input id="f-pay" value="${c ? esc(c.pay_amount||'') : ''}" placeholder="напр. 30 000 ₽/мес"></div>
@@ -1820,7 +2022,7 @@
       closeSheet(); renderClients();
     };
     window.toggleClient = async (id, status) => { haptic(); await api(`/clients/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderClients(); };
-    window.delClient = async (id) => { if (!(await ask("Удалить клиента?"))) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
+    window.delClient = async (id) => { if (!(await ask("Удалить клиента?\nЗадачи и встречи клиента останутся, но потеряют привязку.", { ok: "Удалить", danger: true }))) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
 
     $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "health") openFoodAdd(); else if (tab === "clients") openAddClient(); };
     function updateFab() { $("fab").style.display = ["tasks", "calendar", "health", "clients"].includes(tab) ? "flex" : "none"; }
@@ -2002,7 +2204,6 @@
 
     /** Экран входа: код из чата с ботом. */
     function renderLogin(note) {
-      $("subtitle").textContent = "Знакомимся";
       view.innerHTML = `
         <div class="card" style="padding:18px;text-align:center">
           <img src="${SARA}" alt="" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
@@ -2058,11 +2259,7 @@
           localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
           applyPrefs();
         } catch (e) {}
-        const name = prefs.callMe || tg.initDataUnsafe?.user?.first_name || "";
-        const hour = new Date().getHours();
-        const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
-        $("greeting").textContent = `${hi}${name ? ", " + name : ""}`;
-        $("subtitle").textContent = me.role === "owner" ? "Личный ассистент" : me.role === "member" ? "Команда" : "Личный аккаунт";
+        applyGreeting();
         if (me.role === "owner") $("admin-btn").style.display = "";
         // Личный аккаунт — без клиентской базы владельца
         if (me.role === "client") {
@@ -2082,8 +2279,7 @@
           if (await tryAutoLogin()) return;
           renderLogin("");
         } else {
-          $("subtitle").textContent = "Нет доступа";
-          view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
+              view.innerHTML = emptyBox("Нет доступа", "Открой приложение из своего бота и получи доступ у владельца.");
         }
         return;
       }
