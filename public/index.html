@@ -411,7 +411,6 @@
         toast("Настройки применены, но не сохранились на сервере");
       }
     }
-    applyPrefs();
 
     /* ---------- Состояние ---------- */
     let tab = "home";
@@ -425,6 +424,10 @@
     let me = {};
     let sheetOpen = false;
     const navStack = ["home"];
+
+    // Настройки применяем здесь, а не раньше: applyHiddenTabs читает tab,
+    // и вызов до объявления состояния ронял всё приложение.
+    applyPrefs();
 
     /* ---------- API ---------- */
     async function api(path, opts = {}) {
