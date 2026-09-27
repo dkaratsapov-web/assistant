@@ -369,3 +369,11 @@ export function nextDue(rule: string, fromIso: string, tz: number): string | nul
   }
   return new Date(next.getTime() - tz * 3600_000).toISOString();
 }
+
+/** Байты картинки в base64 — для мультимодальных запросов к модели. */
+export function bytesToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}

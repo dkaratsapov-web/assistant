@@ -10,10 +10,10 @@
  * Доступ такой же, как в Telegram: новый пользователь попадает в `pending`,
  * владелец подтверждает роль кнопкой.
  */
-import { aiConfig, askAIChat, ChatMessage } from "../ai";
+import { aiConfig, askAIChat, ChatMessage, estimateNutritionFromImage, visionEnabled } from "../ai";
 import { lookupWeb } from "../search";
 import { DB } from "../db";
-import { tryPerformCommand } from "../intent";
+import { MEAL_RU, tryPerformCommand } from "../intent";
 import { buildDigest } from "../reports";
 import { sttKey, transcribeVoice } from "../speech";
 import {
@@ -29,7 +29,7 @@ import {
   TASK_STATUS_LABELS,
   User,
 } from "../types";
-import { formatDue, parseDue, tzOffsetOf } from "../utils";
+import { formatDue, mealByHour, mealFromText, parseDue, tzOffsetOf } from "../utils";
 import {
   onboardingAnswer,
   onboardingDone,
@@ -37,6 +37,7 @@ import {
   onboardingState,
   OnbQuestion,
 } from "../onboarding";
+import { bytesToBase64 } from "../utils";
 import { CHANNEL_MAX, maxUid } from "./ids";
 import { MaxButton, MaxClient, MaxUpdate } from "./client";
 
@@ -50,6 +51,8 @@ const HELP = `🤖 Сара — команды в MAX:
 /setup — пройти знакомство заново
 /ai <запрос> — спросить ИИ
 /help — помощь
+
+Пришли фото тарелки — посчитаю калории по нему.
 
 Можно просто писать словами: «напомни завтра отправить отчёт», «встреча с клиентом
 в пятницу в 15:00», «съел борщ», «выпил 300 мл». Голосовые тоже понимаю.
@@ -108,6 +111,7 @@ function extract(update: MaxUpdate): {
   name?: string;
   username?: string;
   audioUrl?: string;
+  imageUrl?: string;
   callbackId?: string;
   callbackPayload?: string;
 } {
@@ -124,7 +128,10 @@ function extract(update: MaxUpdate): {
       callbackPayload: update.callback?.payload,
     };
   }
-  const audio = (update.message?.body?.attachments ?? []).find((a) => a.type === "audio");
+  const attachments = update.message?.body?.attachments ?? [];
+  const audio = attachments.find((a) => a.type === "audio");
+  // фото еды: в MAX вложение приходит ссылкой, забираем её и отдаём модели
+  const image = attachments.find((a) => a.type === "image" || a.type === "photo");
   return {
     senderId: update.message?.sender?.user_id,
     chatId: update.message?.recipient?.chat_id,
@@ -132,6 +139,7 @@ function extract(update: MaxUpdate): {
     name: update.message?.sender?.name,
     username: update.message?.sender?.username,
     audioUrl: audio?.payload?.url,
+    imageUrl: image?.payload?.url,
   };
 }
 
@@ -142,7 +150,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   const tz = tzOffsetOf(env);
   const ai = aiConfig(env);
 
-  const { senderId, chatId, text, name, username, audioUrl, callbackId, callbackPayload } = extract(update);
+  const { senderId, chatId, text, name, username, audioUrl, imageUrl, callbackId, callbackPayload } = extract(update);
   if (!senderId && !chatId) return;
   const reply = async (t: string, kb?: MaxButton[][]) => {
     const to = { chatId: chatId ?? undefined, userId: chatId ? undefined : senderId };
@@ -385,6 +393,29 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       return void (await reply(v.text, v.keyboard));
     }
     return void (await reply("Привет! Что нужно не забыть?", mainMenu(await appButtons())));
+  }
+
+  // ===== Фото еды =====
+  if (imageUrl) {
+    if (!ai) return void (await reply("ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
+    if (!visionEnabled(ai)) {
+      return void (await reply("Разбор фото пока не подключён — нужна мультимодальная модель (переменная YANDEX_VISION_MODEL).\nОпиши блюдо словами, и я посчитаю: например «съел борщ с хлебом»."));
+    }
+    await reply("📷 Смотрю, что на тарелке…");
+    try {
+      const resp = await fetch(imageUrl);
+      const bytes = await resp.arrayBuffer();
+      const mediaType = resp.headers.get("content-type") || "image/jpeg";
+      const caption = (text ?? "").trim();
+      const n = await estimateNutritionFromImage(ai, bytesToBase64(bytes), mediaType, caption);
+      if (!n) return void (await reply("Не смогла разобрать еду на фото 🤔 Опиши словами — посчитаю."));
+      const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
+      const meal = mealFromText(caption) || mealByHour(localHour);
+      await db.addFood(uid, { ...n, meal });
+      return void (await reply(`🍽 Записала (${MEAL_RU[meal]}) по фото: ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`));
+    } catch (e) {
+      return void (await reply(`⚠️ Не получилось обработать фото: ${(e as Error).message}`));
+    }
   }
 
   // ===== Голосовое сообщение =====

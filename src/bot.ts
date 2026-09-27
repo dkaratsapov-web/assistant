@@ -23,15 +23,8 @@ import {
   TASK_STATUS_LABELS,
   User,
 } from "./types";
-import { escapeHtml, extractTags, formatDue, mealByHour, mealFromText, parseDue, platformsToText, tzOffsetOf } from "./utils";
+import { bytesToBase64, escapeHtml, extractTags, formatDue, mealByHour, mealFromText, parseDue, platformsToText, tzOffsetOf } from "./utils";
 
-function bytesToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-  return btoa(bin);
-}
 
 export type MyContext = Context & {
   db: DB;

@@ -236,7 +236,7 @@ npm run typecheck                # проверка типов (её же гон
 |---|---|---|
 | `YANDEX_GPT_MODEL` | `yandexgpt/latest` | основная модель ИИ |
 | `YANDEX_GPT_ROUTER_MODEL` | `yandexgpt-lite/latest` | дешёвая модель для разбора команд |
-| `YANDEX_VISION_MODEL` | — | мультимодальная модель для фото еды (пусто — выключено) |
+| `YANDEX_VISION_MODEL` | — | мультимодальная модель для фото еды (пусто — разбор фото выключен и в чате, и в приложении) |
 | `YANDEX_FOLDER_ID` | — | каталог Yandex Cloud (можно задать секретом) |
 | `YANDEX_STT_API_KEY` | — | отдельный ключ для распознавания речи; нужен, если у API-ключа одна область действия |
 | `YANDEX_SEARCH_API_KEY` | — | ключ Yandex Search API; пусто — берётся общий ключ |

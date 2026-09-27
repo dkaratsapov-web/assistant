@@ -1,4 +1,7 @@
-import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutrition, estimateBurn } from "./ai";
+import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutrition, estimateBurn,
+  estimateNutritionFromImage,
+  visionEnabled,
+} from "./ai";
 import { DB } from "./db";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
@@ -25,7 +28,7 @@ import {
   AppPrefs,
 } from "./types";
 import { lookupWeb } from "./search";
-import { nowContext } from "./utils";
+import { bytesToBase64, nowContext } from "./utils";
 import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
@@ -181,7 +184,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
-    return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(sttKey(env) && env.YANDEX_FOLDER_ID) });
+    return json({ user_id: uid, role: user.role, channel: user.channel ?? "tg", telemost: await telemostConnected(db), voice: !!(sttKey(env) && env.YANDEX_FOLDER_ID), vision: visionEnabled(aiConfig(env)) });
   }
 
   // ---------- Админка владельца ----------
@@ -806,6 +809,30 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return json({ ok: true });
     } catch (e) {
       return json({ error: "connect_failed", message: (e as Error).message }, 502);
+    }
+  }
+
+  // POST /api/health/food/photo — оценить блюдо по фотографии
+  if (path === "/api/health/food/photo" && request.method === "POST") {
+    const ai = aiConfig(env);
+    if (!ai) return json({ error: "ai_not_configured", message: "ИИ не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID." }, 400);
+    if (!visionEnabled(ai)) {
+      return json({ error: "vision_not_configured", message: "Разбор фото не подключён: нужна мультимодальная модель в переменной YANDEX_VISION_MODEL." }, 400);
+    }
+    const mediaType = request.headers.get("content-type") || "image/jpeg";
+    const bytes = await request.arrayBuffer();
+    if (!bytes || bytes.byteLength < 2000) return json({ error: "empty_image" }, 400);
+    // 6 МБ — больше в подсказку не влезет, да и телефон столько не снимет в норме
+    if (bytes.byteLength > 6_000_000) return json({ error: "too_big", message: "Фото слишком большое, попробуй ещё раз." }, 413);
+    const caption = url.searchParams.get("caption") ?? "";
+    try {
+      const n = await estimateNutritionFromImage(ai, bytesToBase64(bytes), mediaType, caption);
+      if (!n) return json({ error: "not_food", message: "Не смогла разобрать еду на фото. Опиши словами — посчитаю." }, 422);
+      const meal = mealFromText(caption) || mealByHour(new Date(Date.now() + tz * 3600_000).getUTCHours());
+      const id = await db.addFood(uid, { ...n, meal });
+      return json({ ok: true, id, meal, ...n });
+    } catch (e) {
+      return json({ error: "vision_failed", message: (e as Error).message }, 502);
     }
   }
 
