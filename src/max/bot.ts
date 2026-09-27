@@ -531,6 +531,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       `последний отказ платформы:\n${(await db.getSetting("max_kb_error")) || "нет"}`,
       await bridgeLine(),
       await clientErrorsLine(),
+      `поля подписи мини-приложения: ${(await db.getSetting("max_initdata_keys")) || "не приходила"}`,
     ];
     return void (await reply(lines.join("\n")));
   }

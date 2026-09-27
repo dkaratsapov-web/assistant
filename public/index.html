@@ -2399,14 +2399,18 @@
     /** Пробуем войти по подписи мини-приложения. true — вошли, страница перезагрузится. */
     async function tryBridgeLogin() {
       const raw = bridgeInitData();
-      if (!raw) return false;
+      if (!raw) { lastAuthError = "подписи нет"; return false; }
       try {
         const res = await fetch("/api/auth/max", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ initData: raw }),
         });
-        if (!res.ok) return false;
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          lastAuthError = `${res.status} ${e.error || ""} ${e.message || ""}`.trim();
+          return false;
+        }
         const d = await res.json();
         if (!d.token) return false;
         await saveSession(d.token);
@@ -2440,17 +2444,22 @@
     }
 
     /** Что страница увидела при запуске — по этим строкам налаживается вход без кодов. */
+    let lastAuthError = "";
     function showLoginDiag() {
       const el = $("login-diag");
       if (!el) return;
       const scan = bridgeScan();
+      // Поля подписи печатаем каждое со своей строки: в одну строку их обрезало
+      // по ширине экрана, и именно нужного поля было не видно.
+      const keys = scan.initKeys ? scan.initKeys.split(",") : [];
       el.textContent = [
         "мосты: " + (Object.keys(scan.bridges).join(", ") || "нет"),
-        "подпись: " + (scan.initData ? scan.initData.length + " симв. [" + scan.initKeys + "]" : "нет"),
-        "токен: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
-        "параметры: " + (Object.keys(scan.params).join(", ") || "нет"),
-        "хеш: " + (scan.hash ? scan.hash.slice(0, 60) : "нет"),
-      ].join("\n");
+        "подпись: " + (scan.initData ? scan.initData.length + " симв." : "нет"),
+        keys.length ? "  поля: " + keys.join(" · ") : "",
+        "токен из кнопки: " + (scan.startParam ? scan.startParam.length + " симв." : "нет"),
+        "параметры адреса: " + (Object.keys(scan.params).join(", ") || "нет"),
+        lastAuthError ? "ответ сервера: " + lastAuthError : "",
+      ].filter(Boolean).join("\n");
     }
 
     window.openBotChat = () => {

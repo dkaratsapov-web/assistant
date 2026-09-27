@@ -32,10 +32,12 @@ export async function validateMaxInitData(
 ): Promise<MaxWebAppUser | null> {
   if (!initData || !botToken) return null;
   const params = new URLSearchParams(initData);
-  const received = (params.get("hash") ?? params.get("signature") ?? "").toLowerCase();
+  // Поле подписи у MAX официально не описано — перебираем известные имена
+  const SIGN_FIELDS = ["hash", "signature", "sign", "sig"];
+  const signField = SIGN_FIELDS.find((f) => params.get(f));
+  const received = (signField ? params.get(signField) ?? "" : "").toLowerCase();
   if (!received) return null;
-  params.delete("hash");
-  params.delete("signature");
+  for (const f of SIGN_FIELDS) params.delete(f);
 
   const dcs = [...params.keys()]
     .sort()
@@ -44,6 +46,8 @@ export async function validateMaxInitData(
 
   const candidates: (ArrayBuffer | Uint8Array)[] = [
     await hmac(enc.encode("WebAppData"), botToken), // как в Telegram
+    await hmac(enc.encode("WebAppMax"), botToken),
+    await hmac(enc.encode(botToken), "WebAppData"), // обратная производная
     await crypto.subtle.digest("SHA-256", enc.encode(botToken)),
     enc.encode(botToken),
   ];

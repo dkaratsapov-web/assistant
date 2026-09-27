@@ -150,8 +150,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/auth/max {initData} — вход внутри мини-приложения MAX по подписи
   if (path === "/api/auth/max" && request.method === "POST") {
     const body = (await request.json().catch(() => ({}))) as { initData?: string };
-    const mu = await validateMaxInitData(body.initData ?? "", env.MAX_BOT_TOKEN ?? "");
-    if (!mu) return json({ error: "bad_signature" }, 401);
+    const raw = body.initData ?? "";
+    const mu = await validateMaxInitData(raw, env.MAX_BOT_TOKEN ?? "");
+    if (!mu) {
+      // Состав подписи сохраняем: по нему видно, чем её вообще можно проверить
+      const keys = [...new URLSearchParams(raw).keys()].join(",");
+      await db.setSetting("max_initdata_keys", `${new Date().toISOString()} ${keys}`);
+      return json({ error: "bad_signature", message: `поля подписи: ${keys || "нет"}` }, 401);
+    }
     const muid = maxUid(mu.id);
     const mUser = await db.ensureChannelUser(muid, CHANNEL_MAX, mu.id, mu.username ?? null, mu.name ?? null);
     if (mUser.role === ROLE_PENDING) return json({ error: "no_access" }, 403);
