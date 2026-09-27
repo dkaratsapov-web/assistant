@@ -1,5 +1,7 @@
 import {
   ActivityRow,
+  AppPrefs,
+  DEFAULT_PREFS,
   Client,
   Contact,
   Event,
@@ -907,6 +909,26 @@ export class DB {
 
   async setNotif(userId: number, s: NotifSettings): Promise<void> {
     await this.setSetting(`notif:${userId}`, JSON.stringify(s));
+  }
+
+  // ---------- Внешний вид приложения (на пользователя) ----------
+  async getPrefs(userId: number): Promise<AppPrefs> {
+    const raw = await this.getSetting(`prefs:${userId}`);
+    if (!raw) return { ...DEFAULT_PREFS };
+    try {
+      const p = JSON.parse(raw) as Partial<AppPrefs>;
+      return {
+        ...DEFAULT_PREFS,
+        ...p,
+        hidden: Array.isArray(p.hidden) ? p.hidden.filter((x) => typeof x === "string").slice(0, 8) : [],
+      };
+    } catch {
+      return { ...DEFAULT_PREFS };
+    }
+  }
+
+  async setPrefs(userId: number, p: AppPrefs): Promise<void> {
+    await this.setSetting(`prefs:${userId}`, JSON.stringify(p));
   }
 
   // ---------- Здоровье: питание и вода ----------

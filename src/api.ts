@@ -22,6 +22,7 @@ import {
   TASK_FAILED,
   TASK_IN_PROGRESS,
   TASK_OPEN,
+  AppPrefs,
 } from "./types";
 import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
@@ -398,6 +399,32 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   // ---------- Настройки уведомлений ----------
+  // GET/POST /api/prefs — внешний вид приложения под себя
+  if (path === "/api/prefs" && request.method === "GET") {
+    return json(await db.getPrefs(uid));
+  }
+  if (path === "/api/prefs" && request.method === "POST") {
+    const b = (await request.json().catch(() => ({}))) as Partial<AppPrefs>;
+    const cur = await db.getPrefs(uid);
+    const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T =>
+      typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;
+    const next: AppPrefs = {
+      scale: Math.min(140, Math.max(85, Math.round(Number(b.scale ?? cur.scale)) || cur.scale)),
+      density: oneOf(b.density, ["compact", "normal", "roomy"] as const, cur.density),
+      images: oneOf(b.images, ["small", "normal", "large"] as const, cur.images),
+      corners: oneOf(b.corners, ["sharp", "normal", "soft"] as const, cur.corners),
+      theme: oneOf(b.theme, ["auto", "light", "dark"] as const, cur.theme),
+      motion: typeof b.motion === "boolean" ? b.motion : cur.motion,
+      haptic: typeof b.haptic === "boolean" ? b.haptic : cur.haptic,
+      startTab: oneOf(b.startTab, ["home", "tasks", "calendar", "health", "clients", "ai"] as const, cur.startTab as "home"),
+      hidden: Array.isArray(b.hidden) ? b.hidden.filter((x): x is string => typeof x === "string").slice(0, 8) : cur.hidden,
+      callMe: typeof b.callMe === "string" ? b.callMe.trim().slice(0, 40) : cur.callMe,
+      botName: typeof b.botName === "string" && b.botName.trim() ? b.botName.trim().slice(0, 24) : cur.botName,
+    };
+    await db.setPrefs(uid, next);
+    return json(next);
+  }
+
   if (path === "/api/notifications" && request.method === "GET") {
     return json(await db.getNotif(uid));
   }

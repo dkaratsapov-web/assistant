@@ -22,11 +22,20 @@
       --fg-contrast: #ffffff;   /* текст на --fg */
       --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
       --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
-      --radius: 14px;
-      --radius-sm: 10px;
+      --radius: calc(14px * var(--corner-k, 1));
+      --radius-sm: calc(10px * var(--corner-k, 1));
       --nav-h: 54px;
-      /* Шаг сетки: всё вертикальное расстояние кратно 4 */
-      --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px;
+      /* Шаг сетки: всё вертикальное расстояние кратно 4, множитель — из настроек */
+      --dens-k: 1;
+      --s1: calc(4px * var(--dens-k)); --s2: calc(8px * var(--dens-k));
+      --s3: calc(12px * var(--dens-k)); --s4: calc(16px * var(--dens-k));
+      --s5: calc(20px * var(--dens-k));
+      /* Размер картинок и аватаров */
+      --img-k: 1;
+    }
+    /* Настройки: «поменьше движения» выключает переливы и переходы целиком */
+    :root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after {
+      animation: none !important; transition: none !important;
     }
     :root[data-theme="dark"] {
       --bg: #0a0a0b;
@@ -59,7 +68,7 @@
     /* Header */
     header { padding: 12px 14px 4px; }
     .hrow { display: flex; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto; }
-    .avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none;
+    .avatar { width: calc(36px * var(--img-k)); height: calc(36px * var(--img-k)); border-radius: 50%; object-fit: cover; flex: none;
       border: 1px solid var(--border); background: var(--surface-2); }
     .hello { flex: 1; min-width: 0; }
     .hello { min-width: 0; }
@@ -136,7 +145,7 @@
     .btn.sm { flex: 0 0 auto; padding: 9px 16px; }
 
     .empty { text-align: center; padding: 32px 16px; color: var(--muted); }
-    .empty img { width: 96px; height: 96px; object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
+    .empty img { width: calc(96px * var(--img-k)); height: calc(96px * var(--img-k)); object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
     .empty .big { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -.02em; }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-weight: 500; }
 
@@ -194,6 +203,11 @@
       background: var(--surface-2); color: var(--text); font-size: 15px; outline: none; transition: border-color .15s ease; }
     .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--border-strong); }
     .field select option { color: #111; background: #fff; }  /* читаемо в нативном меню при любой теме */
+    input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--surface-2); outline: none; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+      background: var(--fg); border: 3px solid var(--surface); box-shadow: var(--shadow-sm); cursor: pointer; }
+    input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--surface);
+      background: var(--fg); box-shadow: var(--shadow-sm); cursor: pointer; }
     .field textarea { resize: vertical; min-height: 56px; }
     .check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--fg); }
@@ -230,6 +244,7 @@
       </div>
       <button class="icon-btn" id="notif-btn" aria-label="Уведомления" onclick="openNotif()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
       <button class="icon-btn" id="admin-btn" aria-label="Доступы" style="display:none" onclick="openAdmin()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M17 8v6M14 11h6"/></svg></button>
+      <button class="icon-btn" id="prefs-btn" aria-label="Настройки" onclick="openSettings()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H2.8a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V2.8a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></button>
       <button class="icon-btn" id="theme-btn" aria-label="Тема"></button>
     </div>
   </header>
@@ -320,7 +335,7 @@
     // Надёжное подтверждение (в Telegram window.confirm часто не работает)
     const ask = (msg) => new Promise((res) => { try { if (tg.showConfirm) { tg.showConfirm(msg, (ok) => res(!!ok)); return; } } catch (e) {} res(typeof confirm === "function" ? confirm(msg) : true); });
     const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    const haptic = (t = "light") => { try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
+    const haptic = (t = "light") => { if (prefs && !prefs.haptic) return; try { tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
     $("avatar").src = SARA;
 
     /* ---------- Тема ---------- */
@@ -334,9 +349,69 @@
       try { tg.setHeaderColor(bg); tg.setBackgroundColor(bg); } catch (e) {}
       localStorage.setItem(THEME_KEY, t);
     }
-    let theme = localStorage.getItem(THEME_KEY) || tg.colorScheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const systemTheme = () => tg.colorScheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    let theme = localStorage.getItem(THEME_KEY) || systemTheme();
     applyTheme(theme);
-    $("theme-btn").onclick = () => { haptic(); theme = theme === "dark" ? "light" : "dark"; applyTheme(theme); };
+    $("theme-btn").onclick = () => {
+      haptic();
+      theme = theme === "dark" ? "light" : "dark";
+      applyTheme(theme);
+      // ручное переключение перебивает «как в системе»
+      if (prefs.theme !== theme) savePrefs({ theme });
+    };
+
+    /* ---------- Настройки внешнего вида ---------- */
+    const PREFS_KEY = "sara-prefs";
+    const PREFS_DEFAULT = {
+      scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto",
+      motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара",
+    };
+    // из памяти устройства — чтобы применить до ответа сервера и не мигать
+    let prefs = (() => {
+      try { return { ...PREFS_DEFAULT, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") }; }
+      catch (e) { return { ...PREFS_DEFAULT }; }
+    })();
+
+    const DENS_K = { compact: 0.8, normal: 1, roomy: 1.25 };
+    const IMG_K = { small: 0.75, normal: 1, large: 1.35 };
+    const CORNER_K = { sharp: 0.35, normal: 1, soft: 1.6 };
+    const TAB_NAMES = { home: "Главная", tasks: "Задачи", calendar: "Календарь", health: "Здоровье", clients: "Клиенты", ai: "Сара" };
+
+    /** Раскладывает настройки по переменным темы — вся вёрстка уже на них держится. */
+    function applyPrefs() {
+      const root = document.documentElement;
+      root.style.setProperty("--dens-k", DENS_K[prefs.density] ?? 1);
+      root.style.setProperty("--img-k", IMG_K[prefs.images] ?? 1);
+      root.style.setProperty("--corner-k", CORNER_K[prefs.corners] ?? 1);
+      root.style.zoom = (prefs.scale || 100) / 100;          // масштаб всего интерфейса
+      root.setAttribute("data-motion", prefs.motion ? "on" : "off");
+      const want = prefs.theme === "auto" ? systemTheme() : prefs.theme;
+      if (want !== theme) { theme = want; applyTheme(theme); }
+      applyHiddenTabs();
+    }
+
+    /** Прячет разделы, которые человек отключил, но никогда — тот, где он сейчас. */
+    function applyHiddenTabs() {
+      document.querySelectorAll(".nav a").forEach((a) => {
+        const hide = prefs.hidden.includes(a.dataset.tab) && a.dataset.tab !== tab;
+        a.style.display = hide ? "none" : "";
+      });
+    }
+
+    /** Сохраняем: сразу на устройство (мгновенно) и на сервер (чтобы жило на всех). */
+    async function savePrefs(patch) {
+      prefs = { ...prefs, ...patch };
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+      applyPrefs();
+      try {
+        const saved = await api("/prefs", { method: "POST", body: JSON.stringify(prefs) });
+        prefs = { ...prefs, ...saved };
+        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+      } catch (e) {
+        toast("Настройки применены, но не сохранились на сервере");
+      }
+    }
+    applyPrefs();
 
     /* ---------- Состояние ---------- */
     let tab = "home";
@@ -1058,6 +1133,90 @@
     }
 
     /* ---------- Уведомления ---------- */
+    /* ---------- Настройки ---------- */
+    window.openSettings = () => {
+      const seg = (key, opts) =>
+        `<div class="seg" style="margin:0">${opts
+          .map(([v, label]) => `<div class="${prefs[key] === v ? "on" : ""}" onclick="setPref('${key}','${v}')">${label}</div>`)
+          .join("")}</div>`;
+      const toggle = (key, label, hint) =>
+        `<label class="check" style="justify-content:space-between;width:100%;align-items:flex-start">
+           <span><span style="font-weight:600">${label}</span>${hint ? `<br><span style="color:var(--muted);font-size:12px">${hint}</span>` : ""}</span>
+           <input type="checkbox" ${prefs[key] ? "checked" : ""} onchange="setPref('${key}', this.checked)">
+         </label>`;
+      const block = (title, body) =>
+        `<div class="card" style="padding:12px;margin-bottom:8px">
+           <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">${title}</div>${body}
+         </div>`;
+      const tabsList = ["home", "tasks", "calendar", "health", "clients", "ai"]
+        .filter((t) => t !== "clients" || me.role !== "client")
+        .map((t) => `<label class="check" style="justify-content:space-between;width:100%">
+             <span>${TAB_NAMES[t]}</span>
+             <input type="checkbox" ${prefs.hidden.includes(t) ? "" : "checked"} ${t === "home" ? "disabled" : ""} onchange="toggleTab('${t}', this.checked)">
+           </label>`).join("");
+      const startOpts = ["home", "tasks", "calendar", "health", "ai"]
+        .map((t) => `<option value="${t}" ${prefs.startTab === t ? "selected" : ""}>${TAB_NAMES[t]}</option>`).join("");
+
+      openSheet(`<h3>Настройки</h3>
+        <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Меняется сразу — можно крутить и смотреть. Настройки свои у каждого аккаунта.</div>
+        ${block("Размер интерфейса",
+          `<div style="display:flex;align-items:center;gap:10px">
+             <span style="font-size:13px;color:var(--muted)">А</span>
+             <input type="range" min="85" max="130" step="5" value="${prefs.scale}" style="flex:1"
+                    oninput="previewScale(this.value)" onchange="setPref('scale', +this.value)">
+             <span style="font-size:19px;color:var(--muted)">А</span>
+             <span id="scale-val" style="width:46px;text-align:right;font-weight:700">${prefs.scale}%</span>
+           </div>`)}
+        ${block("Плотность", seg("density", [["compact", "Плотно"], ["normal", "Обычно"], ["roomy", "Просторно"]]))}
+        ${block("Картинки и аватары", seg("images", [["small", "Мельче"], ["normal", "Обычные"], ["large", "Крупнее"]]))}
+        ${block("Скругления", seg("corners", [["sharp", "Острые"], ["normal", "Обычные"], ["soft", "Мягкие"]]))}
+        ${block("Оформление", seg("theme", [["auto", "Как в системе"], ["light", "Светлая"], ["dark", "Тёмная"]]))}
+        ${block("Поведение",
+          toggle("motion", "Анимации", "Переливы и плавные переходы") +
+          toggle("haptic", "Отклик вибрацией", "Короткая вибрация на нажатия") +
+          `<div class="field" style="margin:8px 0 0"><label>Открывать на экране</label>
+             <select onchange="setPref('startTab', this.value)">${startOpts}</select></div>`)}
+        ${block("Разделы внизу", `<div style="color:var(--muted);font-size:12px;margin:-4px 0 6px">Лишнее можно убрать из меню — данные останутся.</div>${tabsList}`)}
+        ${block("Обращение",
+          `<div class="field"><label>Как обращаться ко мне</label>
+             <input id="pref-callme" value="${esc(prefs.callMe)}" placeholder="например, Дмитрий" onchange="setPref('callMe', this.value)"></div>
+           <div class="field" style="margin-bottom:0"><label>Имя ассистента</label>
+             <input id="pref-botname" value="${esc(prefs.botName)}" placeholder="Сара" onchange="setPref('botName', this.value)"></div>`)}
+        <div class="actions" style="margin-top:4px">
+          <button class="btn" onclick="resetPrefs()">Сбросить</button>
+          <button class="btn primary" onclick="closeSheet()">Готово</button>
+        </div>`);
+    };
+
+    /** Ползунок масштаба: показываем результат прямо во время перетаскивания. */
+    window.previewScale = (v) => {
+      document.documentElement.style.zoom = +v / 100;
+      const el = $("scale-val"); if (el) el.textContent = v + "%";
+    };
+    window.setPref = (key, value) => {
+      haptic();
+      savePrefs({ [key]: value });
+      // переключатели надо перерисовать, но экран не должен прыгать к началу
+      if (["density", "images", "corners", "theme"].includes(key)) {
+        const y = sheetBody.scrollTop;
+        openSettings();
+        sheetBody.scrollTop = y;
+      }
+    };
+    window.toggleTab = (t, visible) => {
+      haptic();
+      const hidden = prefs.hidden.filter((x) => x !== t);
+      if (!visible) hidden.push(t);
+      savePrefs({ hidden });
+    };
+    window.resetPrefs = () => {
+      tg.showConfirm("Вернуть внешний вид по умолчанию?", (ok) => {
+        if (!ok) return;
+        savePrefs({ ...PREFS_DEFAULT });
+        openSettings();
+      });
+    };
+
     window.openNotif = async () => {
       openSheet(`<h3>Уведомления</h3><div id="notif-body"><div class="loading">Загрузка…</div></div>`);
       try {
@@ -1840,7 +1999,14 @@
     (async () => {
       try {
         me = await api("/me");
-        const name = tg.initDataUnsafe?.user?.first_name || "";
+        // настройки аккаунта: локальные уже применены, теперь забираем серверные
+        try {
+          const saved = await api("/prefs");
+          prefs = { ...prefs, ...saved };
+          localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+          applyPrefs();
+        } catch (e) {}
+        const name = prefs.callMe || tg.initDataUnsafe?.user?.first_name || "";
         const hour = new Date().getHours();
         const hi = hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
         $("greeting").textContent = `${hi}${name ? ", " + name : ""}`;
@@ -1850,6 +2016,12 @@
         if (me.role === "client") {
           const cl = document.querySelector('.nav a[data-tab="clients"]');
           if (cl) cl.remove();
+        }
+        // имя ассистента: в шапке, в нижнем меню и в заголовке вкладки
+        if (prefs.botName && prefs.botName !== "Сара") {
+          const navAi = document.querySelector('.nav a[data-tab="ai"]');
+          if (navAi) navAi.lastChild.textContent = prefs.botName;
+          TAB_NAMES.ai = prefs.botName;
         }
       } catch (e) {
         const m = String(e.message || e);
@@ -1863,7 +2035,11 @@
         }
         return;
       }
-      renderTab("home"); updateBack();
+      // открываем тот экран, который выбран в настройках
+      const start = prefs.hidden.includes(prefs.startTab) ? "home" : prefs.startTab;
+      tab = start; navStack.length = 0; navStack.push(start);
+      applyHiddenTabs();
+      renderTab(start); updateBack();
     })();
   </script>
 </body>

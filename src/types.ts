@@ -198,3 +198,32 @@ export interface Contact {
   reminded_year: number | null;
   created_at: string;
 }
+
+/** Настройки внешнего вида и поведения приложения — у каждого аккаунта свои. */
+export interface AppPrefs {
+  scale: number;                       // масштаб интерфейса, %
+  density: "compact" | "normal" | "roomy";
+  images: "small" | "normal" | "large";
+  corners: "sharp" | "normal" | "soft";
+  theme: "auto" | "light" | "dark";
+  motion: boolean;                     // анимации и переходы
+  haptic: boolean;                     // отклик вибрацией
+  startTab: string;                    // с какого экрана открывать
+  hidden: string[];                    // спрятанные разделы нижнего меню
+  callMe: string;                      // как обращаться к человеку
+  botName: string;                     // как зовут ассистента
+}
+
+export const DEFAULT_PREFS: AppPrefs = {
+  scale: 100,
+  density: "normal",
+  images: "normal",
+  corners: "normal",
+  theme: "auto",
+  motion: true,
+  haptic: true,
+  startTab: "home",
+  hidden: [],
+  callMe: "",
+  botName: "Сара",
+};
