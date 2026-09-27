@@ -472,7 +472,7 @@
     const PREFS_DEFAULT = {
       scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto",
       motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара",
-      avatar: "", tone: "friendly", address: "ty", emoji: true,
+      avatar: "", tone: "friendly", address: "ty", emoji: true, search: true,
     };
     // из памяти устройства — чтобы применить до ответа сервера и не мигать
     let prefs = (() => {
@@ -1287,6 +1287,11 @@
            </div>`)}
         ${block("Манера общения", seg("tone", [["friendly", "Дружелюбно"], ["business", "По-деловому"], ["brief", "Кратко"]]))}
         ${block("Обращение", seg("address", [["ty", "На «ты»"], ["vy", "На «вы»"]]))}
+        ${block("Поиск в интернете",
+          `<label class="check" style="justify-content:space-between;width:100%;align-items:flex-start">
+             <span><span style="font-weight:600">Искать свежее в сети</span><br><span style="color:var(--muted);font-size:12px">Для вопросов про новости, цены и события. Твои задачи и здоровье в интернет не уходят.</span></span>
+             <input type="checkbox" ${prefs.search ? "checked" : ""} onchange="setSara('search', this.checked)">
+           </label>`)}
         ${block("Эмодзи в ответах",
           `<label class="check" style="justify-content:space-between;width:100%">
              <span>Разрешить эмодзи</span>

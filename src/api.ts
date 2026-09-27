@@ -24,6 +24,8 @@ import {
   TASK_OPEN,
   AppPrefs,
 } from "./types";
+import { lookupWeb } from "./search";
+import { nowContext } from "./utils";
 import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
@@ -436,6 +438,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       tone: oneOf(b.tone, ["friendly", "business", "brief"] as const, cur.tone),
       address: oneOf(b.address, ["ty", "vy"] as const, cur.address),
       emoji: typeof b.emoji === "boolean" ? b.emoji : cur.emoji,
+      search: typeof b.search === "boolean" ? b.search : cur.search,
     };
     await db.setPrefs(uid, next);
     return json(next);
@@ -1007,8 +1010,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       const history = await db.listAiMessages(uid, 20);
       const ctx = await db.profileContext(uid);
       const persona = await db.personaContext(uid);
+      // Свежие факты Сара из памяти модели взять не может — приносим их поиском
+      const found = await lookupWeb(env, db, uid, userText);
       const msgs: ChatMessage[] = [
         { role: "system" as const, text: persona },
+        ...(found ? [{ role: "system" as const, text: found }] : []),
         ...(ctx ? [{ role: "system" as const, text: ctx }] : []),
         ...history
           .filter((m) => m.role === "user" || m.role === "assistant")

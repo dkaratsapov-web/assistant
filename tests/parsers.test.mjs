@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { parseDue, matchWaterMl, mealFromText, wordRe } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
+import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -158,4 +159,51 @@ test("личные уроки подмешиваются в подсказку �
   assert.ok(!renderExamples("напомни позвонить", 6, []).includes("уже поправлял"));
   // похожий урок выбирается точнее случайного
   assert.equal(pickLessons("накинь 200 риса", lessons, 1)[0].phrase, "накинь 200 риса");
+});
+
+test("в интернет идём только когда это правда нужно", () => {
+  // свежие факты — да
+  assert.equal(needsSearch("кто выиграл Олимпию в 2026 году?"), true);
+  assert.equal(needsSearch("какой сейчас курс доллара"), true);
+  assert.equal(needsSearch("что пишут про новый закон о рекламе"), true);
+  assert.equal(needsSearch("погугли расписание матчей"), true);
+  assert.equal(needsSearch("найди в интернете отзывы о сервисе"), true);
+  // про свои дела — никогда, это личные данные
+  assert.equal(needsSearch("какие у меня задачи на сегодня"), false);
+  assert.equal(needsSearch("напомни завтра позвонить в банк"), false);
+  assert.equal(needsSearch("сколько я съел калорий сегодня"), false);
+  // просьбы сочинить — тоже мимо, модель справится сама
+  assert.equal(needsSearch("придумай пять заголовков"), false);
+  assert.equal(needsSearch("привет"), false);
+});
+
+test("ответ поиска разбирается в выдержки", () => {
+  const xml = `<yandexsearch><response><results><grouping>
+    <group><doc>
+      <url>https://example.com/a</url>
+      <title>Заголовок <hlword>раз</hlword></title>
+      <passages><passage>Первая <hlword>выдержка</hlword> текста.</passage></passages>
+    </doc></group>
+    <group><doc>
+      <url>https://example.com/b</url>
+      <title>Второй</title>
+      <headline>Описание второго</headline>
+    </doc></group>
+  </grouping></results></response></yandexsearch>`;
+  const hits = parseSearchXml(xml, 5);
+  assert.equal(hits.length, 2);
+  assert.equal(hits[0].url, "https://example.com/a");
+  assert.equal(hits[0].title, "Заголовок раз", "подсветка должна убираться из заголовка");
+  assert.equal(hits[0].snippet, "Первая выдержка текста.");
+  assert.equal(hits[1].snippet, "Описание второго", "если нет выдержки — берём описание");
+  // мусор не должен ронять разбор
+  assert.deepEqual(parseSearchXml("", 5), []);
+  assert.deepEqual(parseSearchXml("<yandexsearch></yandexsearch>", 5), []);
+});
+
+test("найденное уходит в подсказку со ссылками", () => {
+  const out = renderHits([{ title: "Т", url: "https://e.com/x", snippet: "С" }], "2026-09-27 18:00, суббота");
+  assert.ok(out.includes("https://e.com/x"), "источник должен быть в подсказке");
+  assert.ok(/не придумывай/i.test(out), "модель надо прямо просить не выдумывать");
+  assert.equal(renderHits([], "сейчас"), "", "без находок подсказка пустая");
 });

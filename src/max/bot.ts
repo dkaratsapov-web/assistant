@@ -11,6 +11,7 @@
  * владелец подтверждает роль кнопкой.
  */
 import { aiConfig, askAIChat, ChatMessage } from "../ai";
+import { lookupWeb } from "../search";
 import { DB } from "../db";
 import { tryPerformCommand } from "../intent";
 import { buildDigest } from "../reports";
@@ -554,8 +555,10 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     const history = await db.listAiMessages(uid, 20);
     const pctx = await db.profileContext(uid);
     const persona = await db.personaContext(uid);
+    const found = await lookupWeb(env, db, uid, prompt);
     const msgs: ChatMessage[] = [
       { role: "system" as const, text: persona },
+      ...(found ? [{ role: "system" as const, text: found }] : []),
       ...(pctx ? [{ role: "system" as const, text: pctx }] : []),
       ...history
         .filter((m) => m.role === "user" || m.role === "assistant")

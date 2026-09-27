@@ -12,6 +12,10 @@ export interface Env {
   // ИИ-«мозги» и голос — Yandex Cloud (YandexGPT + SpeechKit), один API-ключ на оба сервиса
   YANDEX_API_KEY?: string;         // секрет: API-ключ сервисного аккаунта
   YANDEX_STT_API_KEY?: string;     // секрет: отдельный ключ для распознавания речи, если у ключей одна область действия
+  YANDEX_SEARCH_API_KEY?: string;  // секрет: ключ Yandex Search API (пусто — берём общий)
+  YANDEX_SEARCH_FOLDER_ID?: string;// каталог для поиска (пусто — берём общий)
+  YANDEX_SEARCH_URL?: string;      // адрес поискового API, если он изменится
+  WEB_SEARCH?: string;             // "off" — выключить поиск в интернете целиком
   YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
   YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"
   YANDEX_GPT_ROUTER_MODEL?: string;// дешёвая модель для разбора команд, по умолчанию "yandexgpt-lite/latest"
@@ -217,6 +221,7 @@ export interface AppPrefs {
   tone: "friendly" | "business" | "brief";  // манера общения
   address: "ty" | "vy";                // на «ты» или на «вы»
   emoji: boolean;                      // разрешены ли эмодзи в ответах
+  search: boolean;                     // можно ли искать в интернете ради свежих фактов
 }
 
 export const DEFAULT_PREFS: AppPrefs = {
@@ -235,4 +240,5 @@ export const DEFAULT_PREFS: AppPrefs = {
   tone: "friendly",
   address: "ty",
   emoji: true,
+  search: true,
 };

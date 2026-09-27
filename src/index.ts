@@ -2,6 +2,7 @@ import { handleApi, sessionCookie } from "./api";
 import { createBot } from "./bot";
 import { DB } from "./db";
 import { aiConfig, askAI } from "./ai";
+import { searchConfigured } from "./search";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
@@ -379,6 +380,8 @@ export default {
         sttKey: env.YANDEX_STT_API_KEY ? "отдельный" : env.YANDEX_API_KEY ? "общий" : "нет",
         folderId: env.YANDEX_FOLDER_ID ? `${env.YANDEX_FOLDER_ID.slice(0, 6)}…` : null,
         model: cfg?.model ?? null,
+        webSearch: searchConfigured(env) ? "включён" : "не настроен (нужны YANDEX_SEARCH_API_KEY и YANDEX_SEARCH_FOLDER_ID или общие ключи)",
+        webSearchError: (await new DB(env.DB).getSetting("search_error")) ?? null,
         router: cfg?.router ?? null,
       };
       body.test = cfg ? await askAI(cfg, "Ответь одним словом: привет") : "не настроено: нужны YANDEX_API_KEY и YANDEX_FOLDER_ID";
