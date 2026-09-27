@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseDue, matchWaterMl, mealFromText, wordRe } from "../.test-build/utils.js";
-import { localRoute } from "../.test-build/intent.js";
+import { localRoute, looksLikeFoodText, mentionedClient } from "../.test-build/intent.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -67,4 +67,28 @@ test("границы слова знают кириллицу", () => {
   assert.ok(wordRe("зал").test("сходил в зал"));
   assert.ok(wordRe("зал").test("зал 40 минут"));
   assert.equal(wordRe("зал").test("оказался"), false, "внутри слова совпадать не должно");
+});
+
+test("«добавь в еду …» — это еда, а не задача", () => {
+  // Из жизни: «добавь в еду - 200 гр риса и 1 куриная котлета» заводилось задачей,
+  // потому что распознавались только «съел», «на обед» и подобные слова.
+  assert.equal(looksLikeFoodText("добавь в еду - 200 гр риса и 1 куриная котлета"), true);
+  assert.equal(looksLikeFoodText("запиши в еду овсянку"), true);
+  assert.equal(looksLikeFoodText("посчитай калории: борщ и хлеб"), true);
+  assert.equal(looksLikeFoodText("съел борщ"), true);
+  assert.equal(looksLikeFoodText("на обед котлета с рисом"), true);
+  // а это не еда
+  assert.equal(looksLikeFoodText("добавь задачу купить рис"), false);
+  assert.equal(looksLikeFoodText("встреча с клиентом в обед"), false);
+  assert.equal(looksLikeFoodText("напомни купить еду"), false);
+});
+
+test("клиент узнаётся в тексте по своему имени", () => {
+  const names = [{ id: 7, name: "АйПапа" }, { id: 9, name: "Ромашка" }];
+  assert.equal(mentionedClient(names, "встреча с айпапа завтра в 13:00")?.id, 7);
+  assert.equal(mentionedClient(names, "Встреча с АйПапа")?.id, 7);
+  assert.equal(mentionedClient(names, "отправить счёт ромашке")?.id, 9);
+  assert.equal(mentionedClient(names, "встреча с клиентом"), null);
+  // слишком короткие имена не ловим — иначе «АП» найдётся в любом слове
+  assert.equal(mentionedClient([{ id: 1, name: "АП" }], "напомни про апрель"), null);
 });

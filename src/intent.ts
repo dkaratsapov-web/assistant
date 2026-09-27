@@ -12,24 +12,75 @@ const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "�
 
 const FOOD_RE = /(съел[а-яё]*|поел[а-яё]*|скушал[а-яё]*|позавтракал[а-яё]*|пообедал[а-яё]*|поужинал[а-яё]*|перекусил[а-яё]*|на завтрак|на обед|на ужин|съесть)/i;
 
+/** «добавь в еду», «запиши в рацион», «посчитай калории» — прямая просьба записать приём пищи. */
+const FOOD_ADD_RE = /(?:добав[а-яё]*|запиш[а-яё]*|занес[а-яё]*|внес[а-яё]*|учт[а-яё]*|посчита[а-яё]*|подсчита[а-яё]*|расcчита[а-яё]*|рассчита[а-яё]*|плюс)[^.!?]{0,20}?\s(?:в\s+)?(?:еду|еде|ед[ыу]|рацион[а-яё]*|питани[а-яё]+|калори[а-яё]+|ккал|бжу)/i;
+
+/** Похоже ли сообщение на запись еды. Вынесено отдельно — на этом месте ошибались. */
+export function looksLikeFoodText(text: string): boolean {
+  // «напомни купить еду», «встреча в обед», «добавь задачу» — это не про питание
+  if (/(встреч|созвон|задач|клиент|напомни|перезвон|позвон|заплан|купи)/i.test(text)) return false;
+  if (FOOD_ADD_RE.test(text)) return true;
+  if (FOOD_RE.test(text)) return true;
+  const hasMealWord = /(завтрак|обед|ужин|перекус|полдник)/i.test(text);
+  return hasMealWord && /(добав|запиш|плюс|учти|засчита|занеси|внеси)/i.test(text);
+}
+
+/**
+ * Ищет в тексте упоминание своего клиента: «встреча с айпапа» → карточка «АйПапа».
+ * Короткие имена пропускаем — иначе «АП» найдётся в середине любого слова.
+ */
+export function mentionedClient<T extends { id: number; name: string }>(clients: T[], text: string): T | null {
+  const low = text.toLowerCase();
+  // «Ромашка» в тексте встретится как «ромашке» — сравниваем по основе слова
+  const stem = (w: string) => w.replace(/[аяуюыиеёоэьъ]{1,2}$/i, "");
+  let best: T | null = null;
+  let bestLen = 0;
+  for (const c of clients) {
+    const n = (c.name || "").trim().toLowerCase();
+    if (n.length < 3) continue;
+    const st = stem(n);
+    const hit = low.includes(n) ? n.length : st.length >= 4 && low.includes(st) ? st.length : 0;
+    if (hit > bestLen) { best = c; bestLen = hit; }   // длиннее совпадение — точнее
+  }
+  return best;
+}
+
 /** Выполняет распознанное намерение. Возвращает подтверждение или null (если это не команда). */
 export async function performIntent(
   intent: AssistantIntent | null,
   db: DB,
   uid: number,
-  tz: number
+  tz: number,
+  rawText = ""
 ): Promise<string | null> {
   if (!intent || intent.action === "none") return null;
+
+  /**
+   * Чей это клиент. Сначала верим ИИ (он мог вытащить имя), иначе ищем имя
+   * своего клиента прямо в исходной фразе: «встреча с айпапа» → карточка «АйПапа».
+   */
+  const findClient = async (): Promise<{ id: number; name: string } | null> => {
+    const named = (intent.client ?? "").trim();
+    if (named) {
+      const byName = await db.findClientByName(uid, named);
+      if (byName) return byName;
+    }
+    const where = `${rawText} ${intent.title ?? ""}`.trim();
+    if (!where) return null;
+    return mentionedClient(await db.listClients(uid), where);
+  };
 
   if (intent.action === "task") {
     const title = (intent.title ?? "").trim();
     if (!title) return null;
     const dueAt = intent.due ? resolveWhen(intent.due, tz, 10) : null;
     const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
-    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt });
+    const client = scope === SCOPE_PERSONAL ? null : await findClient();
+    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null });
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
-    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}`;
+    const cl = client ? `\n🤝 ${client.name}` : "";
+    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}${cl}`;
   }
 
   if (intent.action === "task_done") {
@@ -59,9 +110,11 @@ export async function performIntent(
       const id = await db.addTask({ title: `Встреча: ${title}`, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt: null });
       return `📝 Добавила как задачу #${id}: «Встреча: ${title}» — не поняла точное время. Скажи время, и перенесу в календарь.`;
     }
-    const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "" });
+    const client = await findClient();
+    const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "", clientId: client?.id ?? null });
     const loc = intent.location ? `\n📍 ${intent.location}` : "";
-    return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}`;
+    const cl = client ? `\n🤝 ${client.name}` : "";
+    return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
   }
 
   if (intent.action === "event_delete") {
@@ -284,10 +337,7 @@ export async function tryPerformCommand(
   }
 
   // 0b) Еда — оценка калорий через ИИ
-  const hasMealWord = /(завтрак|обед|ужин|перекус|полдник)/i.test(text);
-  const notOtherEntity = !/(встреч|созвон|задач|клиент|напомни|перезвон|позвон|заплан)/i.test(text);
-  const looksLikeFood = notOtherEntity && (FOOD_RE.test(text) || (hasMealWord && /(добав|запиш|плюс|учти|засчита|занеси|внеси)/i.test(text)));
-  if (looksLikeFood) {
+  if (looksLikeFoodText(text)) {
     if (!ai) return null;
     const n = await estimateNutrition(ai, text);
     if (n) {
@@ -301,7 +351,7 @@ export async function tryPerformCommand(
   // 0) Локальный быстрый разбор — без ИИ (экономия). Частые команды без дат.
   const local = localRoute(text);
   if (local) {
-    const a = await performIntent(local, db, uid, tz);
+    const a = await performIntent(local, db, uid, tz, text);
     if (a) return a;
   }
 
@@ -310,7 +360,7 @@ export async function tryPerformCommand(
 
   // 1) Иначе — распознавание команды на дешёвой модели (yandexgpt-lite)
   const intent = await routeAssistant(ai, text, now);
-  let action = await performIntent(intent, db, uid, tz);
+  let action = await performIntent(intent, db, uid, tz, text);
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {
