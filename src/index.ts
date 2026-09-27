@@ -452,6 +452,10 @@ export default {
     };
 
     if (event.cron === "*/5 * * * *") {
+      // Подписки на события мессенджеров проверяем каждые пять минут, а не раз в час.
+      // Причина из жизни: пока воркер час отвечал ошибкой, MAX отписал вебхук, и бот
+      // молчал до следующего часового прогона. Проверка дешёвая — два запроса.
+      await ensureWebhooks(env, db, `https://${env.PUBLIC_HOST || "assistant.d-karatsapov.workers.dev"}`);
       // Напоминания о наступивших дедлайнах задач (если включено у получателя)
       const tasks = await db.tasksDueForReminder(new Date().toISOString());
       for (const t of tasks) {
@@ -484,8 +488,6 @@ export default {
       // Напоминания о приёме БАДов/фармы
       await runSupplementReminders(env, db, tz);
     } else if (event.cron === "0 * * * *") {
-      // каналы должны быть подписаны — проверяем и чиним сами
-      await ensureWebhooks(env, db, `https://${env.PUBLIC_HOST || "assistant.d-karatsapov.workers.dev"}`);
       const localHour = new Date(Date.now() + tz * 3600_000).getUTCHours();
       const nowLocal = new Date(Date.now() + tz * 3600_000);
       const pad = (n: number) => String(n).padStart(2, "0");
