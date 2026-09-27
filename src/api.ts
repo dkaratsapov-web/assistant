@@ -812,6 +812,32 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
   }
 
+  // POST /api/voice/do — сказал голосом, Сара сама поняла и завела запись
+  if (path === "/api/voice/do" && request.method === "POST") {
+    if (!sttKey(env) || !env.YANDEX_FOLDER_ID) return json({ error: "stt_not_configured", message: "Голос не настроен: нужны ключи Яндекса." }, 400);
+    const audio = await request.arrayBuffer();
+    if (!audio || audio.byteLength < 1600) return json({ error: "empty_audio", message: "Не расслышала — скажи ещё раз." }, 400);
+    let text = "";
+    try {
+      text = (await transcribeVoice(sttKey(env), env.YANDEX_FOLDER_ID, audio, { format: "lpcm", sampleRateHertz: 16000 })).trim();
+    } catch (e) {
+      return json({ error: "stt_failed", message: (e as Error).message }, 502);
+    }
+    if (!text) return json({ error: "empty_text", message: "Не расслышала — скажи ещё раз, ближе к микрофону." }, 422);
+    // forceTask: сказанное голосом почти всегда команда, а не вопрос
+    const done = await tryPerformCommand(env, db, uid, text, true);
+    return json({ text, reply: done ?? "" });
+  }
+
+  // POST /api/command {text} — то же самое, но текстом (для правок расшифровки)
+  if (path === "/api/command" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { text?: string };
+    const text = (body.text ?? "").trim();
+    if (!text) return json({ error: "empty_text" }, 400);
+    const done = await tryPerformCommand(env, db, uid, text, true);
+    return json({ text, reply: done ?? "" });
+  }
+
   // POST /api/health/food/photo — оценить блюдо по фотографии
   if (path === "/api/health/food/photo" && request.method === "POST") {
     const ai = aiConfig(env);

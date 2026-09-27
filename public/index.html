@@ -174,6 +174,12 @@
       box-shadow: var(--shadow); z-index: 40; display: none; align-items: center; justify-content: center; transition: transform .12s ease; }
     .fab:active { transform: scale(.9); }
     .fab svg { width: 21px; height: 21px; }
+    /* Голосовая кнопка живёт рядом с «＋»: сказал фразу — Сара сама поняла,
+       что это, и завела задачу, встречу, заметку или еду. */
+    .fab-mic { bottom: calc(var(--nav-h) + 76px + env(safe-area-inset-bottom)); background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .fab-mic.rec { background: #ff3b30; color: #fff; border-color: #ff3b30; animation: pulse 1.3s ease-in-out infinite; }
+    .fab-mic.busy { opacity: .6; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,48,.5); } 50% { box-shadow: 0 0 0 10px rgba(255,59,48,0); } }
     @media (max-width: 676px) { .fab { right: 16px; } }
 
     /* Bottom nav */
@@ -283,6 +289,10 @@
   </header>
 
   <main class="wrap" id="view"><div class="loading">Загрузка…</div></main>
+
+  <button class="fab fab-mic" id="fab-mic" aria-label="Сказать голосом" onclick="voiceCommand()" title="Сказать голосом">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
+  </button>
 
   <button class="fab" id="fab" aria-label="Добавить">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -1830,6 +1840,58 @@
       return `<div class="with-mic">${inputHtml}${micButton(inputId)}</div>`;
     }
 
+    /**
+     * Сказал фразу — Сара сама решила, что это: задача, встреча, заметка, еда
+     * или вода, и завела запись. Разбирает та же логика, что и в чате бота,
+     * поэтому «встреча с айпапа завтра в 13:00» сразу попадёт в календарь.
+     */
+    window.voiceCommand = async () => {
+      const btn = $("fab-mic");
+      if (micRec) {                                  // второе нажатие — закончили говорить
+        micTarget = null;
+        if (btn) { btn.classList.remove("rec"); btn.classList.add("busy"); }
+        const bytes = await micRec.stop();
+        micRec = null;
+        try {
+          if (!bytes || bytes.byteLength < 1600) { toast("Слишком коротко — скажи фразу целиком"); return; }
+          const res = await fetch("/api/voice/do", { method: "POST", headers: AUTH_HEADERS, body: bytes });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) { tg.showAlert(d.message || "Не получилось распознать."); return; }
+          if (!d.reply) { showVoiceDraft(d.text || ""); return; }
+          toast(d.reply.split("\n")[0]);
+          renderTab(tab);                            // список сразу обновляем
+        } catch (e) {
+          tg.showAlert("Не получилось отправить запись.");
+        } finally {
+          if (btn) btn.classList.remove("busy");
+        }
+        return;
+      }
+      await startDictation(btn);                     // первое нажатие — пишем
+    };
+
+    /** Если Сара не поняла фразу — показываем расшифровку, чтобы поправить руками. */
+    function showVoiceDraft(text) {
+      openSheet(`<h3>Не поняла, что с этим делать</h3>
+        <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Вот что я услышала. Поправь формулировку или заведи запись руками.</div>
+        <div class="field"><div class="with-mic"><input id="vd-text" value="${esc(text)}">${micButton("vd-text")}</div></div>
+        <div class="actions">
+          <button class="btn" onclick="closeSheet()">Отмена</button>
+          <button class="btn primary" onclick="retryVoiceText()">Попробовать снова</button>
+        </div>`);
+    }
+
+    window.retryVoiceText = async () => {
+      const text = (($("vd-text") || {}).value || "").trim();
+      if (!text) return;
+      closeSheet();
+      try {
+        const d = await api("/command", { method: "POST", body: JSON.stringify({ text }) });
+        if (d.reply) { toast(d.reply.split("\n")[0]); renderTab(tab); }
+        else tg.showAlert("Всё равно не поняла. Заведи руками — так надёжнее.");
+      } catch (e) { tg.showAlert("Не получилось: " + (e.message || e)); }
+    };
+
     /** Нажали микрофон у поля: первый раз — пишем, второй — распознаём и вставляем. */
     window.dictate = async (inputId) => {
       if (micRec) { await stopDictation(); return; }
@@ -1952,6 +2014,7 @@
       if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} }
       const opts = ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)).join("");
       openSheet(`<h3>Новая задача</h3>
+        ${me.voice ? `<button class="btn" style="width:100%;margin-bottom:12px" onclick="closeSheet(); setTimeout(voiceCommand, 150)">🎤 Сказать голосом — Сара заведёт сама</button>` : ""}
         <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">Личная</div></div></div>
         <div class="field"><label>Название задачи</label>
           <div class="with-mic"><input id="f-title" placeholder="Коротко, одной строкой">${micButton("f-title")}</div>
@@ -2017,14 +2080,23 @@
       return `${d.value}T${(t && t.value) || "10:00"}`;
     }
 
+    /** Ближайший следующий час в формате поля «дата и время». */
+    function nextHourInput() {
+      const d = new Date();
+      d.setMinutes(0, 0, 0);
+      d.setHours(d.getHours() + 1);
+      return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:00`;
+    }
+
     async function ensureClients() { if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} } }
     function clientOptions(sel) { return ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}" ${String(sel) === String(c.id) ? "selected" : ""}>${esc(c.name)}</option>`)).join(""); }
     async function openAddEvent() {
       await ensureClients();
       const tm = me.telemost ? `<div class="field"><label class="check"><input type="checkbox" id="f-tm">🎥 Создать ссылку Телемост</label></div>` : "";
       openSheet(`<h3>Новая встреча</h3>
+        ${me.voice ? `<button class="btn" style="width:100%;margin-bottom:12px" onclick="closeSheet(); setTimeout(voiceCommand, 150)">🎤 Сказать голосом — Сара заведёт сама</button>` : ""}
         <div class="field"><label>Название</label><div class="with-mic"><input id="f-title" placeholder="Встреча с клиентом">${micButton("f-title")}</div></div>
-        <div class="field"><label>Когда</label><input id="f-at" type="datetime-local"></div>
+        <div class="field"><label>Когда</label><input id="f-at" type="datetime-local" value="${nextHourInput()}"></div>
         <div class="field"><label>Клиент</label><select id="f-eclient">${clientOptions("")}</select></div>
         <div class="field"><label>Место</label><div class="with-mic"><input id="f-loc" placeholder="офис / адрес / ссылка">${micButton("f-loc")}</div></div>
         ${tm}
@@ -2159,7 +2231,12 @@
     window.delClient = async (id) => { if (!(await ask("Удалить клиента?\nЗадачи и встречи клиента останутся, но потеряют привязку.", { ok: "Удалить", danger: true }))) return; await api(`/clients/${id}`, { method: "DELETE" }); renderClients(); };
 
     $("fab").onclick = () => { haptic(); if (tab === "tasks") openAddTask(); else if (tab === "calendar") openAddEvent(); else if (tab === "health") openFoodAdd(); else if (tab === "clients") openAddClient(); };
-    function updateFab() { $("fab").style.display = ["tasks", "calendar", "health", "clients"].includes(tab) ? "flex" : "none"; }
+    function updateFab() {
+      const show = ["home", "tasks", "calendar", "health", "clients"].includes(tab);
+      $("fab").style.display = show && tab !== "home" ? "flex" : "none";
+      const mic = $("fab-mic");
+      if (mic) mic.style.display = show && me.voice ? "flex" : "none";
+    }
 
     /* ---------- Навигация + кнопка «Назад» ---------- */
     function renderTab(t) {
