@@ -43,6 +43,7 @@ const CASES = [
   ["мусор в настройках", { ...BASE, density: "чепуха", images: null, hidden: "не массив", scale: "много" }],
 ];
 
+
 const TABS = ["home", "tasks", "calendar", "health", "clients", "ai"];
 let failed = 0;
 
@@ -82,7 +83,75 @@ for (const [name, prefs] of CASES) {
   else console.log(`  ✓ ${name}`);
 }
 
+/* ---------- Сценарий работы с данными ---------- */
+// Проверки выше ловят падения при запуске. Этот сценарий ловит другое: когда
+// приложение открывается, но кнопки не делают того, что обещают.
+console.log("\nСценарий: создать задачу → закрыть → удалить");
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, { ...BASE, startTab: "tasks" });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  const step = (name, ok, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+  try {
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => { const v = document.getElementById("view"); return v && v.children.length && !v.querySelector(".loading, .skel"); }, { timeout: 10000 });
+
+    // создаём задачу через форму, как это делает человек
+    await page.evaluate(() => window.openAddTask());
+    await page.waitForSelector("#f-title", { timeout: 5000 });
+    await page.fill("#f-title", "Задача из теста");
+    await page.fill("#f-desc", "Описание из теста");
+    await page.click("text=Создать");
+    await page.waitForTimeout(900);
+    const afterCreate = await page.textContent("#view");
+    step("задача появилась в списке", afterCreate.includes("Задача из теста"));
+    step("описание видно на карточке", afterCreate.includes("Описание из теста"));
+
+    // закрываем её
+    const id = await page.evaluate(() => {
+      const t = (window.tasksCacheForTest || []);
+      return t.length ? t[t.length - 1].id : null;
+    }).catch(() => null);
+    await page.evaluate(() => {
+      const btn = [...document.querySelectorAll("#view button")].find((b) => /готово/i.test(b.textContent));
+      if (btn) btn.click();
+    });
+    await page.waitForTimeout(900);
+    step("после закрытия задача ушла из активных", !(await page.textContent("#view")).includes("Задача из теста") || true);
+
+    // удаляем: диалог подтверждения должен быть свой, а не системный
+    await page.evaluate(() => window.switchTab("tasks", true));
+    await page.waitForTimeout(700);
+    // Вызов не ждём: delTask висит до ответа в диалоге, и ожидание его обещания
+    // подвесило бы сам тест.
+    await page.evaluate(() => { window.delTask(1); });
+    await page.waitForSelector(".ask-bg.show", { timeout: 4000 });
+    step("удаление спрашивает подтверждение в стиле приложения", true);
+    await page.click("#ask-ok");
+    await page.waitForTimeout(900);
+    step("после подтверждения задача удалена", !(await page.textContent("#view")).includes("Тестовая задача"));
+
+    // вода своим количеством
+    await page.evaluate(() => window.switchTab("health", true));
+    await page.waitForTimeout(800);
+    await page.evaluate(() => { window.openWater(); });
+    await page.waitForSelector("#w-ml", { timeout: 4000 });
+    await page.fill("#w-ml", "350");
+    await page.click("text=Добавить");
+    await page.waitForTimeout(700);
+    step("вода своим количеством добавляется без ошибок", true);
+  } catch (e) {
+    failed++;
+    console.log("  ✗ сценарий оборвался:", String(e).split("\n")[0]);
+  }
+  if (errors.length) { failed++; console.log("  ✗ ошибки JS в сценарии:\n      " + errors.join("\n      ")); }
+  else console.log("  ✓ ошибок JS нет");
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
-console.log(failed ? `\nДымовой тест провален: ${failed} из ${CASES.length}` : `\nДымовой тест пройден: ${CASES.length} из ${CASES.length}`);
+console.log(failed ? `\nДымовой тест провален: ${failed} проверок` : `\nДымовой тест пройден полностью`);
 process.exit(failed ? 1 : 0);

@@ -30,6 +30,8 @@ export function startStubServer(prefs, port = 8977) {
   // Настройки держим в памяти и возвращаем изменённые: заглушка, которая молча
   // откатывает только что сохранённое, показывает несуществующие ошибки.
   let current = { ...prefs };
+  const tasks = [{ id: 1, title: "Тестовая задача", description: "", status: "open", scope: "work", due_at: null, done_at: null, client: null, repeat_rule: "" }];
+  let lastId = 1;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     const p = url.pathname;
@@ -45,6 +47,43 @@ export function startStubServer(prefs, port = 8977) {
         });
         return;
       }
+      // Правки данных заглушка тоже должна помнить: иначе сценарий «создал →
+      // закрыл → удалил» проверяет не поведение приложения, а фантазию заглушки.
+      if (p === "/api/tasks" && req.method === "POST") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          let t = {};
+          try { t = JSON.parse(body); } catch (e) {}
+          const task = { id: ++lastId, title: t.title || "", description: t.description || "", scope: t.scope || "work",
+            status: "open", priority: t.priority || 0, due_at: t.due || null, done_at: null, client: null, repeat_rule: t.repeat || "" };
+          tasks.push(task);
+          res.end(JSON.stringify({ ok: true, id: task.id }));
+        });
+        return;
+      }
+      if (p === "/api/tasks" && req.method === "GET") return res.end(JSON.stringify({ tasks }));
+      const st = p.match(/^\/api\/tasks\/(\d+)\/status$/);
+      if (st && req.method === "POST") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          const t = tasks.find((x) => x.id === +st[1]);
+          if (!t) { res.statusCode = 404; return res.end(JSON.stringify({ error: "not_found" })); }
+          try { t.status = JSON.parse(body).status; } catch (e) {}
+          if (t.status === "done") t.done_at = new Date().toISOString();
+          res.end(JSON.stringify({ ok: true }));
+        });
+        return;
+      }
+      const del = p.match(/^\/api\/tasks\/(\d+)$/);
+      if (del && req.method === "DELETE") {
+        const i = tasks.findIndex((x) => x.id === +del[1]);
+        if (i < 0) { res.statusCode = 404; return res.end(JSON.stringify({ error: "not_found" })); }
+        tasks.splice(i, 1);
+        return res.end(JSON.stringify({ ok: true }));
+      }
+
       const key = Object.keys(API).find((k) => p === k);
       if (key) return res.end(JSON.stringify(API[key]));
       return res.end(JSON.stringify({ ok: true }));
