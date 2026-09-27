@@ -208,18 +208,28 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       { type: "callback", text: "🔑 Код входа", payload: "login:code" },
     ];
 
-    // open_app открывает приложение внутри мессенджера и передаёт токен в payload
-    const botId = await maxBotId();
-    const variants: MaxButton[][] = [];
-    if (env.MAX_APP_NAME) {
-      variants.push([{ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token }, ...base]);
+    // open_app открывает приложение внутри мессенджера и передаёт токен в payload.
+    // Какую именно ссылку на мини-приложение ждёт MAX — зависит от настроек бота,
+    // поэтому перебираем все разумные формы: имя из настроек, логин бота, URL, id бота.
+    const me = await maxMe();
+    const candidates: MaxButton[] = [];
+    const seen = new Set<string>();
+    const addApp = (b: MaxButton) => {
+      const key = JSON.stringify(b);
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push(b);
+    };
+    const uname = me?.username?.replace(/^@/, "");
+    if (env.MAX_APP_NAME) addApp({ type: "open_app", text: "📲 Открыть", web_app: env.MAX_APP_NAME, payload: token });
+    if (uname) {
+      addApp({ type: "open_app", text: "📲 Открыть", web_app: uname, payload: token });
+      addApp({ type: "open_app", text: "📲 Открыть", web_app: `@${uname}`, payload: token });
     }
-    if (appUrl) {
-      variants.push([{ type: "open_app", text: "📲 Открыть", web_app: appUrl, payload: token }, ...base]);
-    }
-    if (botId) {
-      variants.push([{ type: "open_app", text: "📲 Открыть", contact_id: botId, payload: token }, ...base]);
-    }
+    if (appUrl) addApp({ type: "open_app", text: "📲 Открыть", web_app: appUrl, payload: token });
+    if (me?.user_id) addApp({ type: "open_app", text: "📲 Открыть", contact_id: me.user_id, payload: token });
+
+    const variants: MaxButton[][] = candidates.map((b) => [b, ...base]);
     variants.push(base);
     return variants;
   }
@@ -230,27 +240,43 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
    */
   async function replyWithApp(text: string): Promise<void> {
     const sets = await appButtonSets();
+    const to = { chatId: chatId ?? undefined, userId: chatId ? undefined : senderId };
+    const errors: string[] = [];
     for (let i = 0; i < sets.length; i++) {
+      const label = describeAppButton(sets[i][0]);
       try {
-        await client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, text, sets[i].length ? [sets[i]] : undefined);
-        if (i > 0) await db.setSetting("max_kb_used", `вариант ${i + 1} из ${sets.length}`);
+        await client.sendMessage(to, text, sets[i].length ? [sets[i]] : undefined);
+        await db.setSetting("max_kb_used", `${i + 1} из ${sets.length} — ${label}`);
+        if (errors.length) await db.setSetting("max_kb_error", `${new Date().toISOString()}\n${errors.join("\n")}`);
+        else await db.setSetting("max_kb_error", "");
         return;
       } catch (e) {
-        await db.setSetting("max_kb_error", `${new Date().toISOString()} · вариант ${i + 1}: ${String((e as Error).message).slice(0, 300)}`);
+        errors.push(`${label}: ${String((e as Error).message).slice(0, 200)}`);
       }
     }
-    await client.sendMessage({ chatId: chatId ?? undefined, userId: chatId ? undefined : senderId }, text).catch(() => {});
+    await db.setSetting("max_kb_error", `${new Date().toISOString()}\n${errors.join("\n")}`);
+    await client.sendMessage(to, text).catch(() => {});
   }
 
-  /** id бота в MAX — нужен кнопке open_app; спрашиваем один раз и держим в настройках. */
-  async function maxBotId(): Promise<number | null> {
-    const cached = parseInt((await db.getSetting("max_bot_id")) ?? "", 10);
-    if (cached) return cached;
+  /** Человеческое имя варианта клавиатуры — чтобы отказ платформы было с чем сопоставить. */
+  function describeAppButton(b: MaxButton | undefined): string {
+    if (!b || b.type !== "open_app") return "только ссылка";
+    if (b.contact_id) return `open_app contact_id=${b.contact_id}`;
+    return `open_app web_app=${b.web_app}`;
+  }
+
+  /** Карточка бота в MAX — нужна кнопке open_app; спрашиваем один раз и держим в настройках. */
+  async function maxMe(): Promise<{ user_id: number; username?: string } | null> {
+    const cachedId = parseInt((await db.getSetting("max_bot_id")) ?? "", 10);
+    const cachedName = (await db.getSetting("max_bot_username")) ?? "";
+    // «-» означает «спросили, логина нет» — иначе ходили бы в API на каждый /app
+    if (cachedId && cachedName) return { user_id: cachedId, username: cachedName === "-" ? undefined : cachedName };
     try {
       const me = await client.getMe();
       if (me?.user_id) {
         await db.setSetting("max_bot_id", String(me.user_id));
-        return me.user_id;
+        await db.setSetting("max_bot_username", me.username || "-");
+        return { user_id: me.user_id, username: me.username };
       }
     } catch {
       // не критично: останется ссылка в браузер
@@ -389,6 +415,8 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     }
     case "/code":
       return sendLoginCode();
+    case "/diag":
+      return sendDiag();
     case "/tasks":
       return listTasks();
     case "/digest":
@@ -432,6 +460,21 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   async function sendLoginCode() {
     const code = await db.createLoginCode(uid);
     await reply(`🔑 Код для входа в приложение:\n\n${code}\n\nВведи его в окне «Нужен вход». Код действует час и работает один раз.`);
+  }
+
+  /** Короткий отчёт о том, почему кнопка «Открыть» могла не появиться. */
+  async function sendDiag() {
+    if (!isOwner) return void (await reply("Команда доступна владельцу."));
+    const me = await maxMe();
+    const lines = [
+      "🩺 Диагностика MAX",
+      `бот: id ${me?.user_id ?? "—"}, логин ${me?.username ?? "—"}`,
+      `адрес приложения: ${appUrl || "не задан"}`,
+      `MAX_APP_NAME: ${env.MAX_APP_NAME || "не задан"}`,
+      `сработал вариант клавиатуры: ${(await db.getSetting("max_kb_used")) ?? "первый"}`,
+      `последний отказ платформы:\n${(await db.getSetting("max_kb_error")) ?? "нет"}`,
+    ];
+    return void (await reply(lines.join("\n")));
   }
 
   async function sendDigest() {
