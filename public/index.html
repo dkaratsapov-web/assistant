@@ -384,6 +384,29 @@
       openLink: (url) => window.open(url, "_blank", "noopener"),
     };
     tg.ready(); tg.expand();
+
+    /**
+     * Все всплывающие окна рисуем сами.
+     *
+     * Подвох: внутри MAX объект Telegram существует (мы грузим его скрипт ради
+     * совместимости), поэтому tg.showAlert и tg.showConfirm уходили в системные
+     * окна браузера — те самые «обычные», выбивающиеся из интерфейса. Перехват
+     * здесь, в одном месте, накрывает все полсотни вызовов разом.
+     *
+     * Короткое сообщение показываем всплывающей плашкой, длинное или
+     * многострочное — своим диалогом с кнопкой: его стоит прочитать.
+     */
+    tg.showAlert = (msg, cb) => {
+      const text = String(msg ?? "");
+      if (text.length <= 70 && !text.includes("\n")) toast(text);
+      else ask(text, { ok: "Понятно", cancel: "Закрыть" });
+      if (cb) cb();
+    };
+    tg.showConfirm = (msg, cb) => { ask(String(msg ?? "")).then((ok) => cb(ok)); };
+    tg.showPopup = (params, cb) => {
+      ask(`${params?.title ?? ""}\n${params?.message ?? ""}`.trim(), { ok: "Понятно", cancel: "Закрыть" });
+      if (cb) cb("ok");
+    };
     // На мобильном Telegram перехватывает вертикальный свайп и мешает вводу в поля — отключаем
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
     const INIT = tg.initData || "";

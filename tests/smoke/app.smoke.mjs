@@ -58,6 +58,9 @@ for (const [name, prefs] of CASES) {
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  // Системных окон быть не должно: внутри MAX они выбиваются из интерфейса,
+  // а появляются незаметно — через tg.showAlert от подключённого Telegram.
+  page.on("dialog", async (d) => { errors.push("системное окно: " + d.message().slice(0, 60)); await d.dismiss(); });
   try {
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(
@@ -93,6 +96,7 @@ console.log("\nСценарий: создать задачу → закрыть 
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("dialog", async (d) => { errors.push("системное окно: " + d.message().slice(0, 60)); await d.dismiss(); });
   const step = (name, ok, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
   try {
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
@@ -132,6 +136,19 @@ console.log("\nСценарий: создать задачу → закрыть 
     await page.click("#ask-ok");
     await page.waitForTimeout(900);
     step("после подтверждения задача удалена", !(await page.textContent("#view")).includes("Тестовая задача"));
+
+    // пустая форма: ругань должна быть своя, а не системным окном браузера
+    await page.evaluate(() => { window.openAddTask(); });
+    await page.waitForSelector("#f-title", { timeout: 5000 });
+    await page.click("text=Создать");
+    await page.waitForTimeout(600);
+    const scolded = await page.evaluate(() => {
+      const t = document.getElementById("toast");
+      return !!(t && t.classList.contains("show")) || !!document.querySelector(".ask-bg.show");
+    });
+    step("на пустое название ругается своим окном", scolded);
+    await page.evaluate(() => window.closeSheet());
+    await page.waitForTimeout(300);
 
     // вода своим количеством
     await page.evaluate(() => window.switchTab("health", true));
