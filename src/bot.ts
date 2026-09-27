@@ -550,7 +550,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
     }
     if (action === "del") {
       await db.deleteTask(id, me);
-      await ctx.editMessageText(`🗑 Задача #${id} удалена.`);
+      await ctx.editMessageText(`🗑 Задача «${task.title}» удалена.`);
       await ctx.answerCallbackQuery({ text: "Удалено" });
       return;
     }
@@ -585,7 +585,7 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       const c = await db.getClient(clientId, ctx.from!.id);
       if (c) suffix += `\nКлиент: ${c.name}`;
     }
-    await ctx.editMessageText(`✅ Задача #${taskId} создана: ${escapeHtml(draft.title)}${suffix}`);
+    await ctx.editMessageText(`✅ Задача создана: ${escapeHtml(draft.title)}${suffix}`);
     await ctx.answerCallbackQuery({ text: "Готово" });
   });
 

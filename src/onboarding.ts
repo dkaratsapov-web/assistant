@@ -231,7 +231,7 @@ export async function onboardingAnswer(
       case "task": {
         const dueAt = parseDue(answer, tz);
         const id = await db.addTask({ title: answer.slice(0, 200), creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt });
-        reply = dueAt ? `✅ Записала. Напомню заранее.` : `✅ Записала (#${id}). Скажешь срок — напомню.`;
+        reply = dueAt ? `✅ Записала. Напомню заранее.` : `✅ Записала. Скажешь срок — напомню.`;
         break;
       }
 

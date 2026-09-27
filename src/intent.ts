@@ -90,7 +90,7 @@ export async function performIntent(
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
     const cl = client ? `\n🤝 ${client.name}` : "";
     const rp = repeat ? `\n🔁 ${repeatLabel(repeat)}` : "";
-    return `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}${cl}${rp}`;
+    return `✅ Добавила задачу\n«${title}»\n${sc}${due}${cl}${rp}`;
   }
 
   if (intent.action === "task_done") {
@@ -99,7 +99,7 @@ export async function performIntent(
     const task = await db.findTaskByTitle(uid, q);
     if (!task) return `Не нашла активную задачу «${q}».`;
     await db.setTaskStatus(task.id, TASK_DONE, uid, tz);
-    return `✅ Задача #${task.id} «${task.title}» отмечена выполненной. Молодец!`;
+    return `✅ Задача «${task.title}» отмечена выполненной. Молодец!`;
   }
 
   if (intent.action === "task_delete") {
@@ -108,7 +108,7 @@ export async function performIntent(
     const task = await db.findTaskByTitle(uid, q);
     if (!task) return `Не нашла задачу «${q}».`;
     await db.deleteTask(task.id, uid);
-    return `🗑 Задача #${task.id} «${task.title}» удалена.`;
+    return `🗑 Задача «${task.title}» удалена.`;
   }
 
   if (intent.action === "event") {
@@ -117,15 +117,15 @@ export async function performIntent(
     const startsAt = intent.at ? resolveWhen(intent.at, tz, 12) : null;
     if (!startsAt) {
       // время не распозналось — не теряем задумку, заводим как задачу
-      const id = await db.addTask({ title: `Встреча: ${title}`, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt: null });
-      return `📝 Добавила как задачу #${id}: «Встреча: ${title}» — не поняла точное время. Скажи время, и перенесу в календарь.`;
+      await db.addTask({ title: `Встреча: ${title}`, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt: null });
+      return `📝 Добавила как задачу «Встреча: ${title}» — не поняла точное время. Скажи время, и перенесу в календарь.`;
     }
     const client = await findClient();
     const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "", clientId: client?.id ?? null });
     await remember("event", id);
     const loc = intent.location ? `\n📍 ${intent.location}` : "";
     const cl = client ? `\n🤝 ${client.name}` : "";
-    return `📅 Встреча добавлена (#${id})\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
+    return `📅 Встреча добавлена\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
   }
 
   if (intent.action === "event_delete") {
@@ -134,7 +134,7 @@ export async function performIntent(
     const ev = await db.findEventByTitle(uid, q);
     if (!ev) return `Не нашла встречу «${q}».`;
     await db.deleteEvent(ev.id, uid);
-    return `🗑 Встреча #${ev.id} «${ev.title}» отменена.`;
+    return `🗑 Встреча «${ev.title}» отменена.`;
   }
 
   if (intent.action === "contact") {
@@ -150,15 +150,15 @@ export async function performIntent(
         birthday = null;
       }
     }
-    const id = await db.addContact({ userId: uid, name, birthday, phone: "", notes: "" });
+    await db.addContact({ userId: uid, name, birthday, phone: "", notes: "" });
     const bd = birthday ? `\n🎂 ${birthday}` : "";
-    return `👤 Контакт добавлен (#${id})\n${name}${bd}`;
+    return `👤 Контакт добавлен\n${name}${bd}`;
   }
 
   if (intent.action === "client_add") {
     const name = (intent.name ?? intent.title ?? "").trim();
     if (!name) return null;
-    const id = await db.addClient(uid, name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
+    await db.addClient(uid, name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
       payAmount: (intent.fee ?? "").trim(),
       payDue: (intent.pay_due ?? "").trim(),
     });
@@ -168,7 +168,7 @@ export async function performIntent(
       intent.fee ? `ведение ${intent.fee}` : "",
       intent.pay_due ? `оплата ${intent.pay_due}` : "",
     ].filter(Boolean).join(" · ");
-    return `🤝 Клиент добавлен (#${id})\n${name}${extra ? `\n${extra}` : ""}`;
+    return `🤝 Клиент добавлен\n${name}${extra ? `\n${extra}` : ""}`;
   }
 
   if (intent.action === "client_delete") {
@@ -177,7 +177,7 @@ export async function performIntent(
     const client = await db.findClientByName(uid, name);
     if (!client) return `Не нашла клиента «${name}». Проверь название — точнее: /clients в боте.`;
     await db.deleteClient(client.id, uid);
-    return `🗑 Клиент удалён: ${client.name} (#${client.id})`;
+    return `🗑 Клиент удалён: ${client.name}`;
   }
 
   if (intent.action === "client_edit") {
@@ -208,7 +208,7 @@ export async function performIntent(
     if (!text) return null;
     const id = await db.addNote(uid, text);
     await remember("note", id);
-    return `📝 Заметка сохранена (#${id})\n«${text}»`;
+    return `📝 Заметка сохранена\n«${text}»`;
   }
 
   return null;
@@ -421,7 +421,7 @@ export async function tryPerformCommand(
       const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt });
       const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
       const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
-      action = `✅ Добавила задачу #${id}\n«${title}»\n${sc}${due}`;
+      action = `✅ Добавила задачу\n«${title}»\n${sc}${due}`;
     }
   }
   return action;
@@ -467,7 +467,7 @@ async function applyCorrection(
   }
   if (kind === "note") {
     const id = await db.addNote(uid, phrase);
-    return `📝 Исправила: заметка #${id}\n«${phrase}»${learned}`;
+    return `📝 Исправила: заметка\n«${phrase}»${learned}`;
   }
   const ai = aiConfig(env);
   if (kind === "food") {
@@ -488,7 +488,7 @@ async function applyCorrection(
     const id = await db.addEvent({ userId: uid, title: phrase, startsAt, location: "", notes: "", clientId: client?.id ?? null });
     await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "event", id }));
     const cl = client ? `\n🤝 ${client.name}` : "";
-    return `📅 Исправила: встреча #${id}\n«${phrase}»\n🕒 ${formatEventTime(startsAt, tz)}${cl}${learned}`;
+    return `📅 Исправила: встреча\n«${phrase}»\n🕒 ${formatEventTime(startsAt, tz)}${cl}${learned}`;
   }
   // задача
   const dueAt = resolveWhen(phrase, tz, 10);
@@ -497,7 +497,7 @@ async function applyCorrection(
   const id = await db.addTask({ title: phrase, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt, clientId: client?.id ?? null });
   await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "task", id }));
   const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
-  return `✅ Исправила: задача #${id}\n«${phrase}»${due}${learned}`;
+  return `✅ Исправила: задача\n«${phrase}»${due}${learned}`;
 }
 
 const KIND_RU: Record<string, string> = {

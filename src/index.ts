@@ -464,7 +464,7 @@ export default {
           const notif = await notifOf(recipient);
           if (!notif.tasks.on) { await db.markReminded(t.id); continue; }
           const u = await userOf(recipient);
-          if (u) await notify(env, u, `⏰ Напоминание по задаче #${t.id}\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
+          if (u) await notify(env, u, `⏰ Напоминание по задаче\n${t.title}\nДедлайн: ${formatDue(t.due_at, tz)}`);
           await db.markReminded(t.id);
         } catch (e) {
           console.error("reminder failed", t.id, e);

@@ -375,11 +375,11 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     }
     if (action === "task_done") {
       const ok = await db.setTaskStatus(parseInt(arg, 10), TASK_DONE, uid, tz);
-      return void (await reply(ok ? `✅ Задача #${arg} закрыта.` : "Не нашла такую задачу."));
+      return void (await reply(ok ? `✅ Задача закрыта.` : "Не нашла такую задачу."));
     }
     if (action === "task_del") {
       const ok = await db.deleteTask(parseInt(arg, 10), uid);
-      return void (await reply(ok ? `🗑 Задача #${arg} удалена.` : "Не нашла такую задачу."));
+      return void (await reply(ok ? `🗑 Задача удалена.` : "Не нашла такую задачу."));
     }
     return;
   }
@@ -454,7 +454,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     const noteText = raw.slice(1).trim();
     if (noteText) {
       const id = await db.addNote(uid, noteText);
-      return void (await reply(`📝 Заметка сохранена (#${id}).`));
+      return void (await reply(`📝 Заметка сохранена.`));
     }
   }
 
@@ -489,7 +489,7 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
       if (!argText) return void (await reply("Напиши текст задачи: /addtask <что сделать> [когда]"));
       const dueAt = parseDue(argText, tz);
       const id = await db.addTask({ title: argText, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt });
-      return void (await reply(`✅ Задача #${id} создана.${dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : ""}`, taskButtons(id)));
+      return void (await reply(`✅ Задача создана.${dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : ""}`, taskButtons(id)));
     }
     case "/ai": {
       if (!argText) {
