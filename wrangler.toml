@@ -3,11 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2024-11-27"
 compatibility_flags = ["nodejs_compat"]
 
-# Перед сборкой штампуем метку версии, чтобы по /version было видно,
-# какая именно версия сейчас в бою.
-[build]
-command = "node scripts/stamp-build.mjs"
-
 # Статика Mini App (интерфейс) — отдаётся с этого же воркера
 assets = { directory = "./public", binding = "ASSETS" }
 
@@ -33,3 +28,8 @@ YANDEX_GPT_ROUTER_MODEL = "yandexgpt-lite/latest" # дешёвая модель:
 PUBLIC_HOST = "assistant.d-karatsapov.workers.dev"  # адрес воркера для самонастройки вебхуков
 TZ_OFFSET = "3"       # смещение часового пояса от UTC (Москва = 3)
 DIGEST_HOUR = "9"     # час утреннего дайджеста по местному времени
+
+# Перед сборкой штампуем метку версии, чтобы по /version было видно,
+# какая именно версия сейчас в бою.
+[build]
+command = "node scripts/stamp-build.mjs"

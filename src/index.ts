@@ -321,7 +321,27 @@ async function handleTelemostCallback(request: Request, env: Env, origin: string
 }
 
 export default {
+  /**
+   * Точка входа. Всё завёрнуто в перехват: без него падение внутри превращается
+   * в немую страницу «Error 1101 — Worker threw exception», по которой нельзя
+   * понять ни строчки. Лучше вернуть текст ошибки — причина видна сразу.
+   */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    try {
+      return await this.route(request, env, ctx);
+    } catch (e) {
+      const err = e as Error;
+      try {
+        await new DB(env.DB).setSetting("worker_error", `${new Date().toISOString()} ${err?.message ?? String(e)}`);
+      } catch {
+        // база тоже недоступна — ответим хотя бы текстом
+      }
+      const body = `Ошибка на сервере\n\n${err?.name ?? "Error"}: ${err?.message ?? String(e)}\n\n${(err?.stack ?? "").split("\n").slice(0, 8).join("\n")}`;
+      return new Response(body, { status: 500, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+    }
+  },
+
+  async route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
 
