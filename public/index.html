@@ -4,10 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Sara</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Скрипт Telegram лежит на telegram.org. В <head> он блокирует отрисовку:
+    // пока браузер его не получит, страница пустая. Из России этот домен
+    // открывается через раз, и приложение зависало на белом экране — именно
+    // поэтому оно «работало только с VPN». В MAX этот скрипт вообще не нужен:
+    // ниже есть полная заглушка. Поэтому грузим его, только если приложение
+    // действительно открыто из Telegram — тот всегда кладёт свои параметры
+    // в адрес (#tgWebAppData=…). document.write здесь намеренно: скрипт
+    // обязан выполниться до кода ниже, который читает window.Telegram.
+    if ((location.hash + location.search).indexOf("tgWebApp") >= 0) {
+      document.write('<scr' + 'ipt src="https://telegram.org/js/telegram-web-app.js"><\/scr' + 'ipt>');
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- media="print" снимает блокировку отрисовки: страница рисуется сразу системным
+       шрифтом, а Manrope подменяется, когда (и если) догрузится. Без этого недоступный
+       Google задерживал показ приложения на десятки секунд. -->
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <style>
     :root {
       /* Светлая тема (по умолчанию) — премиальный монохром */
@@ -276,7 +291,7 @@
 <body>
   <header>
     <div class="hrow">
-      <img id="avatar" class="avatar" alt="Сара" style="cursor:pointer" onclick="openSara()" title="Настройки Сары">
+      <img id="avatar" class="avatar" data-sara="1" alt="Сара" style="cursor:pointer" onclick="openSara()" title="Настройки Сары">
       <div class="hello">
         <div class="h1" id="greeting">Sara</div>
         <div class="sub" id="subtitle"></div>
@@ -435,6 +450,21 @@
       }
     })();
     const AUTH_HEADERS = { "X-Telegram-Init-Data": INIT, ...(MAX_SESSION ? { "X-Max-Session": MAX_SESSION } : {}) };
+    // Запасное лицо Сары: нарисовано прямо здесь, грузить неоткуда не нужно.
+    // Фото ниже лежит на зарубежном хостинге, и если он недоступен, вместо
+    // портрета оставался бы «битый» значок по всему приложению.
+    const SARA_LOCAL = "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b61ff"/><stop offset="1" stop-color="#b06ab3"/></linearGradient></defs><circle cx="48" cy="48" r="48" fill="url(#sg)"/><path d="M28 54c0-11 9-20 20-20s20 9 20 20v4c0 11-9 20-20 20s-20-9-20-20z" fill="#f2cdab"/><path d="M22 96c2-15 12-23 26-23s24 8 26 23z" fill="#2a2140"/><path d="M25 48c0-17 10-28 23-28s23 11 23 28c0 6-1 10-3 13 0-12-7-19-20-19s-20 7-20 19c-2-3-3-7-3-13z" fill="#2a2140"/><g fill="#2b2b2b"><circle cx="40" cy="55" r="2.6"/><circle cx="56" cy="55" r="2.6"/></g><path d="M43 65c3 2 7 2 10 0" stroke="#2b2b2b" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M28 48c-3 11-3 22 0 33M68 48c3 11 3 22 0 33" stroke="#2a2140" stroke-width="7" stroke-linecap="round" fill="none"/></svg>');
+    // Подставляется в каждый <img> с фото.
+    // Подвох: заблокированный домен не отвечает ОШИБКОЙ, он просто молчит —
+    // браузер ждёт до таймаута, и onerror не срабатывает вовсе. Поэтому кроме
+    // onerror помечаем такие картинки, а ниже сторож по таймеру заменяет всё,
+    // что не нарисовалось за полторы секунды.
+    const SARA_FALLBACK = ' data-sara="1" onerror="this.onerror=null;this.src=SARA_LOCAL"';
+    setInterval(() => {
+      document.querySelectorAll('img[data-sara]').forEach((i) => {
+        if (!i.naturalWidth && i.src !== SARA_LOCAL) { i.removeAttribute("data-sara"); i.src = SARA_LOCAL; }
+      });
+    }, 1500);
     const SARA = "https://d8j0ntlcm91z4.cloudfront.net/user_3FDW4xDpfIw798Hq1MYcfG8Ze1n/hf_20260727_104316_1c7a9ff3-3430-4ede-aff4-062cc444784f_min.webp";
 
     /** Короткое уведомление внизу экрана — замена системного алерта вне Telegram. */
@@ -628,7 +658,7 @@
       return esc(v);
     }
     function fmtBd(bd) { if (!bd) return ""; const p = bd.split("-"); const mo = p.length === 3 ? +p[1] : +p[0]; const d = p.length === 3 ? +p[2] : +p[1]; if (!mo || !d) return bd; return `${d} ${MON_RU[mo-1]}`; }
-    function emptyBox(big, small) { return `<div class="empty"><img src="${SARA}" alt=""><div class="big">${big}</div><div>${small}</div></div>`; }
+    function emptyBox(big, small) { return `<div class="empty"><img src="${SARA}"${SARA_FALLBACK} alt=""><div class="big">${big}</div><div>${small}</div></div>`; }
     function err(e) {
       const m = String(e.message || e);
       if (m === "no_access") return emptyBox("Нет доступа", "Получи доступ у владельца бота.");
@@ -1411,14 +1441,14 @@
       openSheet(`<h3>Кто такая ${esc(prefs.botName || "Сара")}</h3>
         <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 12px">Имя, лицо и манера общения. Это влияет и на то, как она отвечает в чате.</div>
         <div style="text-align:center;margin-bottom:14px">
-          <img src="${avatarSrc(prefs.avatar)}" onerror="this.src='${SARA}'" alt=""
+          <img src="${avatarSrc(prefs.avatar)}" data-sara="1" onerror="this.onerror=null;this.src=SARA_LOCAL" alt=""
                style="width:96px;height:96px;border-radius:50%;object-fit:cover;border:1px solid var(--border)">
         </div>
         ${block("Имя", `<div class="field" style="margin:0"><div class="with-mic"><input id="sara-name" value="${esc(prefs.botName)}" placeholder="Сара" onchange="setSara('botName', this.value)">${micButton("sara-name")}</div></div>`)}
         ${block("Лицо",
           `<div class="faces">
              <button type="button" class="face ${!prefs.avatar ? "on" : ""}" onclick="setSara('avatar','')" title="Сара">
-               <img src="${SARA}" alt="Сара"><span>Сара</span>
+               <img src="${SARA}"${SARA_FALLBACK} alt="Сара"><span>Сара</span>
              </button>
              ${FACES.map((f) => `
                <button type="button" class="face ${prefs.avatar === "face:" + f.id ? "on" : ""}" onclick="setSara('avatar','face:${f.id}')" title="${esc(f.name)}">
@@ -2482,7 +2512,7 @@
     function renderLogin(note) {
       view.innerHTML = `
         <div class="card" style="padding:18px;text-align:center">
-          <img src="${SARA}" alt="" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
+          <img src="${SARA}"${SARA_FALLBACK} alt="" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin:2px auto 12px">
           <div style="font-size:17px;font-weight:700;margin-bottom:6px">Сара пока не узнала тебя</div>
           <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
             Открой приложение кнопкой <b>«📲 Открыть»</b> в чате с Сарой — дальше вход запомнится, и это окно больше не появится.

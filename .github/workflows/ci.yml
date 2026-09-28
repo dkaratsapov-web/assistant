@@ -31,3 +31,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Smoke (браузер)
         run: npm run smoke
+      # Проверка «как из России без VPN»: все зарубежные адреса молчат.
+      # Появилась после случая, когда приложение на смартфоне в РФ
+      # открывалось только через VPN из-за трёх внешних ссылок в странице.
+      - name: Smoke (без зарубежных доменов)
+        run: npm run smoke:ru

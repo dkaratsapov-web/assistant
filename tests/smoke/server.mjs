@@ -14,7 +14,19 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", "
 const API = {
   "/api/me": { user_id: 1, role: "owner", channel: "max", telemost: false, voice: true },
   "/api/prefs": null, // отдаём то, что прислал тест (см. PREFS ниже)
-  "/api/home": { tasks: { work: 2, personal: 1 }, overdue: [{ id: 1, title: "Просроченное дело", due_at: new Date(Date.now() - 86400000).toISOString(), scope: "work" }], today: [], birthdays: [] },
+  // Форма ответа должна совпадать с боевой (src/api.ts, GET /api/home), иначе тест
+  // проходит на выдуманных данных и не замечает поломку главного экрана.
+  "/api/home": {
+    tasks: [
+      { id: 1, title: "Просроченное дело", due_at: new Date(Date.now() - 86400000).toISOString(), scope: "work", overdue: true },
+      { id: 2, title: "Дело на сегодня", due_at: new Date().toISOString(), scope: "personal", overdue: false },
+    ],
+    events: [{ id: 1, title: "Планёрка", starts_at: new Date().toISOString(), location: "", client: null }],
+    upcomingEvents: [{ id: 2, title: "Созвон", starts_at: new Date(Date.now() + 86400000).toISOString(), location: "", client: "АйПапа" }],
+    birthdays: [{ name: "Пётр", date: "10-05", in_days: 3 }],
+    counts: { work: 2, personal: 1 },
+    stats: { doneToday: 1, doneWeek: 4, doneTotal: 12 },
+  },
   "/api/tasks": { tasks: [{ id: 1, title: "Тестовая задача", status: "open", scope: "work", due_at: null, client_id: null }] },
   "/api/events": { events: [{ id: 1, title: "Встреча", starts_at: new Date(Date.now() + 86400000).toISOString(), location: "", notes: "", client_id: null }] },
   "/api/clients": { clients: [{ id: 1, name: "АйПапа", status: "active", platforms: "direct", budget: "", contact: "", notes: "", pay_amount: "", pay_due: "" }] },
