@@ -169,10 +169,11 @@ const TASK_PARSE_SYSTEM = `Ты — парсер задач. На вход да�
 export interface AssistantIntent {
   action:
     | "task" | "task_done" | "task_delete" | "task_edit"
-    | "event" | "event_delete"
+    | "event" | "event_delete" | "event_edit"
     | "contact"
     | "client_add" | "client_delete" | "client_edit"
     | "note_add"
+    | "query"
     | "none";
   title?: string;
   due?: string; // срок задачи словами
@@ -193,7 +194,7 @@ export interface AssistantIntent {
 const ROUTER_SYSTEM = `Ты — маршрутизатор команд ассистента Сары. По сообщению пользователя определи,
 хочет ли он ВЫПОЛНИТЬ действие или просто задать вопрос/попросить текст.
 Верни СТРОГО один JSON-объект без пояснений и markdown:
-{"action":"task|task_done|task_delete|task_edit|event|event_delete|contact|client_add|client_delete|client_edit|note_add|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+{"action":"task|task_done|task_delete|task_edit|event|event_delete|event_edit|contact|client_add|client_delete|client_edit|note_add|query|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 ГЛАВНОЕ РАЗЛИЧЕНИЕ:
 - Если пользователь просит СДЕЛАТЬ/ВЫПОЛНИТЬ работу ПРЯМО СЕЙЧАС — проанализировать, написать, составить, придумать,
   дать план/совет/идеи, «действуй как…», «помоги мне…» — это НЕ задача, это "none" (Сара ответит сама).
@@ -217,11 +218,20 @@ const ROUTER_SYSTEM = `Ты — маршрутизатор команд асси
 - ЕДА: «добавь в еду …», «запиши в рацион …», «посчитай калории …», «съел …» — это НЕ задача и НЕ встреча, верни "none": записью питания занимается отдельный разбор.
 - client — если в сообщении назван клиент или проект («встреча с АйПапой», «счёт для Ромашки»), впиши его название в поле client. Иначе оставь пустым.
 - "event_delete" — отменить/удалить встречу («отмени встречу …», «удали созвон …»). title = о какой встрече.
+- "event_edit" — ИЗМЕНИТЬ существующую встречу: перенести на другое время, переименовать, поменять место.
+  Сигналы: «перенеси встречу», «сдвинь созвон», «встреча будет не в 12, а в 16», «поменяй место встречи».
+  title = слова из названия существующей встречи; at = новое время; location = новое место; new_name = новое название.
+  Если человек говорит просто «перенеси на 16:00» сразу после разговора о встрече — title оставь пустым,
+  ассистент сам поймёт, о какой встрече речь.
 - "contact" — добавить контакт/человека или день рождения («запиши др», «добавь контакт»). name = имя, birthday = дата.
 - "client_add" — добавить клиента/заказчика/проект. name = название, platforms = площадки/услуги или "", budget = рекл. бюджет или "", fee = сумма за ведение или "", pay_due = дедлайн оплаты (напр. «5 число») или "".
 - "client_delete" — удалить клиента. name = название клиента.
 - "client_edit" — переименовать/изменить клиента («переименуй клиента X в Y», «поменяй оплату ведения …», «оплата до 5 числа»). name = текущее название, new_name = новое (если переименование), platforms/budget/fee/pay_due — если меняются.
 - "note_add" — сохранить заметку/идею («запиши идею», «заметка: …», «запомни, что …»). title = текст заметки.
+- "query" — вопрос О СВОИХ ЗАПИСЯХ в ассистенте: «что у меня сегодня/завтра», «какие задачи по Ромашке»,
+  «что просрочено», «сколько дел висит», «когда встреча с банком», «что я сделал на этой неделе», «покажи клиентов».
+  Ответ соберёт сам ассистент из базы. Поля заполнять не нужно, кроме client — если спрашивают про конкретного клиента.
+  Не путать с "none": «сколько калорий в банане» — это общий вопрос ("none"), «сколько я съел сегодня» — про свои записи ("query").
 - "none" — вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ операция с записями.
 - scope: "personal" для личного (семья, здоровье, быт), иначе "work".
 ВАЖНО про даты: все относительные сроки («сегодня», «завтра», «через час», «в пятницу», «в 13 часов», «в обед»)
@@ -247,17 +257,56 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 "закрой задачу по лендингу" → {"action":"task_done","title":"лендинг","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "отчёт готов" → {"action":"task_done","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "удали задачу про отчёт" → {"action":"task_delete","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"перенеси встречу с Ромашкой на 16:00" → {"action":"event_edit","title":"Ромашка","due":"","at":"2026-07-31 16:00","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":"Ромашка"}
+"сдвинь созвон на час позже" → {"action":"event_edit","title":"созвон","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"встреча с банком будет в офисе" → {"action":"event_edit","title":"банк","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"офис","platforms":"","budget":"","client":""}
 "отмени встречу с клиентом" → {"action":"event_delete","title":"встреча с клиентом","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "запиши идею: запустить акцию к 8 марта" → {"action":"note_add","title":"запустить акцию к 8 марта","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"что у меня завтра?" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"какие задачи по Ромашке" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":"Ромашка"}
+"что я сделал на этой неделе" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "напиши 3 заголовка для Директа" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "действуй как СММ, проанализируй тренды 2026 и дай контент-план для Telegram" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "составь контент-план на неделю" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "помоги придумать оффер для лендинга" → {"action":"none","title":"","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 
-Отвечай ТОЛЬКО одной строкой JSON, без markdown, без \`\`\`, без пояснений.`;
+НЕСКОЛЬКО ДЕЛ В ОДНОЙ ФРАЗЕ. Если человек назвал два и более РАЗНЫХ независимых дела
+(«завтра созвон с Ромашкой в 12 и не забудь отправить смету»), верни JSON-МАССИВ объектов —
+по одному на каждое дело, в том же порядке. Если дело одно — верни один объект, не массив.
+Одно дело с подробностями («встреча с Ромашкой завтра в 12 в офисе») — это ОДИН объект.
+Перечисление внутри одного дела («купить хлеб, молоко и яйца») — тоже ОДИН объект.
 
-/** Определяет намерение (действие или обычный вопрос). Возвращает null при ошибке разбора. */
-export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string, lessons: Lesson[] = []): Promise<AssistantIntent | null> {
+Пример массива:
+"завтра созвон с Ромашкой в 12 и не забудь отправить смету" → [{"action":"event","title":"Созвон с Ромашкой","due":"","at":"2026-08-01 12:00","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":"Ромашка"},{"action":"task","title":"Отправить смету","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}]
+
+Отвечай ТОЛЬКО JSON, без markdown, без \`\`\`, без пояснений.`;
+
+/**
+ * Достаёт из ответа модели одно намерение или сразу несколько.
+ *
+ * Массив приходится искать отдельно: общий разбор JSON ищет «{…}» жадно и на
+ * «[{…},{…}]» склеил бы два объекта в одну битую строку.
+ */
+export function extractIntents(raw: string): AssistantIntent[] {
+  const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "");
+  const arr = cleaned.match(/\[[\s\S]*\]/);
+  if (arr) {
+    try {
+      const parsed = JSON.parse(arr[0]);
+      if (Array.isArray(parsed)) return parsed.filter((o) => o && typeof o.action === "string");
+    } catch {
+      // не массив — ниже попробуем как одиночный объект
+    }
+  }
+  const one = extractJson(cleaned) as AssistantIntent | null;
+  return one && one.action ? [one] : [];
+}
+
+/**
+ * Определяет намерения. Обычно одно, но в «завтра созвон в 12 и не забудь
+ * отправить смету» их два — вернётся два.
+ */
+export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string, lessons: Lesson[] = []): Promise<AssistantIntent[]> {
   const raw = await complete(
     cfg,
     [
@@ -267,10 +316,9 @@ export async function routeAssistant(cfg: AiConfig, text: string, nowStr: string
       { role: "user", text },
     ],
     cfg.router,
-    { maxTokens: 400, temperature: 0 }
+    { maxTokens: 700, temperature: 0 }
   );
-  const obj = extractJson(raw) as AssistantIntent | null;
-  return obj && obj.action ? obj : null;
+  return extractIntents(raw);
 }
 
 export interface Nutrition {

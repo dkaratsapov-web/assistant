@@ -5,8 +5,9 @@
  */
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
-import { Env, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, WB_END, WB_START, wordRe } from "./utils";
+import { answerQuery, parseQuery } from "./queries";
+import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, WB_END, WB_START, wordRe } from "./utils";
 
 export const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -54,6 +55,9 @@ export async function performIntent(
   rawText = ""
 ): Promise<string | null> {
   if (!intent || intent.action === "none") return null;
+  // Копия в локальной переменной: разбор иногда уточняется по ходу — например,
+  // «перенеси на пятницу» может относиться ко встрече, а не к задаче.
+  let cmd: AssistantIntent = intent;
 
   /**
    * Чей это клиент. Сначала верим ИИ (он мог вытащить имя), иначе ищем имя
@@ -66,12 +70,12 @@ export async function performIntent(
   };
 
   const findClient = async (): Promise<{ id: number; name: string } | null> => {
-    const named = (intent.client ?? "").trim();
+    const named = (cmd.client ?? "").trim();
     if (named) {
       const byName = await db.findClientByName(uid, named);
       if (byName) return byName;
     }
-    const where = `${rawText} ${intent.title ?? ""}`.trim();
+    const where = `${rawText} ${cmd.title ?? ""}`.trim();
     if (!where) return null;
     return mentionedClient(await db.listClients(uid), where);
   };
@@ -84,9 +88,56 @@ export async function performIntent(
    * Если одинаково подходят несколько — не угадываем. Закрыть не ту задачу
    * хуже, чем переспросить.
    */
-  const findTask = async (q: string): Promise<{ task: Task | null; ask: string | null }> => {
-    const tasks = await db.listTasks({ visibleTo: uid });
-    const { best, rivals } = bestMatch(tasks, (t) => t.title, q || rawText);
+  /**
+   * О чём была речь в прошлый раз. Позволяет сказать просто «перенеси на пятницу»
+   * сразу после того, как задача создана или упомянута.
+   */
+  const setFocus = async (kind: "task" | "event", id: number) => {
+    await db.setSetting(`focus:${uid}`, JSON.stringify({ kind, id }));
+  };
+  const getFocusKind = async (): Promise<string | null> => {
+    const raw = await db.getSetting(`focus:${uid}`);
+    if (!raw) return null;
+    try { return (JSON.parse(raw) as { kind?: string }).kind ?? null; } catch { return null; }
+  };
+  const getFocus = async (kind: "task" | "event"): Promise<number | null> => {
+    const raw = await db.getSetting(`focus:${uid}`);
+    if (!raw) return null;
+    try {
+      const f = JSON.parse(raw) as { kind?: string; id?: number };
+      return f.kind === kind && f.id ? f.id : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Названа ли запись вообще. «Перенеси на пятницу» — не названа (остались только
+   * слова о времени), «перенеси задачу про молоко» — названа. Разница важна:
+   * в первом случае берём то, о чём говорили, во втором честно ищем и можем
+   * не найти. Иначе Сара молча меняла бы не ту запись.
+   */
+  const named = (q: string) => {
+    const w = keyWords(q || rawText);
+    return w.length > 0 && !w.every(isTimeWord);
+  };
+
+  /**
+   * `includeClosed` нужен для правок: «верни отчёт в работу» говорят про уже
+   * закрытую задачу, и без этого она просто не находилась. Закрытые смотрим
+   * только вторым заходом — иначе старая выполненная задача могла бы
+   * перебить активную с похожим названием.
+   */
+  const findTask = async (q: string, includeClosed = false): Promise<{ task: Task | null; ask: string | null }> => {
+    const active = await db.listTasks({ visibleTo: uid });
+    const closed = includeClosed ? await db.listTasks({ statuses: [TASK_DONE, TASK_FAILED], visibleTo: uid }) : [];
+    if (!named(q)) {
+      const id = await getFocus("task");
+      const prev = id ? [...active, ...closed].find((t) => t.id === id) : null;
+      return { task: prev ?? null, ask: null };
+    }
+    let { best, rivals } = bestMatch(active, (t) => t.title, q || rawText);
+    if (!best && !rivals.length && closed.length) ({ best, rivals } = bestMatch(closed, (t) => t.title, q || rawText));
     if (best) return { task: best, ask: null };
     if (rivals.length) {
       const list = rivals.slice(0, 4).map((t) => `«${t.title}»`).join(", ");
@@ -95,16 +146,42 @@ export async function performIntent(
     return { task: null, ask: null };
   };
 
-  if (intent.action === "task") {
-    const title = (intent.title ?? "").trim();
+  /** То же самое для встреч. Ищем среди предстоящих — прошедшие переносить незачем. */
+  const findEvent = async (q: string): Promise<{ event: Event | null; ask: string | null }> => {
+    const events = await db.listEvents(uid, startOfLocalDayIso(tz));
+    if (!named(q)) {
+      const id = await getFocus("event");
+      const prev = id ? events.find((e) => e.id === id) : null;
+      return { event: prev ?? null, ask: null };
+    }
+    const { best, rivals } = bestMatch(events, (e) => e.title, q || rawText);
+    if (best) return { event: best, ask: null };
+    if (rivals.length) {
+      const list = rivals.slice(0, 4).map((e) => `«${e.title}»`).join(", ");
+      return { event: null, ask: `Под это подходит несколько встреч: ${list}. Какую именно?` };
+    }
+    return { event: null, ask: null };
+  };
+
+  if (cmd.action === "query") {
+    // Подробности вопроса разбираем сами: модель уже сказала, что это вопрос
+    // о записях, а какие именно записи и за какой срок — надёжнее по словам.
+    const ask = parseQuery(rawText, true);
+    if (!ask) return null;
+    return await answerQuery(db, uid, tz, ask, await findClient());
+  }
+
+  if (cmd.action === "task") {
+    const title = (cmd.title ?? "").trim();
     if (!title) return null;
-    const dueAt = intent.due ? resolveWhen(intent.due, tz, 10) : null;
-    const scope = intent.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
+    const dueAt = cmd.due ? resolveWhen(cmd.due, tz, 10) : null;
+    const scope = cmd.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const client = scope === SCOPE_PERSONAL ? null : await findClient();
     // «каждый вторник», «по будням» — задача должна возвращаться сама
     const repeat = parseRepeat(`${rawText} ${title}`);
     const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null, repeat });
     await remember("task", id);
+    await setFocus("task", id);
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
     const cl = client ? `\n🤝 ${client.name}` : "";
@@ -112,19 +189,20 @@ export async function performIntent(
     return `✅ Добавила задачу\n«${title}»\n${sc}${due}${cl}${rp}`;
   }
 
-  if (intent.action === "task_done") {
-    const q = (intent.title ?? "").trim();
+  if (cmd.action === "task_done") {
+    const q = (cmd.title ?? "").trim();
     if (!q && !rawText) return null;
     const { task, ask } = await findTask(q);
     if (ask) return ask;
     if (!task) return `Не нашла активную задачу «${q}».`;
     await db.setTaskStatus(task.id, TASK_DONE, uid, tz);
+    await setFocus("task", task.id);
     const again = task.repeat_rule ? `\n🔁 Вернётся: ${repeatLabel(task.repeat_rule)}` : "";
     return `✅ Задача «${task.title}» отмечена выполненной. Молодец!${again}`;
   }
 
-  if (intent.action === "task_delete") {
-    const q = (intent.title ?? "").trim();
+  if (cmd.action === "task_delete") {
+    const q = (cmd.title ?? "").trim();
     if (!q) return null;
     const { task, ask } = await findTask(q);
     if (ask) return ask;
@@ -133,16 +211,24 @@ export async function performIntent(
     return `🗑 Задача «${task.title}» удалена.`;
   }
 
-  if (intent.action === "task_edit") {
-    const q = (intent.title ?? "").trim();
-    const { task, ask } = await findTask(q);
+  // «Перенеси на пятницу» без названия: речь о том, о чём только что говорили.
+  // Если это была встреча — правим встречу, а не ищем несуществующую задачу.
+  if (cmd.action === "task_edit" && !named(cmd.title ?? "")) {
+    if ((await getFocusKind()) === "event") {
+      cmd = { ...cmd, action: "event_edit", at: (cmd.at ?? "") || (cmd.due ?? "") };
+    }
+  }
+
+  if (cmd.action === "task_edit") {
+    const q = (cmd.title ?? "").trim();
+    const { task, ask } = await findTask(q, true);
     if (ask) return ask;
     if (!task) return `Не нашла активную задачу${q ? ` «${q}»` : ""}. Скажи пару слов из её названия.`;
 
     const fields: { title?: string; dueAt?: string | null; scope?: string; clientId?: number | null; repeat?: string } = {};
     const done: string[] = [];
 
-    const newTitle = (intent.new_name ?? "").trim();
+    const newTitle = (cmd.new_name ?? "").trim();
     if (newTitle && newTitle.toLowerCase() !== task.title.toLowerCase()) {
       fields.title = newTitle;
       done.push(`название → «${newTitle}»`);
@@ -152,18 +238,18 @@ export async function performIntent(
     if (/(убер[иёи]\w*|сним\w*|без)\s+(срок\w*|дедлайн\w*|дат\w*)/i.test(rawText)) {
       fields.dueAt = null;
       done.push("срок снят");
-    } else if ((intent.due ?? "").trim()) {
-      const dueAt = resolveWhen(intent.due!, tz, 10);
+    } else if ((cmd.due ?? "").trim()) {
+      const dueAt = resolveWhen(cmd.due!, tz, 10);
       if (dueAt) {
         fields.dueAt = dueAt;
         done.push(`срок → ${formatDue(dueAt, tz)}`);
       }
     }
 
-    if (intent.scope === SCOPE_PERSONAL || intent.scope === SCOPE_WORK) {
-      if (intent.scope !== task.scope) {
-        fields.scope = intent.scope;
-        done.push(intent.scope === SCOPE_PERSONAL ? "стала личной" : "стала рабочей");
+    if (cmd.scope === SCOPE_PERSONAL || cmd.scope === SCOPE_WORK) {
+      if (cmd.scope !== task.scope) {
+        fields.scope = cmd.scope;
+        done.push(cmd.scope === SCOPE_PERSONAL ? "стала личной" : "стала рабочей");
       }
     }
 
@@ -182,7 +268,7 @@ export async function performIntent(
     if (Object.keys(fields).length) await db.updateTask(task.id, fields, uid);
 
     // Статус меняем отдельно: у него своя логика (повтор, дата выполнения)
-    const status = (intent.status ?? "").trim();
+    const status = (cmd.status ?? "").trim();
     if (status === TASK_DONE || status === TASK_IN_PROGRESS || status === TASK_OPEN) {
       if (status !== task.status) {
         await db.setTaskStatus(task.id, status, uid, tz);
@@ -190,40 +276,83 @@ export async function performIntent(
       }
     }
 
+    await setFocus("task", task.id);
     if (!done.length) return `Задача «${task.title}» — не поняла, что именно поменять. Скажи, например: «перенеси на пятницу» или «переименуй в …».`;
     return `✏️ Обновила задачу\n«${fields.title ?? task.title}»\n${done.join("\n")}`;
   }
 
-  if (intent.action === "event") {
-    const title = (intent.title ?? "").trim();
+  if (cmd.action === "event") {
+    const title = (cmd.title ?? "").trim();
     if (!title) return null;
-    const startsAt = intent.at ? resolveWhen(intent.at, tz, 12) : null;
+    const startsAt = cmd.at ? resolveWhen(cmd.at, tz, 12) : null;
     if (!startsAt) {
       // время не распозналось — не теряем задумку, заводим как задачу
       await db.addTask({ title: `Встреча: ${title}`, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt: null });
       return `📝 Добавила как задачу «Встреча: ${title}» — не поняла точное время. Скажи время, и перенесу в календарь.`;
     }
     const client = await findClient();
-    const id = await db.addEvent({ userId: uid, title, startsAt, location: intent.location ?? "", notes: "", clientId: client?.id ?? null });
+    const id = await db.addEvent({ userId: uid, title, startsAt, location: cmd.location ?? "", notes: "", clientId: client?.id ?? null });
     await remember("event", id);
-    const loc = intent.location ? `\n📍 ${intent.location}` : "";
+    await setFocus("event", id);
+    const loc = cmd.location ? `\n📍 ${cmd.location}` : "";
     const cl = client ? `\n🤝 ${client.name}` : "";
     return `📅 Встреча добавлена\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
   }
 
-  if (intent.action === "event_delete") {
-    const q = (intent.title ?? "").trim();
+  if (cmd.action === "event_edit") {
+    const q = (cmd.title ?? "").trim();
+    const { event, ask } = await findEvent(q);
+    if (ask) return ask;
+    if (!event) return `Не нашла встречу${q ? ` «${q}»` : ""}. Скажи пару слов из её названия.`;
+
+    const fields: { title?: string; startsAt?: string; location?: string; clientId?: number | null } = {};
+    const done: string[] = [];
+
+    const newTitle = (cmd.new_name ?? "").trim();
+    if (newTitle && newTitle.toLowerCase() !== event.title.toLowerCase()) {
+      fields.title = newTitle;
+      done.push(`название → «${newTitle}»`);
+    }
+    // Для встречи новое время может прийти и в at, и в due — модель путает поля
+    const whenText = (cmd.at ?? "").trim() || (cmd.due ?? "").trim();
+    if (whenText) {
+      const startsAt = resolveWhen(whenText, tz, 12);
+      if (startsAt && startsAt !== event.starts_at) {
+        fields.startsAt = startsAt;
+        done.push(`время → ${formatEventTime(startsAt, tz)}`);
+      }
+    }
+    const place = (cmd.location ?? "").trim();
+    if (place && place !== event.location) {
+      fields.location = place;
+      done.push(`место → ${place}`);
+    }
+    const client = await findClient();
+    if (client && client.id !== event.client_id) {
+      fields.clientId = client.id;
+      done.push(`клиент → ${client.name}`);
+    }
+
+    if (!done.length) return `Встреча «${event.title}» — не поняла, что именно поменять. Скажи, например: «перенеси на 16:00».`;
+    await db.updateEvent(event.id, uid, fields);
+    await setFocus("event", event.id);
+    return `✏️ Обновила встречу\n«${fields.title ?? event.title}»\n${done.join("\n")}`;
+  }
+
+  if (cmd.action === "event_delete") {
+    const q = (cmd.title ?? "").trim();
     if (!q) return null;
-    const ev = await db.findEventByTitle(uid, q);
+    const { event: ev, ask: evAsk } = await findEvent(q);
+    if (evAsk) return evAsk;
     if (!ev) return `Не нашла встречу «${q}».`;
     await db.deleteEvent(ev.id, uid);
     return `🗑 Встреча «${ev.title}» отменена.`;
   }
 
-  if (intent.action === "contact") {
-    const name = (intent.name ?? intent.title ?? "").trim();
+  if (cmd.action === "contact") {
+    const name = (cmd.name ?? cmd.title ?? "").trim();
     if (!name) return null;
-    let birthday: string | null = (intent.birthday ?? "").trim() || null;
+    let birthday: string | null = (cmd.birthday ?? "").trim() || null;
     if (birthday && !/^\d{2}-\d{2}$/.test(birthday) && !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) {
       const iso = resolveWhen(birthday, tz);
       if (iso) {
@@ -238,24 +367,24 @@ export async function performIntent(
     return `👤 Контакт добавлен\n${name}${bd}`;
   }
 
-  if (intent.action === "client_add") {
-    const name = (intent.name ?? intent.title ?? "").trim();
+  if (cmd.action === "client_add") {
+    const name = (cmd.name ?? cmd.title ?? "").trim();
     if (!name) return null;
-    await db.addClient(uid, name, (intent.platforms ?? "").trim(), (intent.budget ?? "").trim(), {
-      payAmount: (intent.fee ?? "").trim(),
-      payDue: (intent.pay_due ?? "").trim(),
+    await db.addClient(uid, name, (cmd.platforms ?? "").trim(), (cmd.budget ?? "").trim(), {
+      payAmount: (cmd.fee ?? "").trim(),
+      payDue: (cmd.pay_due ?? "").trim(),
     });
     const extra = [
-      intent.platforms,
-      intent.budget ? `бюджет ${intent.budget}` : "",
-      intent.fee ? `ведение ${intent.fee}` : "",
-      intent.pay_due ? `оплата ${intent.pay_due}` : "",
+      cmd.platforms,
+      cmd.budget ? `бюджет ${cmd.budget}` : "",
+      cmd.fee ? `ведение ${cmd.fee}` : "",
+      cmd.pay_due ? `оплата ${cmd.pay_due}` : "",
     ].filter(Boolean).join(" · ");
     return `🤝 Клиент добавлен\n${name}${extra ? `\n${extra}` : ""}`;
   }
 
-  if (intent.action === "client_delete") {
-    const name = (intent.name ?? intent.title ?? "").trim();
+  if (cmd.action === "client_delete") {
+    const name = (cmd.name ?? cmd.title ?? "").trim();
     if (!name) return null;
     const client = await db.findClientByName(uid, name);
     if (!client) return `Не нашла клиента «${name}». Проверь название — точнее: /clients в боте.`;
@@ -263,17 +392,17 @@ export async function performIntent(
     return `🗑 Клиент удалён: ${client.name}`;
   }
 
-  if (intent.action === "client_edit") {
-    const name = (intent.name ?? "").trim();
+  if (cmd.action === "client_edit") {
+    const name = (cmd.name ?? "").trim();
     if (!name) return null;
     const client = await db.findClientByName(uid, name);
     if (!client) return `Не нашла клиента «${name}».`;
     const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
-    if (intent.new_name && intent.new_name.trim()) fields.name = intent.new_name.trim();
-    if (intent.platforms && intent.platforms.trim()) fields.platforms = intent.platforms.trim();
-    if (intent.budget && intent.budget.trim()) fields.budget = intent.budget.trim();
-    if (intent.fee && intent.fee.trim()) fields.payAmount = intent.fee.trim();
-    if (intent.pay_due && intent.pay_due.trim()) fields.payDue = intent.pay_due.trim();
+    if (cmd.new_name && cmd.new_name.trim()) fields.name = cmd.new_name.trim();
+    if (cmd.platforms && cmd.platforms.trim()) fields.platforms = cmd.platforms.trim();
+    if (cmd.budget && cmd.budget.trim()) fields.budget = cmd.budget.trim();
+    if (cmd.fee && cmd.fee.trim()) fields.payAmount = cmd.fee.trim();
+    if (cmd.pay_due && cmd.pay_due.trim()) fields.payDue = cmd.pay_due.trim();
     if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи название, площадки, бюджет, сумму ведения или дедлайн оплаты.`;
     await db.updateClient(client.id, uid, fields);
     const changes = [
@@ -286,8 +415,8 @@ export async function performIntent(
     return `✏️ Клиент обновлён: ${client.name}\n${changes}`;
   }
 
-  if (intent.action === "note_add") {
-    const text = (intent.title ?? "").trim();
+  if (cmd.action === "note_add") {
+    const text = (cmd.title ?? "").trim();
     if (!text) return null;
     const id = await db.addNote(uid, text);
     await remember("note", id);
@@ -352,8 +481,14 @@ export function localRoute(text: string): AssistantIntent | null {
   // страховка на случай, когда модель недоступна или отвечает медленно.
   if ((m = t.match(/^(?:закрой|закрыть|заверш(?:и|ить))\s+(?:задач[а-яё]*\s+)?(.+)/i)))
     return { action: "task_done", title: m[1].trim() };
+  if ((m = t.match(/^(?:перенес(?:и|ти)|сдвин(?:ь|уть))\s+на\s+(.+)$/i)))
+    return { action: "task_edit", title: "", due: m[1].trim(), at: m[1].trim() };
+  if ((m = t.match(/^перенес(?:и|ти)\s+(?:встреч[а-яё]*|созвон[а-яё]*)\s+(.+?)\s+на\s+(.+)$/i)))
+    return { action: "event_edit", title: m[1].trim(), at: m[2].trim() };
   if ((m = t.match(/^перенес(?:и|ти)\s+(?:задач[а-яё]*\s+)?(.+?)\s+на\s+(.+)$/i)))
     return { action: "task_edit", title: m[1].trim(), due: m[2].trim() };
+  if ((m = t.match(/^отмен(?:и|ить)\s+(?:встреч[а-яё]*|созвон[а-яё]*)\s+(.+)$/i)))
+    return { action: "event_delete", title: m[1].trim() };
   if ((m = t.match(/^переименуй\s+(?:задач[а-яё]*\s+)?(.+?)\s+в\s+(.+)$/i)))
     return { action: "task_edit", title: m[1].trim(), new_name: m[2].trim() };
   if ((m = t.match(/^(?:возьм(?:и|у)|беру|взял[а-яё]*|начал[а-яё]*|приступил[а-яё]*)\s+(?:в\s+работу\s+)?(?:к\s+)?(?:делать\s+|заниматься\s+)?(?:задач[а-яё]*\s+)?(.+?)(?:\s+в\s+работу)?$/i)))
@@ -491,6 +626,14 @@ export async function tryPerformCommand(
     }
   }
 
+  // 0c) Вопрос о своих записях — отвечаем из базы, без ИИ.
+  // Это самый частый вопрос к ассистенту, и выдуманный ответ тут недопустим.
+  const ask = parseQuery(text);
+  if (ask) {
+    const client = mentionedClient(await db.listClients(uid), text);
+    return await answerQuery(db, uid, tz, ask, client);
+  }
+
   // 0) Локальный быстрый разбор — без ИИ (экономия). Частые команды без дат.
   const local = localRoute(text);
   if (local) {
@@ -501,9 +644,15 @@ export async function tryPerformCommand(
   if (!ai) return null;
   const now = nowContext(tz);
 
-  // 1) Иначе — распознавание команды на дешёвой модели (yandexgpt-lite)
-  const intent = await routeAssistant(ai, text, now, await db.listLessons(uid));
-  let action = await performIntent(intent, db, uid, tz, text);
+  // 1) Иначе — распознавание команды на дешёвой модели (yandexgpt-lite).
+  // Дел может быть несколько: «завтра созвон в 12 и не забудь отправить смету».
+  const intents = await routeAssistant(ai, text, now, await db.listLessons(uid));
+  const answers: string[] = [];
+  for (const one of intents) {
+    const said = await performIntent(one, db, uid, tz, text);
+    if (said) answers.push(said);
+  }
+  let action = answers.length ? answers.join("\n\n") : null;
 
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {

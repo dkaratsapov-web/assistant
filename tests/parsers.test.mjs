@@ -11,6 +11,8 @@ import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, rep
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
+import { parseQuery } from "../.test-build/queries.js";
+import { extractIntents } from "../.test-build/ai.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -96,13 +98,16 @@ test("клиент узнаётся в тексте по своему имени
 });
 
 test("база формулировок цела и согласована с кодом", () => {
-  const ACTIONS = new Set(["task", "task_done", "task_delete", "task_edit", "event", "event_delete", "contact", "client_add", "client_delete", "client_edit", "note_add", "none"]);
+  const ACTIONS = new Set(["task", "task_done", "task_delete", "task_edit", "event", "event_edit", "query", "event_delete", "contact", "client_add", "client_delete", "client_edit", "note_add", "none"]);
   assert.ok(PHRASES.length >= 30, "примеров должно быть достаточно для подсказки");
   const seen = new Set();
   for (const p of PHRASES) {
     const obj = JSON.parse(p.json);                       // разбор не должен падать
     assert.ok(ACTIONS.has(obj.action), `неизвестное действие: ${obj.action} в «${p.text}»`);
-    if (obj.action !== "none") assert.ok(obj.title || obj.name, `пример без названия: «${p.text}»`);
+    // Правка без названия — законный случай: «перенеси на пятницу» относится
+    // к тому, о чём говорили в прошлой реплике, и названия в ней нет.
+    const mayOmitTitle = obj.action === "task_edit" || obj.action === "event_edit";
+    if (obj.action !== "none" && !mayOmitTitle) assert.ok(obj.title || obj.name, `пример без названия: «${p.text}»`);
     assert.ok(!seen.has(p.text), `повтор примера: «${p.text}»`);
     seen.add(p.text);
   }
@@ -327,4 +332,74 @@ test("в базе формулировок есть примеры на изме
   assert.ok(edits.length >= 8, `примеров task_edit мало: ${edits.length}`);
   assert.ok(edits.some((p) => p.text.includes("перенеси")));
   assert.ok(edits.some((p) => p.json.includes("in_progress")));
+});
+
+/* ---------- Вопросы о своих записях ---------- */
+
+test("вопрос о повестке распознаётся с периодом", () => {
+  assert.equal(parseQuery("что у меня сегодня?").kind, "agenda");
+  assert.equal(parseQuery("что у меня сегодня?").period, "today");
+  assert.equal(parseQuery("что у меня завтра").period, "tomorrow");
+  assert.equal(parseQuery("что на этой неделе").period, "week");
+});
+
+test("вопрос про задачи, встречи, клиентов и заметки различается", () => {
+  assert.equal(parseQuery("покажи задачи").kind, "tasks");
+  assert.equal(parseQuery("какие встречи завтра").kind, "events");
+  assert.equal(parseQuery("покажи клиентов").kind, "clients");
+  assert.equal(parseQuery("покажи заметки").kind, "notes");
+  assert.equal(parseQuery("что я сделал на этой неделе").kind, "stats");
+});
+
+test("просроченное узнаётся по разным словам", () => {
+  assert.equal(parseQuery("что просрочено").period, "overdue");
+  assert.equal(parseQuery("что горит?").period, "overdue");
+});
+
+test("личное и рабочее разделяются", () => {
+  assert.equal(parseQuery("какие у меня личные задачи").scope, "personal");
+  assert.equal(parseQuery("покажи рабочие задачи").scope, "work");
+});
+
+test("команда не принимается за вопрос", () => {
+  assert.equal(parseQuery("закрой задачу про отчёт"), null);
+  assert.equal(parseQuery("напомни завтра позвонить в банк"), null);
+  assert.equal(parseQuery("встреча с Ромашкой завтра в 15:00"), null);
+  assert.equal(parseQuery("добавь задачу отчёт"), null);
+});
+
+test("вопрос без слова-признака всё равно ловится по знаку вопроса", () => {
+  assert.equal(parseQuery("задачи по Ромашке?").kind, "tasks");
+});
+
+test("force разбирает даже без признака вопроса — когда вопрос уже опознал ИИ", () => {
+  assert.equal(parseQuery("мои задачи на завтра", true).kind, "tasks");
+  assert.equal(parseQuery("мои задачи на завтра", true).period, "tomorrow");
+});
+
+/* ---------- Несколько дел в одной фразе ---------- */
+
+test("массив намерений разбирается целиком", () => {
+  const raw = '[{"action":"event","title":"Созвон"},{"action":"task","title":"Смета"}]';
+  const got = extractIntents(raw);
+  assert.equal(got.length, 2);
+  assert.equal(got[0].action, "event");
+  assert.equal(got[1].title, "Смета");
+});
+
+test("одиночный объект по-прежнему работает", () => {
+  const got = extractIntents('{"action":"task","title":"Отчёт"}');
+  assert.equal(got.length, 1);
+  assert.equal(got[0].title, "Отчёт");
+});
+
+test("обёртка markdown не мешает", () => {
+  const got = extractIntents('```json\n[{"action":"task","title":"Раз"},{"action":"task","title":"Два"}]\n```');
+  assert.equal(got.length, 2);
+});
+
+test("мусор и пустой ответ не роняют разбор", () => {
+  assert.deepEqual(extractIntents("не понял"), []);
+  assert.deepEqual(extractIntents(""), []);
+  assert.deepEqual(extractIntents('[{"нет":"действия"}]'), []);
 });
