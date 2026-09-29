@@ -168,7 +168,7 @@ const TASK_PARSE_SYSTEM = `Ты — парсер задач. На вход да�
 /** Намерение пользователя, распознанное ассистентом. */
 export interface AssistantIntent {
   action:
-    | "task" | "task_done" | "task_delete"
+    | "task" | "task_done" | "task_delete" | "task_edit"
     | "event" | "event_delete"
     | "contact"
     | "client_add" | "client_delete" | "client_edit"
@@ -180,7 +180,8 @@ export interface AssistantIntent {
   scope?: "work" | "personal";
   name?: string; // имя контакта / клиента
   client?: string; // клиент, к которому относится задача или встреча
-  new_name?: string; // новое имя (переименование клиента)
+  new_name?: string; // новое имя (переименование клиента) или новое название задачи
+  status?: string; // новый статус задачи: open | in_progress | done
   birthday?: string; // дата рождения
   location?: string; // место встречи
   platforms?: string; // площадки клиента
@@ -192,7 +193,7 @@ export interface AssistantIntent {
 const ROUTER_SYSTEM = `Ты — маршрутизатор команд ассистента Сары. По сообщению пользователя определи,
 хочет ли он ВЫПОЛНИТЬ действие или просто задать вопрос/попросить текст.
 Верни СТРОГО один JSON-объект без пояснений и markdown:
-{"action":"task|task_done|task_delete|event|event_delete|contact|client_add|client_delete|client_edit|note_add|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+{"action":"task|task_done|task_delete|task_edit|event|event_delete|contact|client_add|client_delete|client_edit|note_add|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 ГЛАВНОЕ РАЗЛИЧЕНИЕ:
 - Если пользователь просит СДЕЛАТЬ/ВЫПОЛНИТЬ работу ПРЯМО СЕЙЧАС — проанализировать, написать, составить, придумать,
   дать план/совет/идеи, «действуй как…», «помоги мне…» — это НЕ задача, это "none" (Сара ответит сама).
@@ -204,6 +205,14 @@ const ROUTER_SYSTEM = `Ты — маршрутизатор команд асси
 - "task" — добавить задачу/напоминание/дело на потом («напомни», «добавь задачу», «поставь задачу», «к пятнице надо…»). title = суть без срока, due = срок. НЕ используй для просьб выполнить работу сейчас.
 - "task_done" — отметить задачу выполненной («выполнил», «сделал», «задача … готова», «отметь … выполненной»). title = о какой задаче.
 - "task_delete" — удалить задачу («удали задачу …», «убери задачу …»). title = о какой задаче.
+- "task_edit" — ИЗМЕНИТЬ существующую задачу, не создавая новую. Сигналы: «перенеси», «сдвинь», «передвинь»,
+  «поменяй срок», «переименуй задачу», «назови задачу», «возьми в работу», «начал делать», «верни в работу»,
+  «сделай личной/рабочей», «привяжи задачу к клиенту», «сделай задачу ежедневной».
+  title = по каким словам искать СУЩЕСТВУЮЩУЮ задачу (только слова из её названия, без слов команды);
+  new_name = новое название, если переименовывают; due = новый срок; status = "in_progress" для «взял в работу»,
+  "open" для «верни в работу / открой заново»; scope = если делают личной или рабочей; client = если привязывают к клиенту.
+  Отличие от "task": здесь речь о задаче, которая УЖЕ ЕСТЬ. «Напомни завтра позвонить» — новая задача,
+  «перенеси звонок на завтра» — изменение существующей.
 - "event" — добавить встречу/созвон/событие («встреча», «созвон», «запланируй»). title = с кем/о чём, at = когда, location = место или "".
 - ЕДА: «добавь в еду …», «запиши в рацион …», «посчитай калории …», «съел …» — это НЕ задача и НЕ встреча, верни "none": записью питания занимается отдельный разбор.
 - client — если в сообщении назван клиент или проект («встреча с АйПапой», «счёт для Ромашки»), впиши его название в поле client. Иначе оставь пустым.
@@ -230,6 +239,13 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 "удали клиента Ромашка" → {"action":"client_delete","title":"","due":"","at":"","scope":"work","name":"Ромашка","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "переименуй клиента Ромашка в Лютик" → {"action":"client_edit","title":"","due":"","at":"","scope":"work","name":"Ромашка","new_name":"Лютик","birthday":"","location":"","platforms":"","budget":""}
 "я позвонил клиенту, отметь задачу выполненной" → {"action":"task_done","title":"позвонить клиенту","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"перенеси задачу по отчёту на пятницу" → {"action":"task_edit","title":"отчёт","due":"2026-08-01 10:00","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"переименуй задачу отчёт в квартальный отчёт" → {"action":"task_edit","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"Квартальный отчёт","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"взял в работу задачу по лендингу" → {"action":"task_edit","title":"лендинг","due":"","at":"","scope":"work","name":"","new_name":"","status":"in_progress","birthday":"","location":"","platforms":"","budget":"","client":""}
+"сделай задачу про врача личной" → {"action":"task_edit","title":"врач","due":"","at":"","scope":"personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"привяжи задачу по отчёту к Ромашке" → {"action":"task_edit","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":"Ромашка"}
+"закрой задачу по лендингу" → {"action":"task_done","title":"лендинг","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"отчёт готов" → {"action":"task_done","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "удали задачу про отчёт" → {"action":"task_delete","title":"отчёт","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "отмени встречу с клиентом" → {"action":"event_delete","title":"встреча с клиентом","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "запиши идею: запустить акцию к 8 марта" → {"action":"note_add","title":"запустить акцию к 8 марта","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}

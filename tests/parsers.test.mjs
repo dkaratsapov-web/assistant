@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel } from "../.test-build/utils.js";
+import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
@@ -96,7 +96,7 @@ test("клиент узнаётся в тексте по своему имени
 });
 
 test("база формулировок цела и согласована с кодом", () => {
-  const ACTIONS = new Set(["task", "task_done", "task_delete", "event", "event_delete", "contact", "client_add", "client_delete", "client_edit", "note_add", "none"]);
+  const ACTIONS = new Set(["task", "task_done", "task_delete", "task_edit", "event", "event_delete", "contact", "client_add", "client_delete", "client_edit", "note_add", "none"]);
   assert.ok(PHRASES.length >= 30, "примеров должно быть достаточно для подсказки");
   const seen = new Set();
   for (const p of PHRASES) {
@@ -249,4 +249,82 @@ test("правило повтора подписывается по-русски
   assert.equal(repeatLabel("w:2"), "каждый вторник");
   assert.equal(repeatLabel("w:3"), "каждую среду");
   assert.equal(repeatLabel(""), "");
+});
+
+/* ---------- Поиск задачи по словам человека ---------- */
+
+const T = (id, title) => ({ id, title });
+
+test("служебные слова вокруг названия отбрасываются", () => {
+  assert.deepEqual(keyWords("закрой задачу про отчёт"), ["отчет"]);
+  assert.deepEqual(keyWords("перенеси встречу с Ромашкой"), ["ромашкой"]);
+  assert.deepEqual(keyWords("отметь выполненной"), []);
+});
+
+test("задача находится по одному слову из названия", () => {
+  const tasks = [T(1, "Сделать отчёт для Ромашки"), T(2, "Позвонить в банк")];
+  assert.equal(bestMatch(tasks, (t) => t.title, "закрой задачу про отчёт").best.id, 1);
+  assert.equal(bestMatch(tasks, (t) => t.title, "отчёт готов").best.id, 1);
+  assert.equal(bestMatch(tasks, (t) => t.title, "позвонил в банк").best.id, 2);
+});
+
+test("падеж не мешает: «по Ромашке» находит «для Ромашки»", () => {
+  const tasks = [T(1, "Отчёт для Ромашки"), T(2, "Счёт для Лютика")];
+  assert.equal(bestMatch(tasks, (t) => t.title, "перенеси задачу по Ромашке").best.id, 1);
+});
+
+test("ё и е считаются одной буквой", () => {
+  const tasks = [T(1, "Сделать отчет")];
+  assert.equal(bestMatch(tasks, (t) => t.title, "отчёт сделал").best.id, 1);
+});
+
+test("две одинаково подходящие задачи — не угадываем, а переспрашиваем", () => {
+  const tasks = [T(1, "Отчёт для Ромашки"), T(2, "Отчёт для Лютика")];
+  const r = bestMatch(tasks, (t) => t.title, "закрой задачу про отчёт");
+  assert.equal(r.best, null);
+  assert.equal(r.rivals.length, 2);
+});
+
+test("более точное совпадение побеждает частичное", () => {
+  const tasks = [T(1, "Отчёт для Ромашки"), T(2, "Отчётность за квартал")];
+  assert.equal(bestMatch(tasks, (t) => t.title, "отчёт для Ромашки готов").best.id, 1);
+});
+
+test("ничего похожего — пустой результат, а не случайная задача", () => {
+  const tasks = [T(1, "Позвонить в банк")];
+  assert.equal(bestMatch(tasks, (t) => t.title, "купить молоко").best, null);
+  assert.equal(matchScore("Позвонить в банк", keyWords("купить молоко")), 0);
+});
+
+/* ---------- Команды по задачам без обращения к ИИ ---------- */
+
+test("«закрой задачу …» понимается без ИИ", () => {
+  assert.deepEqual(localRoute("Закрой задачу по лендингу"), { action: "task_done", title: "по лендингу" });
+  assert.deepEqual(localRoute("заверши отчёт"), { action: "task_done", title: "отчёт" });
+});
+
+test("«перенеси … на …» понимается без ИИ", () => {
+  assert.deepEqual(localRoute("перенеси задачу отчёт на пятницу"), { action: "task_edit", title: "отчёт", due: "пятницу" });
+});
+
+test("«переименуй … в …» понимается без ИИ", () => {
+  assert.deepEqual(localRoute("переименуй задачу отчёт в квартальный отчёт"),
+    { action: "task_edit", title: "отчёт", new_name: "квартальный отчёт" });
+});
+
+test("«взял в работу …» понимается без ИИ", () => {
+  assert.deepEqual(localRoute("взял в работу лендинг"), { action: "task_edit", title: "лендинг", status: "in_progress" });
+  assert.deepEqual(localRoute("начал делать смету"), { action: "task_edit", title: "смету", status: "in_progress" });
+});
+
+test("обычная фраза не превращается в команду", () => {
+  assert.equal(localRoute("что у меня на сегодня"), null);
+  assert.equal(localRoute("напиши три заголовка для Директа"), null);
+});
+
+test("в базе формулировок есть примеры на изменение задачи", () => {
+  const edits = PHRASES.filter((p) => p.json.includes('"task_edit"'));
+  assert.ok(edits.length >= 8, `примеров task_edit мало: ${edits.length}`);
+  assert.ok(edits.some((p) => p.text.includes("перенеси")));
+  assert.ok(edits.some((p) => p.json.includes("in_progress")));
 });

@@ -5,8 +5,8 @@
  */
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
-import { Env, SCOPE_PERSONAL, SCOPE_WORK, TASK_DONE } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, WB_END, WB_START, wordRe } from "./utils";
+import { Env, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, WB_END, WB_START, wordRe } from "./utils";
 
 export const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -76,6 +76,25 @@ export async function performIntent(
     return mentionedClient(await db.listClients(uid), where);
   };
 
+  /**
+   * Ищет СВОЮ активную задачу по словам человека: «закрой задачу про отчёт» →
+   * «Сделать отчёт для Ромашки». Поиск одной строкой целиком тут не годится —
+   * человек почти никогда не называет задачу ровно так, как она записана.
+   *
+   * Если одинаково подходят несколько — не угадываем. Закрыть не ту задачу
+   * хуже, чем переспросить.
+   */
+  const findTask = async (q: string): Promise<{ task: Task | null; ask: string | null }> => {
+    const tasks = await db.listTasks({ visibleTo: uid });
+    const { best, rivals } = bestMatch(tasks, (t) => t.title, q || rawText);
+    if (best) return { task: best, ask: null };
+    if (rivals.length) {
+      const list = rivals.slice(0, 4).map((t) => `«${t.title}»`).join(", ");
+      return { task: null, ask: `Под это подходит несколько задач: ${list}. Какую именно?` };
+    }
+    return { task: null, ask: null };
+  };
+
   if (intent.action === "task") {
     const title = (intent.title ?? "").trim();
     if (!title) return null;
@@ -95,20 +114,84 @@ export async function performIntent(
 
   if (intent.action === "task_done") {
     const q = (intent.title ?? "").trim();
-    if (!q) return null;
-    const task = await db.findTaskByTitle(uid, q);
+    if (!q && !rawText) return null;
+    const { task, ask } = await findTask(q);
+    if (ask) return ask;
     if (!task) return `Не нашла активную задачу «${q}».`;
     await db.setTaskStatus(task.id, TASK_DONE, uid, tz);
-    return `✅ Задача «${task.title}» отмечена выполненной. Молодец!`;
+    const again = task.repeat_rule ? `\n🔁 Вернётся: ${repeatLabel(task.repeat_rule)}` : "";
+    return `✅ Задача «${task.title}» отмечена выполненной. Молодец!${again}`;
   }
 
   if (intent.action === "task_delete") {
     const q = (intent.title ?? "").trim();
     if (!q) return null;
-    const task = await db.findTaskByTitle(uid, q);
+    const { task, ask } = await findTask(q);
+    if (ask) return ask;
     if (!task) return `Не нашла задачу «${q}».`;
     await db.deleteTask(task.id, uid);
     return `🗑 Задача «${task.title}» удалена.`;
+  }
+
+  if (intent.action === "task_edit") {
+    const q = (intent.title ?? "").trim();
+    const { task, ask } = await findTask(q);
+    if (ask) return ask;
+    if (!task) return `Не нашла активную задачу${q ? ` «${q}»` : ""}. Скажи пару слов из её названия.`;
+
+    const fields: { title?: string; dueAt?: string | null; scope?: string; clientId?: number | null; repeat?: string } = {};
+    const done: string[] = [];
+
+    const newTitle = (intent.new_name ?? "").trim();
+    if (newTitle && newTitle.toLowerCase() !== task.title.toLowerCase()) {
+      fields.title = newTitle;
+      done.push(`название → «${newTitle}»`);
+    }
+
+    // «убери срок» надо отличать от «перенеси»: там срок снимают, а не двигают
+    if (/(убер[иёи]\w*|сним\w*|без)\s+(срок\w*|дедлайн\w*|дат\w*)/i.test(rawText)) {
+      fields.dueAt = null;
+      done.push("срок снят");
+    } else if ((intent.due ?? "").trim()) {
+      const dueAt = resolveWhen(intent.due!, tz, 10);
+      if (dueAt) {
+        fields.dueAt = dueAt;
+        done.push(`срок → ${formatDue(dueAt, tz)}`);
+      }
+    }
+
+    if (intent.scope === SCOPE_PERSONAL || intent.scope === SCOPE_WORK) {
+      if (intent.scope !== task.scope) {
+        fields.scope = intent.scope;
+        done.push(intent.scope === SCOPE_PERSONAL ? "стала личной" : "стала рабочей");
+      }
+    }
+
+    const client = await findClient();
+    if (client && client.id !== task.client_id) {
+      fields.clientId = client.id;
+      done.push(`клиент → ${client.name}`);
+    }
+
+    const repeat = parseRepeat(rawText);
+    if (repeat && repeat !== (task.repeat_rule ?? "")) {
+      fields.repeat = repeat;
+      done.push(`повтор → ${repeatLabel(repeat)}`);
+    }
+
+    if (Object.keys(fields).length) await db.updateTask(task.id, fields, uid);
+
+    // Статус меняем отдельно: у него своя логика (повтор, дата выполнения)
+    const status = (intent.status ?? "").trim();
+    if (status === TASK_DONE || status === TASK_IN_PROGRESS || status === TASK_OPEN) {
+      if (status !== task.status) {
+        await db.setTaskStatus(task.id, status, uid, tz);
+        done.push(status === TASK_DONE ? "выполнена" : status === TASK_IN_PROGRESS ? "взята в работу" : "возвращена в работу");
+      }
+    }
+
+    if (!done.length) return `Задача «${task.title}» — не поняла, что именно поменять. Скажи, например: «перенеси на пятницу» или «переименуй в …».`;
+    return `✏️ Обновила задачу\n«${fields.title ?? task.title}»\n${done.join("\n")}`;
   }
 
   if (intent.action === "event") {
@@ -264,6 +347,17 @@ export function localRoute(text: string): AssistantIntent | null {
   if ((m = t.match(/^удал(?:и|ить)\s+задач[а-яё]*\s+(.+)/i))) return { action: "task_delete", title: m[1].trim() };
   if ((m = t.match(/^(?:выполнил[а-яё]*|сделал[а-яё]*|отметь)\s+(?:задач[а-яё]*\s+)?(.+?)(?:\s+выполненн[а-яё]+)?$/i)))
     return { action: "task_done", title: m[1].trim() };
+
+  // Задачи: закрыть / изменить. Эти шаблоны работают БЕЗ обращения к ИИ —
+  // страховка на случай, когда модель недоступна или отвечает медленно.
+  if ((m = t.match(/^(?:закрой|закрыть|заверш(?:и|ить))\s+(?:задач[а-яё]*\s+)?(.+)/i)))
+    return { action: "task_done", title: m[1].trim() };
+  if ((m = t.match(/^перенес(?:и|ти)\s+(?:задач[а-яё]*\s+)?(.+?)\s+на\s+(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), due: m[2].trim() };
+  if ((m = t.match(/^переименуй\s+(?:задач[а-яё]*\s+)?(.+?)\s+в\s+(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), new_name: m[2].trim() };
+  if ((m = t.match(/^(?:возьм(?:и|у)|беру|взял[а-яё]*|начал[а-яё]*|приступил[а-яё]*)\s+(?:в\s+работу\s+)?(?:к\s+)?(?:делать\s+|заниматься\s+)?(?:задач[а-яё]*\s+)?(.+?)(?:\s+в\s+работу)?$/i)))
+    return { action: "task_edit", title: m[1].trim(), status: "in_progress" };
 
   // Клиенты: удалить (только имя — безопасно локально)
   if ((m = t.match(/^удал(?:и|ить)\s+клиент[а-яё]*\s+(.+)/i))) return { action: "client_delete", name: m[1].trim() };

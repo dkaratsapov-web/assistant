@@ -377,3 +377,78 @@ export function bytesToBase64(buf: ArrayBuffer): string {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
+
+/* ---------- Поиск записи по словам человека ---------- */
+
+/**
+ * Служебные слова, которые человек говорит вокруг названия: «закрой ЗАДАЧУ ПРО отчёт».
+ * Их надо выкинуть, иначе они перетянут совпадение на себя.
+ */
+const SKIP_WORDS = new Set([
+  "задача", "задачу", "задачи", "задаче", "задачей", "дело", "дела", "делу", "встреча", "встречу", "встречи",
+  "про", "по", "о", "об", "на", "в", "во", "с", "со", "у", "к", "и", "а", "же", "бы", "ли", "не",
+  "это", "эту", "этот", "эта", "той", "ту", "тот", "та", "то", "мою", "мой", "моя", "мое", "моё", "мне",
+  "все", "всю", "весь", "вся", "что", "чтобы", "как", "уже", "там", "вот", "ещё", "еще", "пожалуйста",
+  "закрой", "закрыть", "закончил", "выполни", "выполнил", "выполнила", "выполнено", "выполненной",
+  "сделал", "сделала", "сделай", "отметь", "отметить", "готово", "готова", "готов", "завершил", "завершить",
+  "удали", "удалить", "убери", "убрать", "отмени", "отменить", "перенеси", "перенести", "поменяй",
+  "измени", "изменить", "обнови", "обновить", "переименуй", "переименовать", "назови", "поставь",
+  "возьми", "статус", "срок", "дедлайн", "работу", "работе", "работа", "сроком", "название", "назови",
+]);
+
+/** «Закрой задачу про отчёт» → ["отчет"]. Ё приводим к Е: люди пишут и так, и так. */
+export function keyWords(text: string): string[] {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .split(/[^a-zа-я0-9]+/i)
+    .filter((w) => w.length > 1 && !SKIP_WORDS.has(w));
+}
+
+/**
+ * Совпадают ли два слова с учётом русских окончаний: «отчёт» и «отчёты», «Ромашка» и «Ромашке».
+ * Сравниваем по началу слова — сравнивать целиком бесполезно, падеж всё ломает.
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  const n = Math.min(a.length, b.length, 4);
+  return a.slice(0, n) === b.slice(0, n);
+}
+
+/**
+ * Насколько название подходит под сказанное. Точное слово весит больше, чем
+ * совпадение по началу: «отчёт» важнее, чем «отчаянный» под ту же основу.
+ */
+export function matchScore(title: string, words: string[]): number {
+  if (!words.length) return 0;
+  const has = keyWords(title);
+  if (!has.length) return 0;
+  let score = 0;
+  for (const w of words) {
+    if (has.includes(w)) score += 2;
+    else if (has.some((h) => sameWord(h, w))) score += 1;
+  }
+  // Фраза целиком внутри названия — самый надёжный признак
+  const low = String(title ?? "").toLowerCase().replace(/ё/g, "е");
+  if (words.length > 1 && low.includes(words.join(" "))) score += 2;
+  return score;
+}
+
+/**
+ * Лучшее совпадение среди записей. `rivals` не пуст, когда несколько записей
+ * подходят одинаково: тогда честнее переспросить, чем закрыть не ту задачу.
+ */
+export function bestMatch<T>(items: T[], title: (x: T) => string, query: string): { best: T | null; rivals: T[] } {
+  const words = keyWords(query);
+  if (!words.length) return { best: null, rivals: [] };
+  const scored = items
+    .map((item) => ({ item, score: matchScore(title(item), words) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length) return { best: null, rivals: [] };
+  const top = scored[0].score;
+  const tied = scored.filter((x) => x.score === top);
+  if (tied.length > 1) return { best: null, rivals: tied.map((x) => x.item) };
+  return { best: scored[0].item, rivals: [] };
+}

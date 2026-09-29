@@ -436,13 +436,20 @@ export class DB {
   }
 
   /** Частичное обновление своей задачи (редактирование). */
-  async updateTask(id: number, fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number }, userId?: number): Promise<void> {
+  async updateTask(
+    id: number,
+    fields: { title?: string; description?: string; dueAt?: string | null; scope?: string; priority?: number; clientId?: number | null; repeat?: string },
+    userId?: number
+  ): Promise<void> {
     const sets: string[] = [];
     const binds: unknown[] = [];
     if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
+    if (fields.description !== undefined) { sets.push("description = ?"); binds.push(fields.description); }
     if (fields.dueAt !== undefined) { sets.push("due_at = ?"); binds.push(fields.dueAt); }
     if (fields.scope !== undefined) { sets.push("scope = ?"); binds.push(fields.scope); }
     if (fields.priority !== undefined) { sets.push("priority = ?"); binds.push(fields.priority); }
+    if (fields.clientId !== undefined) { sets.push("client_id = ?"); binds.push(fields.clientId); }
+    if (fields.repeat !== undefined) { sets.push("repeat_rule = ?"); binds.push(fields.repeat); }
     if (!sets.length) return;
     binds.push(id);
     let where = "id = ?";
