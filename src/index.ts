@@ -3,7 +3,7 @@ import { createBot } from "./bot";
 import { DB } from "./db";
 import { BUILD } from "./build";
 import { aiConfig, askAI } from "./ai";
-import { searchConfigured } from "./search";
+import { searchConfigured, webSearch } from "./search";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
@@ -406,6 +406,29 @@ export default {
         router: cfg?.router ?? null,
       };
       body.test = cfg ? await askAI(cfg, "Ответь одним словом: привет") : "не настроено: нужны YANDEX_API_KEY и YANDEX_FOLDER_ID";
+      return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    // Настоящая проверка поиска: ключи на месте — это ещё не значит, что он
+    // работает. Сервис поиска в Яндекс Облаке включается отдельно и требует
+    // своей роли, и узнать об этом можно только живым запросом.
+    if (url.pathname === "/diag/search") {
+      if (!maxAdminAllowed(url, env)) {
+        return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+      }
+      const q = url.searchParams.get("q") || "новости сегодня";
+      const body: Record<string, unknown> = {
+        настроен: searchConfigured(env),
+        ключ: env.YANDEX_SEARCH_API_KEY ? "отдельный" : env.YANDEX_API_KEY ? "общий" : "нет",
+        каталог: (env.YANDEX_SEARCH_FOLDER_ID || env.YANDEX_FOLDER_ID || "").slice(0, 6) || null,
+        адрес: env.YANDEX_SEARCH_URL || "https://yandex.ru/search/xml",
+        запрос: q,
+      };
+      try {
+        const hits = await webSearch(env, q, 3);
+        body.результат = hits.length ? hits.map((h) => `${h.title} — ${h.url}`) : "поиск ответил, но ничего не нашёл";
+      } catch (e) {
+        body.ошибка = (e as Error).message;
+      }
       return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
     }
     if (url.pathname === "/health") return new Response("ok");
