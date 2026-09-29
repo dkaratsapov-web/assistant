@@ -8,7 +8,7 @@ import { DB } from "./db";
 import { answerQuery, parseQuery } from "./queries";
 import { parseAppearance, renderPrefsChange } from "./appearance";
 import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, WB_END, WB_START, wordRe } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, WB_END, WB_START, wordRe } from "./utils";
 
 export const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -487,41 +487,147 @@ export function parseCorrection(text: string): "food" | "event" | "task" | "note
   return null;
 }
 
+/**
+ * Разбор команд БЕЗ обращения к ИИ.
+ *
+ * Зачем он такой подробный. Если модель недоступна или медленно отвечает, без
+ * этих правил бот не умеет вообще ничего — даже завести задачу, а это самая
+ * частая команда. Поэтому здесь закрыты все основные действия и по нескольку
+ * способов сказать каждое: люди говорят «напомни», «поставь задачу», «не забыть»
+ * и «надо» об одном и том же.
+ *
+ * Границы слов — из utils: в JavaScript \b не считает кириллицу буквами.
+ */
 export function localRoute(text: string): AssistantIntent | null {
   const t = text.trim();
   let m: RegExpMatchArray | null;
 
-  // Заметки
+  /** Название + срок из хвоста фразы. */
+  const task = (rest: string, extra: Partial<AssistantIntent> = {}): AssistantIntent | null => {
+    const { title, when } = splitWhen(rest);
+    if (!title || title.length < 2) return null;
+    return { action: "task", title, due: when, scope: guessScope(rest), ...extra };
+  };
+
+  // ---------- Заметки ----------
   if (t.startsWith("!")) {
     const body = t.slice(1).trim();
     return body ? { action: "note_add", title: body } : null;
   }
-  if ((m = t.match(/^(?:заметка|запиши идею|запомни)[:\s]+(.+)/i))) return { action: "note_add", title: m[1].trim() };
+  if ((m = t.match(/^(?:заметка|записка|запиши идею|запиши мысль|запомни|на заметку)[:\s]+(.+)/i)))
+    return { action: "note_add", title: m[1].trim() };
 
-  // Задачи: удалить / выполнить (без дат — можно локально)
-  if ((m = t.match(/^удал(?:и|ить)\s+задач[а-яё]*\s+(.+)/i))) return { action: "task_delete", title: m[1].trim() };
-  if ((m = t.match(/^(?:выполнил[а-яё]*|сделал[а-яё]*|отметь)\s+(?:задач[а-яё]*\s+)?(.+?)(?:\s+выполненн[а-яё]+)?$/i)))
-    return { action: "task_done", title: m[1].trim() };
+  // ---------- Задачи: постановка ----------
+  // «напоминай каждый вторник …» — повтор разбирается отдельно, в обработчике
+  if ((m = t.match(/^(?:напоминай|напоминать)\s+(.+)$/i))) return task(m[1]);
+  if ((m = t.match(/^(?:напомни|напомнить|напомните)\s+(?:мне\s+)?(.+)$/i))) return task(m[1]);
+  if ((m = t.match(/^(?:поставь|постав|добавь|заведи|создай|запиши|внеси)\s+(?:нов[а-яё]+\s+)?(?:задач[а-яё]*|дело|напоминани[ея])[:\s]+(.+)$/i)))
+    return task(m[1]);
+  if ((m = t.match(/^(?:не\s+(?:забыть|забудь|забудьте))\s+(.+)$/i))) return task(m[1]);
+  if ((m = t.match(/^(?:надо|нужно|необходимо|требуется)\s+(?:бы\s+)?(.+)$/i))) return task(m[1]);
+  if ((m = t.match(/^(?:запланируй|планирую|хочу)\s+(.+)$/i)) && !/(встреч|созвон|планерк|планёрк)/i.test(t)) return task(m[1]);
 
-  // Задачи: закрыть / изменить. Эти шаблоны работают БЕЗ обращения к ИИ —
-  // страховка на случай, когда модель недоступна или отвечает медленно.
-  if ((m = t.match(/^(?:закрой|закрыть|заверш(?:и|ить))\s+(?:задач[а-яё]*\s+)?(.+)/i)))
-    return { action: "task_done", title: m[1].trim() };
-  if ((m = t.match(/^(?:перенес(?:и|ти)|сдвин(?:ь|уть))\s+на\s+(.+)$/i)))
+  // ---------- Задачи: изменение ----------
+  if ((m = t.match(/^(?:перенес(?:и|ти)|сдвин(?:ь|уть)|передвин(?:ь|уть))\s+на\s+(.+)$/i)))
     return { action: "task_edit", title: "", due: m[1].trim(), at: m[1].trim() };
-  if ((m = t.match(/^перенес(?:и|ти)\s+(?:встреч[а-яё]*|созвон[а-яё]*)\s+(.+?)\s+на\s+(.+)$/i)))
+  if ((m = t.match(/^(?:перенес(?:и|ти)|сдвин(?:ь|уть)|передвин(?:ь|уть))\s+(?:встреч[а-яё]*|созвон[а-яё]*|планерк[а-яё]*|планёрк[а-яё]*)\s*(.*?)\s+на\s+(.+)$/i)))
     return { action: "event_edit", title: m[1].trim(), at: m[2].trim() };
-  if ((m = t.match(/^перенес(?:и|ти)\s+(?:задач[а-яё]*\s+)?(.+?)\s+на\s+(.+)$/i)))
+  if ((m = t.match(/^(?:перенес(?:и|ти)|сдвин(?:ь|уть)|передвин(?:ь|уть))\s+(?:задач[а-яё]*\s+)?(.+?)\s+на\s+(.+)$/i)))
     return { action: "task_edit", title: m[1].trim(), due: m[2].trim() };
-  if ((m = t.match(/^отмен(?:и|ить)\s+(?:встреч[а-яё]*|созвон[а-яё]*)\s+(.+)$/i)))
-    return { action: "event_delete", title: m[1].trim() };
-  if ((m = t.match(/^переименуй\s+(?:задач[а-яё]*\s+)?(.+?)\s+в\s+(.+)$/i)))
+  if ((m = t.match(/^(?:поменяй|измени|смени)\s+срок\s+(?:у\s+)?(?:задач[а-яё]*\s+)?(.+?)\s+на\s+(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), due: m[2].trim() };
+  if ((m = t.match(/^(?:убер(?:и|ать)|сним(?:и|ать)|сбрось)\s+(?:срок|дедлайн|дату)\s+(?:у\s+)?(?:задач[а-яё]*\s+)?(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim() };
+  if ((m = t.match(/^(?:переименуй|назови|переназови)\s+(?:встреч[а-яё]*|созвон[а-яё]*)\s+(.+?)\s+в\s+(.+)$/i)))
+    return { action: "event_edit", title: m[1].trim(), new_name: m[2].trim() };
+  if ((m = t.match(/^(?:переименуй|назови|переназови)\s+(?:клиент[а-яё]*)\s+(.+?)\s+в\s+(.+)$/i)))
+    return { action: "client_edit", name: m[1].trim(), new_name: m[2].trim() };
+  // «назови задачу лендинг «Лендинг под Директ»» — новое название в кавычках,
+  // без слова «в». Кавычки тут единственная надёжная граница.
+  if ((m = t.match(/^(?:переименуй|назови|переназови)\s+(?:задач[а-яё]*\s+)?(.+?)\s+[«"'](.+)[»"']$/i)))
     return { action: "task_edit", title: m[1].trim(), new_name: m[2].trim() };
-  if ((m = t.match(/^(?:возьм(?:и|у)|беру|взял[а-яё]*|начал[а-яё]*|приступил[а-яё]*)\s+(?:в\s+работу\s+)?(?:к\s+)?(?:делать\s+|заниматься\s+)?(?:задач[а-яё]*\s+)?(.+?)(?:\s+в\s+работу)?$/i)))
+  if ((m = t.match(/^(?:переименуй|назови|переназови)\s+(?:задач[а-яё]*\s+)?(.+?)\s+в\s+(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), new_name: m[2].trim() };
+  if ((m = t.match(/^(?:возьм(?:и|у)|беру|взял[а-яё]*|начал[а-яё]*|приступил[а-яё]*|делаю)\s+(?:в\s+работу\s+)?(?:к\s+)?(?:делать\s+|заниматься\s+)?(?:задач[а-яё]*\s+)?(.+?)(?:\s+в\s+работу)?$/i)))
     return { action: "task_edit", title: m[1].trim(), status: "in_progress" };
+  if ((m = t.match(/^(?:верн(?:и|уть)|открой|открыть|возобнови)\s+(?:задач[а-яё]*\s+)?(.+?)\s+в\s+работу$/i)))
+    return { action: "task_edit", title: m[1].trim(), status: "open" };
+  if ((m = t.match(/^(?:сделай|переведи|помести)\s+(?:задач[а-яё]*\s+)?(?:про\s+|по\s+)?(.+?)\s+(личн[а-яё]+|рабоч[а-яё]+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), scope: /личн/i.test(m[2]) ? SCOPE_PERSONAL : SCOPE_WORK };
+  if ((m = t.match(/^(?:привяж(?:и|ать)|прикреп(?:и|ить)|отнеси)\s+(?:задач[а-яё]*\s+)?(?:про\s+|по\s+)?(.+?)\s+(?:к|на)\s+(.+)$/i)))
+    return { action: "task_edit", title: m[1].trim(), client: m[2].trim() };
 
-  // Клиенты: удалить (только имя — безопасно локально)
-  if ((m = t.match(/^удал(?:и|ить)\s+клиент[а-яё]*\s+(.+)/i))) return { action: "client_delete", name: m[1].trim() };
+  // ---------- Задачи: выполнение ----------
+  if ((m = t.match(/^(?:закрой|закрыть|заверш(?:и|ить)|выполни)\s+(?:задач[а-яё]*\s+)?(.+)$/i)))
+    return { action: "task_done", title: m[1].trim() };
+  if ((m = t.match(/^(?:выполнил[а-яё]*|сделал[а-яё]*|отметь|отметил[а-яё]*|закончил[а-яё]*)\s+(?:задач[а-яё]*\s+)?(.+?)(?:\s+выполненн[а-яё]+)?$/i)))
+    return { action: "task_done", title: m[1].trim() };
+  // «отчёт готов», «смета сделана»
+  if ((m = t.match(/^(.+?)\s+(?:готов[аоы]?|сделан[аоы]?|законч(?:ен|ена|ено)|заверш(?:ен|ена|ено)|отправлен[аоы]?)$/i)))
+    return { action: "task_done", title: m[1].trim() };
+  // «с банком закончил», «по отчёту всё»
+  if ((m = t.match(/^(?:с|по)\s+(.+?)\s+(?:закончил[а-яё]*|покончено|разобрал[а-яё]*|все|всё|готово)$/i)))
+    return { action: "task_done", title: m[1].trim() };
+
+  // ---------- Задачи и встречи: удаление ----------
+  // «Отмени встречу с Ромашкой» → ищем по «с Ромашкой»: слово «встречу» тут
+  // только тип. А в «отмени планёрку» это единственное название, и выбрасывать
+  // его нельзя — иначе искать будет нечего и Сара удалит первую попавшуюся.
+  if ((m = t.match(/^(?:удал(?:и|ить)|убер(?:и|ать)|отмен(?:и|ить))\s+(?:(?:встреч|созвон|планерк|планёрк|собрани)[а-яё]*\s+(.+)|((?:встреч|созвон|планерк|планёрк|собрани)[а-яё]*))$/i)))
+    return { action: "event_delete", title: (m[1] || m[2] || "").trim() };
+  if ((m = t.match(/^(?:удал(?:и|ить)|убер(?:и|ать))\s+(?:задач[а-яё]*|дело)\s+(.+)$/i)))
+    return { action: "task_delete", title: m[1].trim() };
+  if ((m = t.match(/^(?:удал(?:и|ить)|убер(?:и|ать))\s+клиент[а-яё]*\s+(.+)$/i)))
+    return { action: "client_delete", name: m[1].trim() };
+  if ((m = t.match(/^(?:удал(?:и|ить)|убер(?:и|ать))\s+(?:из\s+списка\s+)?(.+)$/i)) && !/(ед[уы]|воду|трениров|последн)/i.test(t))
+    return { action: "task_delete", title: m[1].trim() };
+  if ((m = t.match(/^отмен(?:и|ить)\s+(.+)$/i))) return { action: "event_delete", title: m[1].trim() };
+
+  // ---------- Встречи ----------
+  // Перемена места — ДО правила создания: иначе «встреча … будет в офисе»
+  // попадёт в создание, там не найдётся времени, и фраза потеряется.
+  if ((m = t.match(/^(?:встреча|встречу|созвон|планерка|планёрка)\s+(.+?)\s+буд(?:ет|ут)\s+(?:в|на)\s+(.+)$/i)))
+    return { action: "event_edit", title: m[1].trim(), location: m[2].trim() };
+
+  let kind = "";
+  if ((m = t.match(/^((?:встреч|созвон|планерк|планёрк|собрани)[а-яё]*)\s+(.+)$/i)) && (kind = m[1])
+    || ((m = t.match(/^(?:запланируй|назначь|поставь|добавь|заведи|создай)\s+((?:встреч|созвон|планерк|планёрк|собрани)[а-яё]*)\s+(.+)$/i)) && (kind = m[1]))) {
+    const { title, when } = splitWhen(m[2]);
+    if (!when) return null;                       // без времени это не встреча — пусть решает ИИ
+    const place = title.match(/\s+(?:в|на)\s+(офисе|зуме|зале|кафе|переговорке|скайпе|телемосте)$/i);
+    const clean = place ? title.slice(0, place.index).trim() : title;
+    // «запланируй планёрку в 10» — название и есть тип встречи, иначе оно пропадёт
+    const name = clean || kind.charAt(0).toUpperCase() + kind.slice(1);
+    return { action: "event", title: name, at: when, location: place ? place[1] : "" };
+  }
+
+  // ---------- Клиенты ----------
+  if ((m = t.match(/^(?:добавь|заведи|создай|внеси)\s+(?:нов[а-яё]+\s+)?клиент[а-яё]*[:\s]+(.+)$/i))) {
+    const parts = m[1].split(/\s*,\s*/);
+    const name = parts.shift()!.trim();
+    if (!name) return null;
+    const rest = parts.join(", ");
+    const budget = rest.match(/бюджет\D{0,3}(\d[\d\s]*)/i);
+    const fee = rest.match(/(?:ведени[ея]|оплата)\D{0,3}(\d[\d\s]*)/i);
+    const platforms = parts.filter((x) => !/бюджет|ведени|оплата/i.test(x)).join(", ");
+    return {
+      action: "client_add",
+      name,
+      platforms: platforms.trim(),
+      budget: budget ? budget[1].replace(/\s/g, "") : "",
+      fee: fee ? fee[1].replace(/\s/g, "") : "",
+    };
+  }
+  if ((m = t.match(/^(?:поменяй|измени|смени|постав(?:ь|ить))\s+(?:оплату|ведение|стоимость)\s+(?:ведения\s+)?(?:у\s+|для\s+)?(?:клиент[а-яё]*\s+)?(.+?)\s+на\s+(\d[\d\s]*)/i)))
+    return { action: "client_edit", name: m[1].trim(), fee: m[2].replace(/\s/g, "") };
+  if ((m = t.match(/^(?:поменяй|измени|смени|постав(?:ь|ить))\s+бюджет\s+(?:у\s+|для\s+)?(?:клиент[а-яё]*\s+)?(.+?)\s+на\s+(\d[\d\s]*)/i)))
+    return { action: "client_edit", name: m[1].trim(), budget: m[2].replace(/\s/g, "") };
+
+  // ---------- Контакты ----------
+  if ((m = t.match(/^(?:запиши|добавь|запомни|внеси)\s+(?:день\s+рождения|др|днюху)\s+(.+?)\s+(\d{1,2}[\s.]+[а-яё]+|\d{1,2}\.\d{1,2})$/i)))
+    return { action: "contact", name: m[1].trim(), birthday: m[2].trim() };
+  if ((m = t.match(/^(?:добавь|заведи|запиши|внеси)\s+контакт[:\s]+(.+)$/i)))
+    return { action: "contact", name: m[1].trim() };
 
   return null;
 }

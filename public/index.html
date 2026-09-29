@@ -192,9 +192,29 @@
     /* Голосовая кнопка живёт рядом с «＋»: сказал фразу — Сара сама поняла,
        что это, и завела задачу, встречу, заметку или еду. */
     .fab-mic { bottom: calc(var(--nav-h) + 76px + env(safe-area-inset-bottom)); background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-    .fab-mic.rec { background: #ff3b30; color: #fff; border-color: #ff3b30; animation: pulse 1.3s ease-in-out infinite; }
+    .fab-mic.rec { background: #ff3b30; color: #fff; border-color: #ff3b30; }
     .fab-mic.busy { opacity: .6; }
+    /* Кольцо вокруг кнопки раздувается от громкости голоса: видно, что Сара
+       действительно слышит. --lvl (0..1) обновляется прямо из аудиопотока.
+       Без записи кольца нет вовсе, поэтому оно ничего не перекрывает. */
+    .fab-mic.rec::before, .fab-mic.rec::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+      transform: scale(calc(1 + var(--lvl, 0) * 0.55));
+      transition: transform .09s linear, opacity .09s linear;
+    }
+    .fab-mic.rec::before { box-shadow: 0 0 0 3px rgba(255,59,48,.35); opacity: calc(.35 + var(--lvl, 0) * .65); }
+    .fab-mic.rec::after { box-shadow: 0 0 0 9px rgba(255,59,48,.16); opacity: calc(var(--lvl, 0) * .9); }
+    /* Сам значок чуть подрастает на громких слогах */
+    .fab-mic.rec svg { transform: scale(calc(1 + var(--lvl, 0) * 0.22)); transition: transform .09s linear; }
+    /* Тихое ожидание: пока не говоришь, кнопка мягко дышит сама */
+    .fab-mic.rec.quiet { animation: pulse 1.6s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,48,.5); } 50% { box-shadow: 0 0 0 10px rgba(255,59,48,0); } }
+    /* Выключенные анимации в настройках: остаётся только цвет, без движения.
+       Селектор — тот же, что у общего правила выше (data-motion), иначе правило
+       молча не сработало бы. */
+    :root[data-motion="off"] .fab-mic.rec::before,
+    :root[data-motion="off"] .fab-mic.rec::after { transform: none; opacity: .4; }
+    :root[data-motion="off"] .fab-mic.rec svg { transform: none; }
     @media (max-width: 676px) { .fab { right: 16px; } }
 
     /* Bottom nav */
@@ -238,7 +258,9 @@
       background: var(--surface); color: var(--muted); cursor: pointer; display: flex; align-items: center;
       justify-content: center; transition: all .15s ease; }
     .mic-btn:active { transform: scale(.96); }
-    .mic-btn.rec { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+    .mic-btn.rec { background: #ff3b30; border-color: #ff3b30; color: #fff;
+      box-shadow: 0 0 0 calc(var(--lvl, 0) * 7px) rgba(255,59,48,.25); transition: box-shadow .09s linear; }
+    :root[data-motion="off"] .mic-btn.rec { box-shadow: none; }
     .with-mic { display: flex; gap: 8px; align-items: stretch; }
     .with-mic > :first-child { flex: 1; min-width: 0; }
     /* Сетка готовых лиц: три в ряд, выбранное обведено. */
@@ -2010,9 +2032,28 @@
         const AC = window.AudioContext || window.webkitAudioContext;
         const ac = new AC(); const src = ac.createMediaStreamSource(stream);
         const proc = ac.createScriptProcessor(4096, 1, 1); const buf = [];
-        proc.onaudioprocess = (e) => buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        // Громкость считаем прямо здесь, из тех же данных, что пишем: отдельный
+        // анализатор не нужен, а кнопка начинает реагировать на голос.
+        let level = 0;
+        proc.onaudioprocess = (e) => {
+          const chunk = e.inputBuffer.getChannelData(0);
+          buf.push(new Float32Array(chunk));
+          let sum = 0;
+          for (let i = 0; i < chunk.length; i += 4) sum += chunk[i] * chunk[i];
+          const rms = Math.sqrt(sum / (chunk.length / 4));
+          // Тихая речь на телефоне даёт ~0.02-0.08, поэтому растягиваем шкалу
+          const raw = Math.min(1, rms * 12);
+          // Вверх прыгаем быстро, вниз опускаемся плавно — иначе кольцо дёргается
+          level = raw > level ? raw : level * 0.72 + raw * 0.28;
+          if (btn) {
+            btn.style.setProperty("--lvl", level.toFixed(3));
+            btn.classList.toggle("quiet", level < 0.06);
+          }
+        };
         src.connect(proc); proc.connect(ac.destination);
         micRec = { btn, stop: async () => {
+          proc.onaudioprocess = null;
+          if (btn) { btn.style.removeProperty("--lvl"); btn.classList.remove("quiet"); }
           proc.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop());
           const rate = ac.sampleRate; await ac.close();
           let len = buf.reduce((s, a) => s + a.length, 0); const flat = new Float32Array(len); let o = 0;
@@ -2021,7 +2062,7 @@
           for (let i = 0; i < ds.length; i++) { const s = Math.max(-1, Math.min(1, ds[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
           return new Uint8Array(i16.buffer);
         } };
-        if (btn) { btn.classList.add("rec"); btn.style.color = ""; }
+        if (btn) { btn.classList.add("rec", "quiet"); btn.style.setProperty("--lvl", "0"); btn.style.color = ""; }
         haptic();
       } catch (e) {
         ask("Микрофон не разрешён\nБез него голосовые команды не работают. Разреши доступ в настройках телефона для MAX — или просто наговори голосовое прямо в чат Саре, там распознавание идёт на сервере.",
