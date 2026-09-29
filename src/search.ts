@@ -89,19 +89,77 @@ function strip(s: string): string {
     .trim();
 }
 
-/** Ищет в интернете. Бросает исключение с понятным текстом, если не вышло. */
-export async function webSearch(env: Env, query: string, limit = 5): Promise<SearchHit[]> {
-  const key = searchKey(env);
-  const folder = searchFolder(env);
-  if (!key || !folder) throw new Error("Поиск не настроен: нужны YANDEX_SEARCH_API_KEY и YANDEX_SEARCH_FOLDER_ID (или общие ключи Яндекса).");
+/** Отдаёт находки или бросает исключение с понятным текстом. */
+async function searchXmlGet(env: Env, key: string, folder: string, query: string, limit: number): Promise<SearchHit[]> {
   const base = env.YANDEX_SEARCH_URL || DEFAULT_URL;
   const url = `${base}?folderid=${encodeURIComponent(folder)}&query=${encodeURIComponent(query)}&l10n=ru&sortby=rlv&filter=moderate&groupby=${encodeURIComponent("attr=d.mode=deep.groups-on-page=" + limit + ".docs-in-group=1")}`;
   const res = await fetch(url, { headers: { Authorization: `Api-Key ${key}` } });
   const body = await res.text();
-  if (!res.ok) throw new Error(`Поиск ответил ${res.status}: ${body.slice(0, 200)}`);
+  if (!res.ok) throw new Error(`${res.status}: ${body.slice(0, 200)}`);
   const err = body.match(/<error[^>]*>([\s\S]*?)<\/error>/);
-  if (err) throw new Error(`Поиск отказал: ${strip(err[1]).slice(0, 200)}`);
+  if (err) throw new Error(strip(err[1]).slice(0, 200));
   return parseSearchXml(body, limit);
+}
+
+/**
+ * Второй способ обращения к поиску Яндекса: POST с JSON, ответ приходит
+ * XML-ом в base64. Держим оба, потому что у разных аккаунтов включён разный,
+ * а проверить, какой именно, можно только живым запросом.
+ */
+async function searchJsonPost(env: Env, key: string, folder: string, query: string, limit: number): Promise<SearchHit[]> {
+  const url = env.YANDEX_SEARCH_URL_V2 || "https://searchapi.api.cloud.yandex.net/v2/web/search";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Api-Key ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      query: { searchType: "SEARCH_TYPE_RU", queryText: query },
+      folderId: folder,
+      responseFormat: "FORMAT_XML",
+      groupSpec: { groupsOnPage: String(limit), docsInGroup: "1" },
+    }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${res.status}: ${text.slice(0, 200)}`);
+  let xml = text;
+  try {
+    const obj = JSON.parse(text) as { rawData?: string };
+    if (obj.rawData) xml = decodeBase64(obj.rawData);
+  } catch {
+    // пришёл не JSON — пробуем разобрать как есть
+  }
+  const err = xml.match(/<error[^>]*>([\s\S]*?)<\/error>/);
+  if (err) throw new Error(strip(err[1]).slice(0, 200));
+  return parseSearchXml(xml, limit);
+}
+
+/** base64 → текст с поддержкой кириллицы (atob отдаёт байты, не символы). */
+export function decodeBase64(b64: string): string {
+  const bin = atob(b64.replace(/\s+/g, ""));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+/**
+ * Ищет в интернете. Пробует оба способа обращения к API: у разных аккаунтов
+ * Яндекса включён разный, и заранее это не выяснить. Если не вышло ни одним —
+ * в ошибке будут обе причины, чтобы не гадать, что чинить.
+ */
+export async function webSearch(env: Env, query: string, limit = 5): Promise<SearchHit[]> {
+  const key = searchKey(env);
+  const folder = searchFolder(env);
+  if (!key || !folder) throw new Error("Поиск не настроен: нужны YANDEX_SEARCH_API_KEY и YANDEX_SEARCH_FOLDER_ID (или общие ключи Яндекса).");
+  const order = env.YANDEX_SEARCH_API === "v2" ? [searchJsonPost, searchXmlGet] : [searchXmlGet, searchJsonPost];
+  const names = env.YANDEX_SEARCH_API === "v2" ? ["POST-JSON", "XML-GET"] : ["XML-GET", "POST-JSON"];
+  const errors: string[] = [];
+  for (let i = 0; i < order.length; i++) {
+    try {
+      return await order[i](env, key, folder, query, limit);
+    } catch (e) {
+      errors.push(`${names[i]} → ${(e as Error).message}`);
+    }
+  }
+  throw new Error(`Поиск не ответил. ${errors.join(" | ")}`);
 }
 
 /** Собирает найденное в кусок подсказки для модели. */

@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
-import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
+import { needsSearch, parseSearchXml, renderHits, decodeBase64 } from "../.test-build/search.js";
 import { parseQuery } from "../.test-build/queries.js";
 import { extractIntents } from "../.test-build/ai.js";
 import { parseAppearance } from "../.test-build/appearance.js";
@@ -478,4 +478,24 @@ test("несколько настроек одной фразой", () => {
   assert.equal(r.changes.theme, "dark");
   assert.equal(r.changes.scale, 110);
   assert.equal(r.said.length, 2);
+});
+
+/* ---------- Второй способ обращения к поиску (ответ в base64) ---------- */
+
+test("кириллица из base64 не превращается в кракозябры", () => {
+  // Ловушка: atob отдаёт БАЙТЫ, а не символы. Без пересборки через TextDecoder
+  // «Погода в Сочи» приходит как «ÐÐ¾Ð³Ð¾Ð´Ð°».
+  const xml = "<doc><url>https://ya.ru</url><title>Погода в Сочи</title><headline>Сегодня +22</headline></doc>";
+  const b64 = Buffer.from(xml, "utf8").toString("base64");
+  const back = decodeBase64(b64);
+  assert.equal(back, xml);
+  const hits = parseSearchXml(back, 3);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].title, "Погода в Сочи");
+});
+
+test("переносы строк внутри base64 не мешают", () => {
+  const xml = "<doc><url>https://ya.ru</url><title>Тест</title></doc>";
+  const b64 = Buffer.from(xml, "utf8").toString("base64").replace(/(.{10})/g, "$1\n");
+  assert.equal(decodeBase64(b64), xml);
 });

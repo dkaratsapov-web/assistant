@@ -420,6 +420,7 @@ export default {
         настроен: searchConfigured(env),
         ключ: env.YANDEX_SEARCH_API_KEY ? "отдельный" : env.YANDEX_API_KEY ? "общий" : "нет",
         каталог: (env.YANDEX_SEARCH_FOLDER_ID || env.YANDEX_FOLDER_ID || "").slice(0, 6) || null,
+        способ: env.YANDEX_SEARCH_API === "v2" ? "сначала POST-JSON" : "сначала XML-GET",
         адрес: env.YANDEX_SEARCH_URL || "https://yandex.ru/search/xml",
         запрос: q,
       };

@@ -14,7 +14,9 @@ export interface Env {
   YANDEX_STT_API_KEY?: string;     // секрет: отдельный ключ для распознавания речи, если у ключей одна область действия
   YANDEX_SEARCH_API_KEY?: string;  // секрет: ключ Yandex Search API (пусто — берём общий)
   YANDEX_SEARCH_FOLDER_ID?: string;// каталог для поиска (пусто — берём общий)
-  YANDEX_SEARCH_URL?: string;      // адрес поискового API, если он изменится
+  YANDEX_SEARCH_URL?: string;      // адрес поискового API (XML-GET), если он изменится
+  YANDEX_SEARCH_URL_V2?: string;   // адрес второго способа (POST-JSON), если он изменится
+  YANDEX_SEARCH_API?: string;      // "v2" — начинать с POST-JSON, иначе с XML-GET
   WEB_SEARCH?: string;             // "off" — выключить поиск в интернете целиком
   YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
   YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"
