@@ -609,6 +609,21 @@
       }
     }
 
+    /**
+     * Перечитать настройки с сервера и применить.
+     *
+     * Нужна, когда настройки поменяли голосом или из чата: «сделай шрифт
+     * крупнее» должно сработать сразу, а не после перезапуска приложения.
+     */
+    async function refreshPrefs() {
+      try {
+        const saved = await api("/prefs");
+        prefs = { ...prefs, ...saved };
+        try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+        applyPrefs();
+      } catch (e) {}
+    }
+
     /* ---------- Состояние ---------- */
     let tab = "home";
     let taskScope = "work";
@@ -1916,6 +1931,7 @@
           if (!res.ok) { tg.showAlert(d.message || "Не получилось распознать."); return; }
           if (!d.reply) { showVoiceDraft(d.text || ""); return; }
           toast(d.reply.split("\n")[0]);
+          if (d.prefs) await refreshPrefs();         // поменяли оформление — применяем сразу
           renderTab(tab);                            // список сразу обновляем
         } catch (e) {
           tg.showAlert("Не получилось отправить запись.");
@@ -1963,7 +1979,11 @@
       closeSheet();
       try {
         const d = await api("/command", { method: "POST", body: JSON.stringify({ text }) });
-        if (d.reply) { toast(d.reply.split("\n")[0]); renderTab(tab); }
+        if (d.reply) {
+          toast(d.reply.split("\n")[0]);
+          if (d.prefs) await refreshPrefs();
+          renderTab(tab);
+        }
         else tg.showAlert("Всё равно не поняла. Заведи руками — так надёжнее.");
       } catch (e) { tg.showAlert("Не получилось: " + (e.message || e)); }
     };
@@ -2057,10 +2077,11 @@
       think.className = "msg ai think"; think.textContent = "Сара печатает…";
       scroll.appendChild(think); aiScrollBottom();
       try {
-        const { reply } = await api("/ai", { method: "POST", body: JSON.stringify({ prompt: text }) });
+        const { reply, prefs: prefsChanged } = await api("/ai", { method: "POST", body: JSON.stringify({ prompt: text }) });
         think.remove();
         aiHistory.push({ role: "assistant", content: reply });
         scroll.insertAdjacentHTML("beforeend", `<div class="msg ai">${esc(reply)}</div>`);
+        if (prefsChanged) await refreshPrefs();      // «сделай шрифт крупнее» — видно сразу
       } catch (e) {
         think.remove();
         const m = String(e.message || e);

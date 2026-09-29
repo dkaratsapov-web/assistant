@@ -3,6 +3,7 @@ import { aiConfig, askAI, askAIChat, ChatMessage, estimateNutrition, estimateBur
   visionEnabled,
 } from "./ai";
 import { DB } from "./db";
+import { PREFS_MARK } from "./appearance";
 import { tryPerformCommand } from "./intent";
 import { telemostConnected, telemostCreate, telemostAuthUrl, telemostExchangeCode, telemostState, metrikaStats } from "./telemost";
 import { sttKey, transcribeVoice } from "./speech";
@@ -832,7 +833,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (!text) return json({ error: "empty_text", message: "Не расслышала — скажи ещё раз, ближе к микрофону." }, 422);
     // forceTask: сказанное голосом почти всегда команда, а не вопрос
     const done = await tryPerformCommand(env, db, uid, text, true);
-    return json({ text, reply: done ?? "" });
+    return json({ text, reply: done ?? "", prefs: (done ?? "").startsWith(PREFS_MARK) });
   }
 
   // POST /api/command {text} — то же самое, но текстом (для правок расшифровки)
@@ -841,7 +842,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const text = (body.text ?? "").trim();
     if (!text) return json({ error: "empty_text" }, 400);
     const done = await tryPerformCommand(env, db, uid, text, true);
-    return json({ text, reply: done ?? "" });
+    // prefs: команда поменяла настройки — приложению надо перечитать их сейчас
+    return json({ text, reply: done ?? "", prefs: (done ?? "").startsWith(PREFS_MARK) });
   }
 
   // POST /api/health/food/photo — оценить блюдо по фотографии
@@ -1090,7 +1092,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     // Сохраняем в кеш (даже если это сообщение об ошибке — чтобы диалог был честным)
     await db.addAiMessage(uid, "user", userText);
     await db.addAiMessage(uid, "assistant", reply);
-    return json({ reply });
+    return json({ reply, prefs: reply.startsWith(PREFS_MARK) });
   }
 
   // GET /api/notes

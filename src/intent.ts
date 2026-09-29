@@ -6,6 +6,7 @@
 import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFromText, routeAssistant } from "./ai";
 import { DB } from "./db";
 import { answerQuery, parseQuery } from "./queries";
+import { parseAppearance, renderPrefsChange } from "./appearance";
 import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
 import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, WB_END, WB_START, wordRe } from "./utils";
 
@@ -162,6 +163,31 @@ export async function performIntent(
     }
     return { event: null, ask: null };
   };
+
+  if (cmd.action === "prefs") {
+    const cur = await db.getPrefs(uid);
+    const look = parseAppearance(rawText, cur);
+    if (look) {
+      await db.setPrefs(uid, { ...cur, ...look.changes });
+      return renderPrefsChange(look);
+    }
+    // Модель поняла, что речь о настройках, а мы — какая именно. Честно
+    // перечисляем, что умеем, вместо того чтобы менять наугад.
+    return [
+      "Могу поменять под тебя:",
+      "• размер текста — «сделай шрифт крупнее»",
+      "• тему — «включи тёмную тему»",
+      "• расстановку — «сделай просторнее» / «компактнее»",
+      "• картинки и углы — «картинки покрупнее», «углы круглее»",
+      "• анимации и вибрацию — «отключи анимации»",
+      "• стартовый экран — «открывай сразу задачи»",
+      "• разделы меню — «спрячь раздел здоровье»",
+      "• обращение — «называй меня Дмитрием», «обращайся на вы»",
+      "• моё имя и манеру — «тебя зовут Аня», «отвечай покороче»",
+      "",
+      "Или скажи «верни настройки по умолчанию».",
+    ].join("\n");
+  }
 
   if (cmd.action === "query") {
     // Подробности вопроса разбираем сами: модель уже сказала, что это вопрос
@@ -623,6 +649,22 @@ export async function tryPerformCommand(
       const foodId = await db.addFood(uid, { ...n, meal });
       await db.setSetting(`last:${uid}`, JSON.stringify({ phrase: text, kind: "food", id: foodId }));
       return `🍽 Записала (${MEAL_RU[meal]}): ${n.title}\n🔥 ${n.kcal} ккал · Б ${n.protein} · Ж ${n.fat} · У ${n.carbs} г`;
+    }
+  }
+
+  // 0b2) Настройки приложения словами: «сделай шрифт крупнее», «тёмная тема»,
+  // «спрячь раздел здоровье». Проверяем ДО вопросов: «покажи раздел здоровье»
+  // иначе было бы принято за вопрос о делах.
+  //
+  // Сначала пробуем со стандартными настройками — это дёшево и отсеивает почти
+  // все фразы. Настоящие настройки читаем, только если команда правда похожа:
+  // шаг «крупнее» надо считать от текущего размера, а не от стандартного.
+  if (parseAppearance(text)) {
+    const cur = await db.getPrefs(uid);
+    const look = parseAppearance(text, cur);
+    if (look) {
+      await db.setPrefs(uid, { ...cur, ...look.changes });
+      return renderPrefsChange(look);
     }
   }
 

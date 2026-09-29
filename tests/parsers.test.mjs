@@ -13,6 +13,7 @@ import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-bui
 import { needsSearch, parseSearchXml, renderHits } from "../.test-build/search.js";
 import { parseQuery } from "../.test-build/queries.js";
 import { extractIntents } from "../.test-build/ai.js";
+import { parseAppearance } from "../.test-build/appearance.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -402,4 +403,79 @@ test("мусор и пустой ответ не роняют разбор", () 
   assert.deepEqual(extractIntents("не понял"), []);
   assert.deepEqual(extractIntents(""), []);
   assert.deepEqual(extractIntents('[{"нет":"действия"}]'), []);
+});
+
+/* ---------- Настройки приложения словами ---------- */
+
+const PREFS = { scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto", motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара", avatar: "", tone: "friendly", address: "ty", emoji: true, search: true };
+const ap = (text, cur = PREFS) => parseAppearance(text, cur);
+
+test("размер текста меняется шагом и точным числом", () => {
+  assert.equal(ap("сделай шрифт крупнее").changes.scale, 110);
+  assert.equal(ap("уменьши шрифт").changes.scale, 90);
+  assert.equal(ap("поставь масштаб 130").changes.scale, 130);
+  assert.equal(ap("сделай текст побольше", { ...PREFS, scale: 135 }).changes.scale, 140, "выше предела не уходим");
+});
+
+test("тема переключается", () => {
+  assert.equal(ap("включи тёмную тему").changes.theme, "dark");
+  assert.equal(ap("сделай светлый фон").changes.theme, "light");
+  assert.equal(ap("тема как в системе").changes.theme, "auto");
+});
+
+test("плотность, картинки, углы", () => {
+  assert.equal(ap("сделай просторнее").changes.density, "roomy");
+  assert.equal(ap("сделай компактнее").changes.density, "compact");
+  assert.equal(ap("картинки покрупнее").changes.images, "large");
+  assert.equal(ap("сделай углы круглее").changes.corners, "soft");
+});
+
+test("анимации и вибрация выключаются", () => {
+  assert.equal(ap("отключи анимации").changes.motion, false);
+  assert.equal(ap("включи анимации").changes.motion, true);
+  assert.equal(ap("убери вибрацию").changes.haptic, false);
+});
+
+test("стартовый экран и разделы меню", () => {
+  assert.equal(ap("открывай сразу задачи").changes.startTab, "tasks");
+  assert.deepEqual(ap("спрячь раздел здоровье").changes.hidden, ["health"]);
+  assert.deepEqual(ap("верни раздел здоровье", { ...PREFS, hidden: ["health"] }).changes.hidden, []);
+  assert.equal(ap("спрячь раздел главная"), null, "без главной приложение осиротеет");
+});
+
+test("обращение, имя и манера", () => {
+  assert.equal(ap("называй меня Дмитрием").changes.callMe, "Дмитрием");
+  assert.equal(ap("обращайся на вы").changes.address, "vy");
+  assert.equal(ap("тебя зовут Аня").changes.botName, "Аня");
+  assert.equal(ap("отвечай покороче").changes.tone, "brief");
+  assert.equal(ap("говори по-деловому").changes.tone, "business");
+  assert.equal(ap("не используй эмодзи").changes.emoji, false);
+});
+
+test("сброс возвращает стандартный вид", () => {
+  const r = ap("верни настройки по умолчанию");
+  assert.equal(r.changes.scale, 100);
+  assert.equal(r.changes.theme, "auto");
+  assert.deepEqual(r.changes.hidden, []);
+});
+
+test("обычные фразы настройки НЕ меняют", () => {
+  // Каждая строка — реальная ловушка, а не выдуманная
+  assert.equal(ap("напомни на выходных полить цветы"), null, "«на выходных» — не «на вы»");
+  assert.equal(ap("перенеси на тысячу рублей"), null, "«на тысячу» — не «на ты»");
+  assert.equal(ap("напомни про уборку в субботу"), null, "«уборку» — не «компактно»");
+  assert.equal(ap("короче, напомни завтра позвонить"), null, "«короче» — слово-паразит");
+  assert.equal(ap("найди в интернете погоду в Сочи"), null, "это поиск, а не настройка поиска");
+  assert.equal(ap("я свободен в пятницу"), null);
+  assert.equal(ap("переходи к следующей задаче"), null, "«переход» — не анимации");
+  assert.equal(ap("называй меня по имени"), null, "«по» — не имя");
+  assert.equal(ap("закрой задачу про отчёт"), null);
+  assert.equal(ap("что у меня завтра"), null);
+});
+
+test("несколько настроек одной фразой", () => {
+  const r = ap("сделай тёмную тему и шрифт крупнее");
+  assert.equal(r.changes.theme, "dark");
+  assert.equal(r.changes.scale, 110);
+  assert.equal(r.said.length, 2);
 });

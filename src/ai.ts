@@ -174,6 +174,7 @@ export interface AssistantIntent {
     | "client_add" | "client_delete" | "client_edit"
     | "note_add"
     | "query"
+    | "prefs"
     | "none";
   title?: string;
   due?: string; // срок задачи словами
@@ -194,7 +195,7 @@ export interface AssistantIntent {
 const ROUTER_SYSTEM = `Ты — маршрутизатор команд ассистента Сары. По сообщению пользователя определи,
 хочет ли он ВЫПОЛНИТЬ действие или просто задать вопрос/попросить текст.
 Верни СТРОГО один JSON-объект без пояснений и markdown:
-{"action":"task|task_done|task_delete|task_edit|event|event_delete|event_edit|contact|client_add|client_delete|client_edit|note_add|query|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+{"action":"task|task_done|task_delete|task_edit|event|event_delete|event_edit|contact|client_add|client_delete|client_edit|note_add|query|prefs|none","title":"","due":"","at":"","scope":"work|personal","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 ГЛАВНОЕ РАЗЛИЧЕНИЕ:
 - Если пользователь просит СДЕЛАТЬ/ВЫПОЛНИТЬ работу ПРЯМО СЕЙЧАС — проанализировать, написать, составить, придумать,
   дать план/совет/идеи, «действуй как…», «помоги мне…» — это НЕ задача, это "none" (Сара ответит сама).
@@ -232,6 +233,12 @@ const ROUTER_SYSTEM = `Ты — маршрутизатор команд асси
   «что просрочено», «сколько дел висит», «когда встреча с банком», «что я сделал на этой неделе», «покажи клиентов».
   Ответ соберёт сам ассистент из базы. Поля заполнять не нужно, кроме client — если спрашивают про конкретного клиента.
   Не путать с "none": «сколько калорий в банане» — это общий вопрос ("none"), «сколько я съел сегодня» — про свои записи ("query").
+- "prefs" — изменить НАСТРОЙКИ САМОГО ПРИЛОЖЕНИЯ: размер текста и шрифт, тему и фон, плотность,
+  картинки, скругление углов, анимации, вибрацию, стартовый экран, разделы нижнего меню,
+  как обращаться к человеку, имя ассистента, манеру общения, эмодзи, поиск в интернете.
+  Примеры: «сделай шрифт крупнее», «включи тёмную тему», «спрячь раздел здоровье»,
+  «открывай сразу задачи», «называй меня Дмитрием», «отвечай покороче», «верни настройки по умолчанию».
+  Поля заполнять не нужно — ассистент разберёт фразу сам.
 - "none" — вопрос, консультация, просьба написать текст/заголовки/оффер/идеи — всё, что НЕ операция с записями.
 - scope: "personal" для личного (семья, здоровье, быт), иначе "work".
 ВАЖНО про даты: все относительные сроки («сегодня», «завтра», «через час», «в пятницу», «в 13 часов», «в обед»)
@@ -262,6 +269,9 @@ birthday → "ГГГГ-ММ-ДД" или "ММ-ДД". Если срок не у�
 "встреча с банком будет в офисе" → {"action":"event_edit","title":"банк","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"офис","platforms":"","budget":"","client":""}
 "отмени встречу с клиентом" → {"action":"event_delete","title":"встреча с клиентом","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
 "запиши идею: запустить акцию к 8 марта" → {"action":"note_add","title":"запустить акцию к 8 марта","due":"","at":"","scope":"work","name":"","new_name":"","birthday":"","location":"","platforms":"","budget":""}
+"сделай шрифт покрупнее" → {"action":"prefs","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"включи тёмную тему" → {"action":"prefs","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
+"спрячь раздел здоровье" → {"action":"prefs","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "что у меня завтра?" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}
 "какие задачи по Ромашке" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":"Ромашка"}
 "что я сделал на этой неделе" → {"action":"query","title":"","due":"","at":"","scope":"work","name":"","new_name":"","status":"","birthday":"","location":"","platforms":"","budget":"","client":""}

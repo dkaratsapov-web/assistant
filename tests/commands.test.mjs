@@ -18,11 +18,14 @@ const iso = (dayOffset, hour = 12) => {
 };
 
 /** Минимальная база в памяти: только то, чем пользуется обработчик команд. */
+const DEFAULT_PREFS = { scale: 100, density: "normal", images: "normal", corners: "normal", theme: "auto", motion: true, haptic: true, startTab: "home", hidden: [], callMe: "", botName: "Сара", avatar: "", tone: "friendly", address: "ty", emoji: true, search: true };
+
 function fakeDb({ tasks = [], events = [], clients = [], notes = [] } = {}) {
   const settings = new Map();
+  let prefs = null;
   let seq = 100;
   return {
-    store: { tasks, events, clients, notes, settings },
+    store: { tasks, events, clients, notes, settings, get prefs() { return prefs; } },
     async listTasks({ statuses = ["open", "in_progress"], visibleTo = null, scope = null, clientId = null } = {}) {
       return tasks.filter(
         (t) =>
@@ -37,6 +40,8 @@ function fakeDb({ tasks = [], events = [], clients = [], notes = [] } = {}) {
     async listNotes() { return notes; },
     async findClientByName(_uid, name) { return clients.find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? null; },
     async setSetting(k, v) { settings.set(k, v); },
+    async getPrefs() { return { ...DEFAULT_PREFS, ...(prefs ?? {}) }; },
+    async setPrefs(_uid, p) { prefs = p; },
     async getSetting(k) { return settings.get(k) ?? null; },
     async addTask(o) { const t = { id: ++seq, status: "open", scope: o.scope ?? "work", client_id: o.clientId ?? null, due_at: o.dueAt ?? null, creator_id: o.creatorId, title: o.title, repeat_rule: o.repeat ?? "" }; tasks.push(t); return t.id; },
     async updateTask(id, f) {
@@ -189,4 +194,36 @@ test("пустой день — честный ответ, а не выдума�
   const db = fakeDb({});
   const said = await performIntent({ action: "query" }, db, 1, TZ, "что у меня завтра?");
   assert.match(said, /ничего не запланировано/);
+});
+
+/* ---------- Настройки приложения словами ---------- */
+
+test("«сделай шрифт крупнее» правда меняет настройку", async () => {
+  const db = fakeDb({});
+  const said = await performIntent({ action: "prefs" }, db, 1, TZ, "сделай шрифт крупнее");
+  assert.match(said, /Размер текста: 110/);
+  assert.equal(db.store.prefs.scale, 110);
+});
+
+test("тёмная тема и спрятанный раздел сохраняются вместе", async () => {
+  const db = fakeDb({});
+  await performIntent({ action: "prefs" }, db, 1, TZ, "включи тёмную тему");
+  assert.equal(db.store.prefs.theme, "dark");
+  await performIntent({ action: "prefs" }, db, 1, TZ, "спрячь раздел здоровье");
+  assert.deepEqual(db.store.prefs.hidden, ["health"]);
+  assert.equal(db.store.prefs.theme, "dark", "прошлая настройка не должна потеряться");
+});
+
+test("шаг размера считается от текущего, а не от стандартного", async () => {
+  const db = fakeDb({});
+  await performIntent({ action: "prefs" }, db, 1, TZ, "сделай шрифт крупнее");
+  await performIntent({ action: "prefs" }, db, 1, TZ, "ещё крупнее шрифт");
+  assert.equal(db.store.prefs.scale, 120);
+});
+
+test("непонятную настройку не угадываем, а показываем список", async () => {
+  const db = fakeDb({});
+  const said = await performIntent({ action: "prefs" }, db, 1, TZ, "сделай покрасивее");
+  assert.match(said, /Могу поменять/);
+  assert.equal(db.store.prefs, null, "ничего меняться не должно");
 });
