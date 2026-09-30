@@ -5,6 +5,9 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Кнопка «Run workflow» в GitHub: позволяет выкатить вручную, не делая
+  # пустой коммит ради запуска сборки.
+  workflow_dispatch:
 
 jobs:
   build:
