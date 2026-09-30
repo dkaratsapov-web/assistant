@@ -206,14 +206,14 @@ export class DB {
 
   // ---------- Клиенты ----------
 
-  async addClient(ownerId: number, name: string, platforms = "", budget = "", opts: { contact?: string; payAmount?: string; payDue?: string } = {}): Promise<number> {
+  async addClient(ownerId: number, name: string, platforms = "", budget = "", opts: { contact?: string; payAmount?: string; payDue?: string; grp?: string; kind?: string } = {}): Promise<number> {
     await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO clients (owner_id, name, platforms, status, budget, contact, notes, pay_amount, pay_due, created_at)
-         VALUES (?, ?, ?, 'active', ?, ?, '', ?, ?, ?)`
+        `INSERT INTO clients (owner_id, name, platforms, status, budget, contact, notes, pay_amount, pay_due, grp, kind, created_at)
+         VALUES (?, ?, ?, 'active', ?, ?, '', ?, ?, ?, ?, ?)`
       )
-      .bind(ownerId, name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", nowIso())
+      .bind(ownerId, name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", opts.grp ?? "", opts.kind ?? "client", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
@@ -255,13 +255,15 @@ export class DB {
   async updateClient(
     id: number,
     ownerId: number,
-    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string; notes?: string }
+    fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string; metrikaCounter?: string; directLogin?: string; notes?: string; grp?: string; kind?: string }
   ): Promise<boolean> {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
     if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
     if (fields.platforms !== undefined) { sets.push("platforms = ?"); binds.push(fields.platforms); }
+    if (fields.grp !== undefined) { sets.push("grp = ?"); binds.push(fields.grp); }
+    if (fields.kind !== undefined) { sets.push("kind = ?"); binds.push(fields.kind); }
     if (fields.budget !== undefined) { sets.push("budget = ?"); binds.push(fields.budget); }
     if (fields.payAmount !== undefined) { sets.push("pay_amount = ?"); binds.push(fields.payAmount); }
     if (fields.payDue !== undefined) { sets.push("pay_due = ?"); binds.push(fields.payDue); }
@@ -295,6 +297,12 @@ export class DB {
       // отметка «предупредили заранее»: отдельно от reminded_at, иначе
       // напоминание за час съедало бы напоминание в сам срок
       "ALTER TABLE tasks ADD COLUMN pre_reminded_at TEXT",
+      // свои группы: «Свои», «Агентские» — названия придумывает пользователь.
+      // Колонка названа grp, а не group: group — служебное слово SQL.
+      "ALTER TABLE tasks ADD COLUMN grp TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN grp TEXT DEFAULT ''",
+      // вид карточки: обычный клиент, коллега, партнёр или сотрудник
+      "ALTER TABLE clients ADD COLUMN kind TEXT DEFAULT 'client'",
       // дни недели приёма бада: "" — каждый день, иначе "1,3,5" (1=Пн..7=Вс)
       "ALTER TABLE supplement ADD COLUMN weekdays TEXT DEFAULT ''",
     ];
@@ -315,6 +323,7 @@ export class DB {
     creatorId: number;
     description?: string;
     scope?: string;
+    grp?: string;
     clientId?: number | null;
     assigneeId?: number | null;
     priority?: number;
@@ -324,13 +333,14 @@ export class DB {
     await this.ensureSchema();
     const res = await this.d1
       .prepare(
-        `INSERT INTO tasks (title, description, scope, client_id, creator_id, assignee_id, priority, due_at, repeat_rule, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+        `INSERT INTO tasks (title, description, scope, grp, client_id, creator_id, assignee_id, priority, due_at, repeat_rule, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
       )
       .bind(
         opts.title,
         opts.description ?? "",
         opts.scope ?? "work",
+        opts.grp ?? "",
         opts.clientId ?? null,
         opts.creatorId,
         opts.assigneeId ?? null,
@@ -374,6 +384,7 @@ export class DB {
     visibleTo?: number | null;
     clientId?: number | null;
     scope?: string | null;
+    grp?: string | null;
     orderByDone?: boolean;
     limit?: number;
   } = {}): Promise<Task[]> {
@@ -396,6 +407,10 @@ export class DB {
     if (opts.scope) {
       q += " AND scope = ?";
       binds.push(opts.scope);
+    }
+    if (opts.grp) {
+      q += " AND grp = ?";
+      binds.push(opts.grp);
     }
     q += opts.orderByDone
       ? " ORDER BY (done_at IS NULL), done_at DESC, created_at DESC"
@@ -450,7 +465,7 @@ export class DB {
   /** Частичное обновление своей задачи (редактирование). */
   async updateTask(
     id: number,
-    fields: { title?: string; description?: string; dueAt?: string | null; scope?: string; priority?: number; clientId?: number | null; repeat?: string },
+    fields: { title?: string; description?: string; dueAt?: string | null; scope?: string; priority?: number; clientId?: number | null; repeat?: string; grp?: string },
     userId?: number
   ): Promise<void> {
     const sets: string[] = [];
@@ -462,6 +477,7 @@ export class DB {
     if (fields.priority !== undefined) { sets.push("priority = ?"); binds.push(fields.priority); }
     if (fields.clientId !== undefined) { sets.push("client_id = ?"); binds.push(fields.clientId); }
     if (fields.repeat !== undefined) { sets.push("repeat_rule = ?"); binds.push(fields.repeat); }
+    if (fields.grp !== undefined) { sets.push("grp = ?"); binds.push(fields.grp); }
     if (!sets.length) return;
     binds.push(id);
     let where = "id = ?";

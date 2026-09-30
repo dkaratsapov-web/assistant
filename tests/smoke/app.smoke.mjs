@@ -168,6 +168,54 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Группы и разделы ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: группы и свои разделы");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  await page.evaluate(() => go("clients"));
+  await page.waitForSelector("#cllist .card, #cllist .empty", { timeout: 6000 });
+
+  // Включён раздел «Коллеги» — значит над списком есть переключатель
+  const segText = await page.evaluate(() => (document.querySelector("#cllist .seg") || {}).innerText || "");
+  check(/Клиенты/.test(segText) && /Коллеги/.test(segText), "вкладки видов показаны", JSON.stringify(segText));
+
+  // Переключение на «Коллеги» не роняет приложение и меняет выбранную вкладку
+  await page.evaluate(() => window.setClientKind("colleague"));
+  await page.waitForTimeout(500);
+  check(await page.evaluate(() => clientKind === "colleague"), "вкладка переключается");
+  await page.evaluate(() => window.setClientKind("client"));
+  await page.waitForTimeout(500);
+
+  // Группы из настроек попадают в выпадающий список формы
+  await page.evaluate(() => window.openAddClient());
+  await page.waitForSelector("#f-grp", { timeout: 6000 });
+  const opts = await page.evaluate(() => [...$("f-grp").options].map((o) => o.textContent));
+  check(opts.includes("Свои") && opts.includes("Агентские"), "группы предлагаются в форме", JSON.stringify(opts));
+  check(await page.evaluate(() => !!$("f-kind")), "раздел выбирается в форме");
+  await page.evaluate(() => closeSheet());
+
+  // Фильтр по группе в задачах
+  await page.evaluate(() => go("tasks"));
+  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  const chips = await page.evaluate(() => ($("task-groups") || {}).innerText || "");
+  check(/Свои/.test(chips), "фильтр групп есть в задачах", JSON.stringify(chips));
+  await page.evaluate(() => window.setTaskGroup("Свои"));
+  await page.waitForTimeout(500);
+  check(await page.evaluate(() => taskGroup === "Свои"), "фильтр группы применяется");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
 /* ---------- Дедлайн задачи меняется календарём ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });

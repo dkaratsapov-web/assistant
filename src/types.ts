@@ -90,6 +90,8 @@ export interface Client {
   metrika_counter: string;
   direct_login: string;
   created_at: string;
+  grp?: string;                 // своя группа: «Свои», «Агентские»…
+  kind?: string;                // client | colleague | partner | employee
 }
 
 export interface Task {
@@ -107,6 +109,8 @@ export interface Task {
   done_at: string | null;
   reminded_at: string | null;
   repeat_rule?: string;                // правило повтора: "" — разовая задача
+  grp?: string;                        // своя группа задачи
+  pre_reminded_at?: string | null;     // предупредили заранее
 }
 
 export interface Note {

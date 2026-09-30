@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS clients (
   pay_due    TEXT DEFAULT '',   -- дедлайн оплаты (напр. «5 число» или дата)
   metrika_counter TEXT DEFAULT '', -- номер счётчика Яндекс Метрики
   direct_login    TEXT DEFAULT '', -- логин аккаунта Яндекс Директ
+  grp        TEXT DEFAULT '',      -- своя группа: «Свои», «Агентские» и т.п.
+  kind       TEXT DEFAULT 'client',-- client | colleague | partner | employee
   created_at TEXT NOT NULL
 );
 
@@ -42,7 +44,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at  TEXT NOT NULL,
   done_at     TEXT,
   reminded_at TEXT,
-  pre_reminded_at TEXT             -- предупредили заранее (отдельно от напоминания в сам срок)
+  pre_reminded_at TEXT,            -- предупредили заранее (отдельно от напоминания в сам срок)
+  grp         TEXT DEFAULT ''      -- своя группа задачи
 );
 
 CREATE TABLE IF NOT EXISTS notes (

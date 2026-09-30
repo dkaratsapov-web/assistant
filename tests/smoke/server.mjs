@@ -43,6 +43,7 @@ const API = {
     today: { date: new Date().toISOString().slice(0, 10), items: [{ supId: 1, name: "Витамин D", dose: "5000 МЕ", slot: "09:00", taken: false }] },
     adherence: [],
   },
+  "/api/groups": { groups: ["Свои", "Агентские"], kinds: ["colleague"] },
   "/api/profile": { sex: "", height: 0, weight: 0, birth_year: 0, goal: "", allergies: "" },
 };
 

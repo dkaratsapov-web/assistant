@@ -126,6 +126,42 @@ function suggestKcal(p: Profile, weightKg: number | null): { kcal: number; prote
  * Понимать надо оба вида и одинаково во всех местах: разный разбор при
  * создании и при правке — это дедлайн, который «не меняется или лагает».
  */
+/**
+ * Виды карточек. Клиент, коллега, партнёр и сотрудник ведутся одинаково —
+ * карточка и задачи по ней, — поэтому это не разные сущности, а поле вида.
+ * Какие из них показывать, человек решает в настройках.
+ */
+/** Какие дополнительные виды карточек человек включил в настройках. */
+async function readKinds(db: DB, uid: number): Promise<string[]> {
+  const raw = await db.getSetting(`kinds:${uid}`);
+  try {
+    const list = JSON.parse(raw || "[]");
+    return (Array.isArray(list) ? list : []).map((x: unknown) => String(x)).filter((x: string) => CLIENT_KINDS.includes(x) && x !== "client");
+  } catch {
+    return [];
+  }
+}
+
+/** Свои группы пользователя. */
+async function readGroups(db: DB, uid: number): Promise<string[]> {
+  const raw = await db.getSetting(`groups:${uid}`);
+  try { return cleanGroups(JSON.parse(raw || "[]")); } catch { return []; }
+}
+
+const CLIENT_KINDS = ["client", "colleague", "partner", "employee"];
+
+/** Свои группы: названия придумывает пользователь («Свои», «Агентские»). */
+function cleanGroups(v: unknown): string[] {
+  const list = Array.isArray(v) ? v : [];
+  const out: string[] = [];
+  for (const raw of list) {
+    const g = String(raw ?? "").trim().slice(0, 40);
+    if (g && !out.some((x) => x.toLowerCase() === g.toLowerCase())) out.push(g);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 function readDue(value: string, tz: number): string | null {
   const v = String(value ?? "").trim();
   if (!v) return null;
@@ -930,7 +966,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       : [TASK_OPEN, TASK_IN_PROGRESS];
     // Выполненных показываем последние: дальше вглубь истории никто не листает,
     // а выгрузка всего архива — то, из-за чего раздел тяжелел со временем.
-    const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, orderByDone: filter === "done", limit: filter === "done" ? 100 : 300 });
+    const grp = url.searchParams.get("grp") || null;
+    const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, grp, orderByDone: filter === "done", limit: filter === "done" ? 100 : 300 });
     const out = [];
     for (const t of tasks) {
       const client = t.client_id ? await db.getClient(t.client_id, uid) : null;
@@ -946,7 +983,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/tasks
   if (path === "/api/tasks" && request.method === "POST") {
     const body = (await request.json()) as {
-      title?: string; description?: string; due?: string; client_id?: number | null; scope?: string; priority?: number; repeat?: string;
+      title?: string; description?: string; due?: string; client_id?: number | null; scope?: string; priority?: number; repeat?: string; grp?: string;
     };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
@@ -974,8 +1011,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/tasks/{id} — редактирование задачи
   const editMatch = path.match(/^\/api\/tasks\/(\d+)$/);
   if (editMatch && request.method === "POST") {
-    const body = (await request.json()) as { title?: string; due?: string; scope?: string; priority?: number };
-    const fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number } = {};
+    const body = (await request.json()) as { title?: string; due?: string; scope?: string; priority?: number; grp?: string };
+    const fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number; grp?: string } = {};
     if (body.title !== undefined) {
       const t = body.title.trim();
       if (!t) return json({ error: "empty_title" }, 400);
@@ -987,6 +1024,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (body.due !== undefined) fields.dueAt = body.due.trim() ? readDue(body.due, tz) : null;
     if (body.scope !== undefined) fields.scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     if (body.priority !== undefined) fields.priority = body.priority ? 1 : 0;
+    if (body.grp !== undefined) fields.grp = String(body.grp).trim().slice(0, 40);
     await db.updateTask(parseInt(editMatch[1], 10), fields, uid);
     return json({ ok: true });
   }
@@ -998,20 +1036,36 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
+  // GET/POST /api/groups — свои группы для клиентов и задач
+  if (path === "/api/groups" && request.method === "GET") {
+    return json({ groups: await readGroups(db, uid), kinds: await readKinds(db, uid) });
+  }
+  if (path === "/api/groups" && request.method === "POST") {
+    const b = (await request.json().catch(() => ({}))) as { groups?: unknown; kinds?: unknown };
+    if (b.groups !== undefined) await db.setSetting(`groups:${uid}`, JSON.stringify(cleanGroups(b.groups)));
+    if (b.kinds !== undefined) {
+      const kinds = (Array.isArray(b.kinds) ? b.kinds : []).map((x) => String(x)).filter((x) => CLIENT_KINDS.includes(x) && x !== "client");
+      await db.setSetting(`kinds:${uid}`, JSON.stringify(kinds));
+    }
+    return json({ ok: true, groups: await readGroups(db, uid), kinds: await readKinds(db, uid) });
+  }
+
   // GET /api/clients
   if (path === "/api/clients" && request.method === "GET") {
     const clients = await db.listClients(uid);
-    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due, metrika_counter: c.metrika_counter, direct_login: c.direct_login })) });
+    return json({ clients: clients.map((c) => ({ id: c.id, name: c.name, platforms: c.platforms, status: c.status, budget: c.budget, pay_amount: c.pay_amount, pay_due: c.pay_due, metrika_counter: c.metrika_counter, direct_login: c.direct_login, grp: c.grp ?? "", kind: c.kind || "client" })) });
   }
 
   // POST /api/clients — добавить клиента
   if (path === "/api/clients" && request.method === "POST") {
-    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string };
+    const body = (await request.json()) as { name?: string; platforms?: string; budget?: string; pay_amount?: string; pay_due?: string; grp?: string; kind?: string };
     const name = (body.name ?? "").trim();
     if (!name) return json({ error: "empty_name" }, 400);
     const id = await db.addClient(uid, name, (body.platforms ?? "").trim(), (body.budget ?? "").trim(), {
       payAmount: (body.pay_amount ?? "").trim(),
       payDue: (body.pay_due ?? "").trim(),
+      grp: (body.grp ?? "").trim().slice(0, 40),
+      kind: CLIENT_KINDS.includes((body.kind ?? "").trim()) ? (body.kind ?? "").trim() : "client",
     });
     return json({ ok: true, id });
   }

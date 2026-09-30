@@ -663,6 +663,22 @@
     let taskScope = "work";
     let taskStage = "open";
     let clientsCache = [];
+    // Свои группы («Свои», «Агентские») и включённые виды карточек.
+    // Подтягиваются при первом обращении и дальше живут в памяти.
+    let orgCache = { groups: [], kinds: [] };
+    let clientKind = "client";   // какая вкладка открыта в разделе клиентов
+    let clientGroup = "";        // фильтр по группе в разделе клиентов
+    let taskGroup = "";          // фильтр по группе в задачах
+    const KIND_RU = { client: "Клиенты", colleague: "Коллеги", partner: "Партнёры", employee: "Сотрудники" };
+    const KIND_ONE = { client: "клиента", colleague: "коллегу", partner: "партнёра", employee: "сотрудника" };
+    async function loadOrg(force) {
+      if (!force && (orgCache.groups.length || orgCache.kinds.length || orgCache.loaded)) return orgCache;
+      try {
+        const d = await api("/groups");
+        orgCache = { groups: d.groups || [], kinds: d.kinds || [], loaded: true };
+      } catch (e) { orgCache.loaded = true; }
+      return orgCache;
+    }
     let tasksCache = [];
     let eventsCache = [];
     let contactsCache = [];
@@ -1314,19 +1330,28 @@
       const mine = tab;
       if (!warm) view.innerHTML =
         `<div class="seg"><div class="${taskScope==='work'?'on':''}" onclick="setScope('work')">Рабочие</div><div class="${taskScope==='personal'?'on':''}" onclick="setScope('personal')">Личные</div></div>
+         <div class="chips" id="task-groups"></div>
          <div class="chips" id="task-stages"></div><div id="tasklist">${skeleton("list")}</div>`;
       try {
-        const { tasks } = await api(`/tasks?scope=${taskScope}&status=all`);
+        await loadOrg();
+        const { tasks } = await api(`/tasks?scope=${taskScope}&status=all${taskGroup ? `&grp=${encodeURIComponent(taskGroup)}` : ""}`);
         if (tab !== mine) return;
         tasksCache = tasks;
         const groups = { open: [], in_progress: [], done: [], failed: [] };
         tasks.forEach((t) => { (groups[t.status] || (groups[t.status] = [])).push(t); });
         setHTML("task-stages", TASK_STAGES.map(([k, l]) => `<div class="chip ${taskStage===k?'on':''}" onclick="setStage('${k}')">${l} · ${(groups[k]||[]).length}</div>`).join(""));
+        // Полосу групп показываем, только если группы заведены: иначе она пустая
+        setHTML("task-groups", orgCache.groups.length
+          ? `<div class="chip ${taskGroup ? "" : "on"}" onclick="setTaskGroup('')">Все</div>` +
+            orgCache.groups.map((g) => `<div class="chip ${taskGroup === g ? "on" : ""}" onclick="setTaskGroup('${esc(g)}')">${esc(g)}</div>`).join("")
+          : "");
         const list = groups[taskStage] || [];
         const el = $("tasklist"); if (!el) return;
         el.innerHTML = list.length ? list.map(taskCard).join("") : emptyBox("Пусто", "Нет задач в этом статусе.");
       } catch (e) { setHTML("tasklist", err(e)); }
     }
+
+    window.setTaskGroup = (g) => { haptic(); taskGroup = g; delete tabHtml.tasks; renderTasks(false); };
 
     let calView = "list";       // list | month
     let calMonthOffset = 0;     // 0 = текущий месяц
@@ -1461,16 +1486,32 @@
       if (!warm) view.innerHTML = '<div class="section-title">Клиенты и проекты</div><div id="cllist">' + skeleton("list") + '</div>';
       const PLAT = { direct: "Директ", google: "Google Ads", tg: "TG Ads", vk: "VK", avito: "Авито", site: "Сайт" };
       try {
-        const { clients } = await api("/clients");
+        await loadOrg();
+        const { clients: all } = await api("/clients");
         if (tab !== mine) return;
-        clientsCache = clients;
+        clientsCache = all;
+        // Вкладки по видам показываем, только если человек их включил:
+        // у большинства раздел один, и лишняя полоса ему ни к чему.
+        const kinds = ["client", ...orgCache.kinds];
+        if (!kinds.includes(clientKind)) clientKind = "client";
+        const byKind = all.filter((c) => (c.kind || "client") === clientKind);
+        // Группы показываем только те, что реально встречаются здесь
+        const groupsHere = [...new Set(byKind.map((c) => c.grp).filter(Boolean))];
+        const clients = clientGroup && groupsHere.includes(clientGroup) ? byKind.filter((c) => c.grp === clientGroup) : byKind;
+        let head = "";
+        if (kinds.length > 1) {
+          head += `<div class="seg" style="margin-bottom:8px">${kinds.map((k) => `<div class="${k === clientKind ? "on" : ""}" onclick="setClientKind('${k}')">${KIND_RU[k]}</div>`).join("")}</div>`;
+        }
+        if (groupsHere.length) {
+          head += `<div class="chips" style="margin-bottom:8px"><div class="chip ${clientGroup ? "" : "on"}" onclick="setClientGroup('')">Все</div>${groupsHere.map((g) => `<div class="chip ${clientGroup === g ? "on" : ""}" onclick="setClientGroup('${esc(g)}')">${esc(g)}</div>`).join("")}</div>`;
+        }
         const el = $("cllist");
         if (!el) return;
-        if (!clients.length) { el.innerHTML = emptyBox("Клиентов нет", "Нажми «+» или скажи Саре: «добавь клиента …»."); return; }
-        el.innerHTML = clients.map((c) => {
+        if (!clients.length) { el.innerHTML = head + emptyBox(`Пока пусто`, `Нажми «+» или скажи Саре: «добавь ${KIND_ONE[clientKind]} …».`); return; }
+        el.innerHTML = head + clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
           return `<div class="card item"><div class="top" onclick="openClientCard(${c.id})" style="cursor:pointer"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div><span style="color:var(--muted)">›</span></div>
-            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}</div>
+            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}${c.grp ? `<span class="pill strong">${esc(c.grp)}</span>` : ""}</div>
             <div class="actions">
               ${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
               <button class="btn" onclick="editClient(${c.id})">Изменить</button>
@@ -1612,6 +1653,11 @@
              <span>${TAB_NAMES[t]}</span>
              <input type="checkbox" ${prefs.hidden.includes(t) ? "" : "checked"} ${t === "home" ? "disabled" : ""} onchange="toggleTab('${t}', this.checked)">
            </label>`).join("");
+      const kindsList = ["colleague", "partner", "employee"]
+        .map((k) => `<label class="check" style="justify-content:space-between;width:100%">
+             <span>${KIND_RU[k]}</span>
+             <input type="checkbox" ${orgCache.kinds.includes(k) ? "checked" : ""} onchange="toggleKind('${k}', this.checked)">
+           </label>`).join("");
       const startOpts = ["home", "tasks", "calendar", "health", "ai"]
         .map((t) => `<option value="${t}" ${prefs.startTab === t ? "selected" : ""}>${TAB_NAMES[t]}</option>`).join("");
 
@@ -1635,6 +1681,10 @@
           `<div class="field" style="margin:8px 0 0"><label>Открывать на экране</label>
              <select onchange="setPref('startTab', this.value)">${startOpts}</select></div>`)}
         ${block("Разделы внизу", `<div style="color:var(--muted);font-size:12px;margin:-4px 0 6px">Лишнее можно убрать из меню — данные останутся.</div>${tabsList}`)}
+        ${block("Разделы в клиентах", `<div style="color:var(--muted);font-size:12px;margin:-4px 0 6px">Коллеги, партнёры и сотрудники ведутся так же, как клиенты: карточка и задачи по ней. Включи нужные — появятся вкладками.</div>${kindsList}`)}
+        ${block("Свои группы", `<div style="color:var(--muted);font-size:12px;margin:-4px 0 6px">Чтобы отделить своё от чужого: «Свои», «Агентские» — как удобно. Группу можно поставить клиенту и задаче, а потом фильтровать по ней.</div>
+          <div class="chips" id="grp-list" style="margin-bottom:8px">${groupChips()}</div>
+          <div style="display:flex;gap:8px"><input id="grp-new" placeholder="Название группы" style="flex:1"><button class="btn" onclick="addGroup()">Добавить</button></div>`)}
         ${block("Сама Сара", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Имя, лицо и манера общения — на отдельном экране.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(openSara, 180)">Открыть настройки Сары</button>`)}
         <div class="actions" style="margin-top:4px">
           <button class="btn" onclick="resetPrefs()">Сбросить</button>
@@ -2215,6 +2265,7 @@
     sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSheet(); });
 
     async function openAddTask() {
+      await loadOrg();
       if (!clientsCache.length) { try { clientsCache = (await api("/clients")).clients; } catch (e) {} }
       const opts = ['<option value="">Без клиента</option>'].concat(clientsCache.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)).join("");
       openSheet(`<h3>Новая задача</h3>
@@ -2251,6 +2302,7 @@
         </div>
         <div class="field"><label class="check"><input type="checkbox" id="f-prio">Важная задача</label></div>
         <div class="field" id="f-client-wrap"><label>Клиент</label><select id="f-client">${opts}</select></div>
+        <div class="field"><label>Группа</label><select id="f-grp">${groupOptions(taskGroup)}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTask()">Создать</button></div>`);
       dueQuick(0);                                  // по умолчанию сегодня — без английской заглушки в поле
       window.__ts = taskScope;
@@ -2259,7 +2311,7 @@
     }
     window.saveTask = async () => {
       const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
-      await api("/tasks", { method: "POST", body: JSON.stringify({ title, description: ($("f-desc") || {}).value || "", due: dueValue(), repeat: ($("f-repeat") || {}).value || "", scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
+      await api("/tasks", { method: "POST", body: JSON.stringify({ title, description: ($("f-desc") || {}).value || "", due: dueValue(), repeat: ($("f-repeat") || {}).value || "", scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null), grp: ($("f-grp") || {}).value || "" }) });
       closeSheet(); taskScope = window.__ts; switchTab("tasks", true);
     };
 
@@ -2368,6 +2420,7 @@
           <div id="f-due-none" style="display:${t.due_at ? "none" : "block"};color:var(--muted);font-size:13px;padding:6px 2px">Срок не задан — задача просто будет в списке.</div>
         </div>
         <div class="field"><label class="check"><input type="checkbox" id="f-prio" ${t.priority ? "checked" : ""}>Важная задача</label></div>
+        <div class="field"><label>Группа</label><select id="f-grp">${groupOptions(t.grp || "")}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTaskEdit(${id})">Сохранить</button></div>`);
       window.__ts = t.scope || "work";
       window.tsSet = (s) => { window.__ts = s; $("ts-work").classList.toggle("on", s === "work"); $("ts-personal").classList.toggle("on", s === "personal"); };
@@ -2378,7 +2431,7 @@
       // dueValue() отдаёт «ГГГГ-ММ-ДДTЧЧ:ММ» — ровно то, что выбрано в полях.
       // Раньше тут уходил свободный текст вроде «30.09 23:09», сервер разбирал
       // его заново и то и дело понимал иначе, чем человек имел в виду.
-      await api(`/tasks/${id}`, { method: "POST", body: JSON.stringify({ title, due: dueValue(), scope: window.__ts, priority: $("f-prio").checked ? 1 : 0 }) });
+      await api(`/tasks/${id}`, { method: "POST", body: JSON.stringify({ title, due: dueValue(), scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, grp: ($("f-grp") || {}).value || "" }) });
       closeSheet(); renderTasks();
     };
 
@@ -2429,6 +2482,14 @@
     window.saveClientNotes = async (id) => { try { await api(`/clients/${id}`, { method: "POST", body: JSON.stringify({ notes: $("cc-notes").value }) }); tg.showAlert("Заметка сохранена"); } catch (e) { tg.showAlert("Ошибка"); } };
 
     /* Клиенты */
+    /** Варианты групп для выпадающего списка. Пустая — «без группы». */
+    function groupOptions(current) {
+      const cur = current || "";
+      const all = orgCache.groups.slice();
+      if (cur && !all.includes(cur)) all.push(cur);
+      return `<option value="">Без группы</option>` + all.map((g) => `<option value="${esc(g)}" ${g === cur ? "selected" : ""}>${esc(g)}</option>`).join("");
+    }
+
     function clientSheet(title, c, saveCall) {
       openSheet(`<h3>${title}</h3>
         <div class="field"><label>Название</label><div class="with-mic"><input id="f-name" value="${c ? esc(c.name) : ''}" placeholder="Компания / проект">${micButton("f-name")}</div></div>
@@ -2438,12 +2499,59 @@
         <div class="field"><label>Дедлайн оплаты</label><input id="f-paydue" value="${c ? esc(c.pay_due||'') : ''}" placeholder="напр. 5 число / 15.08"></div>
         <div class="field"><label>Счётчик Яндекс Метрики</label><input id="f-metrika" value="${c ? esc(c.metrika_counter||'') : ''}" placeholder="напр. 12345678" inputmode="numeric"></div>
         <div class="field"><label>Логин Яндекс Директ</label><input id="f-direct" value="${c ? esc(c.direct_login||'') : ''}" placeholder="логин рекламного аккаунта"></div>
+        <div class="field"><label>Группа</label><select id="f-grp">${groupOptions(c ? c.grp : "")}</select></div>
+        ${orgCache.kinds.length ? `<div class="field"><label>Раздел</label><select id="f-kind">${["client", ...orgCache.kinds].map((k) => `<option value="${k}" ${(c ? c.kind || "client" : clientKind) === k ? "selected" : ""}>${KIND_RU[k]}</option>`).join("")}</select></div>` : ""}
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="${saveCall}">Сохранить</button></div>`);
     }
     function clientBody() {
-      return { name: $("f-name").value.trim(), platforms: $("f-plat").value, budget: $("f-budget").value, pay_amount: $("f-pay").value, pay_due: $("f-paydue").value, metrika_counter: $("f-metrika").value, direct_login: $("f-direct").value };
+      return {
+        name: $("f-name").value.trim(), platforms: $("f-plat").value, budget: $("f-budget").value,
+        pay_amount: $("f-pay").value, pay_due: $("f-paydue").value,
+        metrika_counter: $("f-metrika").value, direct_login: $("f-direct").value,
+        grp: ($("f-grp") || {}).value || "",
+        kind: ($("f-kind") || {}).value || clientKind,
+      };
     }
-    function openAddClient() { clientSheet("Новый клиент", null, "saveClient()"); }
+    /** Ярлыки заведённых групп с крестиком удаления. */
+    function groupChips() {
+      if (!orgCache.groups.length) return `<div style="color:var(--muted);font-size:12.5px">Групп пока нет.</div>`;
+      return orgCache.groups.map((g) => `<div class="chip on" onclick="delGroup('${esc(g)}')">${esc(g)} ✕</div>`).join("");
+    }
+    async function saveOrg() {
+      try {
+        const d = await api("/groups", { method: "POST", body: JSON.stringify({ groups: orgCache.groups, kinds: orgCache.kinds }) });
+        orgCache = { groups: d.groups || [], kinds: d.kinds || [], loaded: true };
+      } catch (e) { toast("Не удалось сохранить"); }
+      // Списки построены на группах — их надо перерисовать
+      delete tabHtml.clients; delete tabHtml.tasks;
+      setHTML("grp-list", groupChips());
+    }
+    window.addGroup = async () => {
+      const el = $("grp-new");
+      const name = (el && el.value || "").trim().slice(0, 40);
+      if (!name) return;
+      if (orgCache.groups.some((g) => g.toLowerCase() === name.toLowerCase())) { toast("Такая группа уже есть"); return; }
+      orgCache.groups = [...orgCache.groups, name];
+      el.value = "";
+      haptic();
+      await saveOrg();
+    };
+    window.delGroup = async (g) => {
+      // Записи в этой группе не трогаем: у них останется своё название группы,
+      // и его будет видно в карточке. Удаляется только пункт списка.
+      if (!(await ask(`Убрать группу «${g}»?\nЗаписи останутся на месте.`, { ok: "Убрать", danger: true }))) return;
+      orgCache.groups = orgCache.groups.filter((x) => x !== g);
+      await saveOrg();
+    };
+    window.toggleKind = async (k, on) => {
+      haptic();
+      orgCache.kinds = on ? [...new Set([...orgCache.kinds, k])] : orgCache.kinds.filter((x) => x !== k);
+      await saveOrg();
+    };
+
+    window.setClientKind = (k) => { haptic(); clientKind = k; clientGroup = ""; delete tabHtml.clients; renderClients(false); };
+    window.setClientGroup = (g) => { haptic(); clientGroup = g; delete tabHtml.clients; renderClients(false); };
+    function openAddClient() { clientSheet(`Новый ${KIND_ONE[clientKind] || "клиент"}`, null, "saveClient()"); }
     window.saveClient = async () => {
       const b = clientBody(); if (!b.name) return tg.showAlert("Введи название");
       await api("/clients", { method: "POST", body: JSON.stringify(b) });
