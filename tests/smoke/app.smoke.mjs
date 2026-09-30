@@ -168,6 +168,38 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Ничего не уезжает за край экрана ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => {
+    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); localStorage.setItem("sara-tour-done", "1"); } catch (e) {}
+  }, BASE);
+  const page = await ctx.newPage();
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: ничего не уезжает за край");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  // Три кнопки в ряду должны переноситься, а не выпихивать третью за экран
+  await page.evaluate(() => go("tasks"));
+  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  const wraps = await page.evaluate(() => {
+    const el = document.querySelector(".actions");
+    return el ? getComputedStyle(el).flexWrap : "нет ряда кнопок";
+  });
+  check(wraps === "wrap", "ряды кнопок переносятся", wraps);
+
+  for (const t of ["home", "tasks", "calendar", "health", "clients"]) {
+    await page.evaluate((x) => go(x), t);
+    await page.waitForTimeout(450);
+    const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(over <= 1, `раздел «${t}» по ширине экрана`, `перебор ${over}px`);
+  }
+
+  await ctx.close();
+}
+
 /* ---------- Обучающий тур ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });

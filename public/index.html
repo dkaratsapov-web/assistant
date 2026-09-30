@@ -155,8 +155,10 @@
     .meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; align-items: center; }
     .pill { font-size: 11px; padding: 3px 8px; border-radius: 7px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); font-weight: 600; }
     .pill.strong { color: var(--fg-contrast); background: var(--fg); border-color: var(--fg); }
-    .actions { display: flex; gap: var(--s2); margin-top: 10px; }
-    .btn { flex: 1; min-height: 40px; padding: 9px 10px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); transition: transform .1s ease; white-space: nowrap; }
+    /* Переносим кнопки на вторую строку, а не выпихиваем за край: в админке
+       в ряду бывает три действия, и третье уезжало за экран. */
+    .actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: 10px; }
+    .btn { flex: 1 1 auto; min-height: 40px; padding: 9px 10px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); transition: transform .1s ease; white-space: nowrap; }
     .btn:active { transform: scale(.97); }
     .btn.primary { background: var(--fg); color: var(--fg-contrast); border-color: var(--fg); }
     .btn.ghost { flex: 0 0 40px; color: var(--muted); padding: 9px 0; }
@@ -816,6 +818,7 @@
         }
         // На сегодня — строго сегодняшнее (не просроченное)
         h += `<div class="section-title">На сегодня</div>`;
+        const aheadEvents = d.events.filter((e) => new Date(e.starts_at).getTime() >= Date.now());
         if (!todayTasks.length && !d.events.length) {
           h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Всё спокойно. Свободный день ✦</div></div>`;
         } else {
@@ -825,7 +828,10 @@
             h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}${t.client ? " · 📁 " + esc(t.client) : ""}</div></div></div>`;
           });
           d.events.forEach((e) => {
-            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · сегодня ${tOnly(e.starts_at)}${e.client ? " · 📁 " + esc(e.client) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
+            // Встреча в 12:00, когда на часах 19:00, — уже прошла. Раньше она
+            // висела наравне с предстоящими, и день читался неверно.
+            const past = new Date(e.starts_at).getTime() < Date.now();
+            h += `<div class="agenda-item"${past ? ' style="opacity:.55"' : ""}><div class="dot${past ? "" : " strong"}"></div><div class="t"><div class="ttl"${past ? ' style="text-decoration:line-through"' : ""}>${esc(e.title)}</div><div class="m">${past ? "прошла" : "встреча"} · сегодня ${tOnly(e.starts_at)}${e.client ? " · 📁 " + esc(e.client) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -1730,6 +1736,14 @@
       tourNext();
     };
 
+    /** Показать в настройках, какая сборка сейчас загружена. */
+    async function fillBuildLine() {
+      try {
+        const res = await fetch("/version", { cache: "no-store" });
+        setHTML("build-line", esc(await res.text()));
+      } catch (e) { setHTML("build-line", "не удалось узнать"); }
+    }
+
     window.openSettings = () => {
       const seg = (key, opts) =>
         `<div class="seg" style="margin:0">${opts
@@ -1758,6 +1772,8 @@
       const startOpts = ["home", "tasks", "calendar", "health", "ai"]
         .map((t) => `<option value="${t}" ${prefs.startTab === t ? "selected" : ""}>${TAB_NAMES[t]}</option>`).join("");
 
+      // Версию подтягиваем после отрисовки: шторка уже на экране, ждать нечего
+      setTimeout(fillBuildLine, 60);
       openSheet(`<h3>Настройки</h3>
         <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Меняется сразу — можно крутить и смотреть. Настройки свои у каждого аккаунта.</div>
         ${block("Размер интерфейса",
@@ -1783,6 +1799,7 @@
           <div class="chips" id="grp-list" style="margin-bottom:8px">${groupChips()}</div>
           <div style="display:flex;gap:8px"><input id="grp-new" placeholder="Название группы" style="flex:1"><button class="btn" onclick="addGroup()">Добавить</button></div>`)}
         ${block("Сама Сара", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Имя, лицо и манера общения — на отдельном экране.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(openSara, 180)">Открыть настройки Сары</button>`)}
+        ${block("Версия", `<div style="color:var(--muted);font-size:12.5px">Если правка не видна, сверь эту строку с адресом <b>/version</b> — совпадают, значит у тебя свежая сборка.</div><div id="build-line" style="font-size:12.5px;margin-top:6px;font-weight:600">…</div>`)}
         ${block("Знакомство с приложением", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Короткая экскурсия по разделам и кнопкам — ${TOUR.length} шагов.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(() => startTour(true), 260)">Пройти заново</button>`)}
         <div class="actions" style="margin-top:4px">
           <button class="btn" onclick="resetPrefs()">Сбросить</button>
@@ -1924,10 +1941,39 @@
         <div class="actions" style="margin-top:10px">
           ${u.role !== "client" ? `<button class="btn sm" onclick="setUserRole(${u.user_id}, 'client')">${pending ? "Дать личный акк" : "Сделать личным"}</button>` : ""}
           ${u.role !== "member" ? `<button class="btn sm" onclick="setUserRole(${u.user_id}, 'member')">В команду</button>` : ""}
+          ${u.is_me ? "" : `<button class="btn sm" onclick="openUserTabs(${u.user_id}, '${esc(u.name || u.username || "аккаунт")}')">Разделы</button>`}
           <button class="btn sm ghost" style="flex:0 0 auto;color:var(--danger,#e5484d)" onclick="removeUser(${u.user_id})">Отозвать</button>
         </div>
       </div>`;
     }
+
+    /** Какие разделы доступны конкретному человеку. Решает владелец. */
+    window.openUserTabs = async (uid, who) => {
+      let cur = { hidden: [], locked: false };
+      try { cur = await api(`/admin/users/${uid}/tabs`); } catch (e) {}
+      const rows = ["tasks", "calendar", "health", "clients", "ai"]
+        .map((t) => `<label class="check" style="justify-content:space-between;width:100%">
+             <span>${TAB_NAMES[t]}</span>
+             <input type="checkbox" data-tab="${t}" ${cur.hidden.includes(t) ? "" : "checked"}>
+           </label>`).join("");
+      openSheet(`<h3>Разделы: ${esc(who)}</h3>
+        <div style="color:var(--muted);font-size:12.5px;margin:-4px 2px 10px">Снятая галочка убирает раздел из меню. Данные при этом остаются — их просто не видно.</div>
+        <div class="card" style="padding:12px">${rows}</div>
+        <label class="check" style="justify-content:space-between;width:100%;margin-top:10px">
+          <span><span style="font-weight:600">Запретить менять самому</span><br><span style="color:var(--muted);font-size:12px">Человек не сможет вернуть спрятанное в своих настройках</span></span>
+          <input type="checkbox" id="tabs-lock" ${cur.locked ? "checked" : ""}>
+        </label>
+        <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveUserTabs(${uid})">Сохранить</button></div>`);
+    };
+    window.saveUserTabs = async (uid) => {
+      const hidden = [...document.querySelectorAll("[data-tab]")].filter((c) => !c.checked).map((c) => c.dataset.tab);
+      const locked = $("tabs-lock") && $("tabs-lock").checked;
+      try {
+        await api(`/admin/users/${uid}/tabs`, { method: "POST", body: JSON.stringify({ hidden, locked }) });
+      } catch (e) { return tg.showAlert("Ошибка: " + (e.message || e)); }
+      closeSheet();
+      toast("Разделы сохранены");
+    };
 
     window.checkAi = async () => {
       const box = $("adm-ai");

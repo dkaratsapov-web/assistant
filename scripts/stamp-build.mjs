@@ -9,6 +9,7 @@
  * деплой целиком, а цена вопроса — всего лишь строчка на /version.
  */
 import { execSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 
 const date = new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -19,6 +20,16 @@ try {
   // сборка может идти без истории git — тогда обойдёмся датой
 }
 
-const stamp = commit ? `${date} · ${commit}` : date;
+/**
+ * Отпечаток интерфейса.
+ *
+ * Метка коммита обманывает: штамп ставится ДО коммита, поэтому показывает
+ * предыдущий — и по нему нельзя понять, доехала ли правка интерфейса. Отпечаток
+ * самого файла меняется ровно тогда, когда меняется интерфейс, и отвечает на
+ * единственный важный вопрос: «у меня в приложении новая версия или старая?».
+ */
+const ui = crypto.createHash("sha256").update(fs.readFileSync("public/index.html")).digest("hex").slice(0, 7);
+
+const stamp = `${date} · ui ${ui}${commit ? ` · после ${commit}` : ""}`;
 fs.writeFileSync("src/build.ts", `// Файл создаётся скриптом scripts/stamp-build.mjs при каждой сборке.\nexport const BUILD = ${JSON.stringify(stamp)};\n`);
 console.log("метка сборки:", stamp);

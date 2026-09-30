@@ -7,6 +7,7 @@ import { aiConfig, AssistantIntent, estimateBurn, estimateNutrition, parseTaskFr
 import { DB } from "./db";
 import { answerQuery, parseQuery } from "./queries";
 import { parseAppearance, renderPrefsChange } from "./appearance";
+import { CLIENT_FIELD_RU, hasFields, parseClientFields, parseTaskFields } from "./cards";
 import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
 import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, stripClientName, WB_END, WB_START, wordRe } from "./utils";
 
@@ -129,6 +130,23 @@ export async function performIntent(
    * только вторым заходом — иначе старая выполненная задача могла бы
    * перебить активную с похожим названием.
    */
+  /**
+   * Имя клиента для поиска. Нужно потому, что из названия оно теперь вырезается
+   * («Встреча с клиентом» вместо «Встреча с клиентом ДиАвто69»), и без этого
+   * запись переставала находиться по клиенту: «перенеси встречу с ДиАвто69»
+   * отвечало «не нашла».
+   */
+  let clientNames: Map<number, string> | null = null;
+  const searchText = async (title: string, clientId: number | null | undefined): Promise<string> => {
+    if (!clientId) return title;
+    if (!clientNames) clientNames = new Map((await db.listClients(uid)).map((c) => [c.id, c.name]));
+    const name = clientNames.get(clientId);
+    return name ? `${title} ${name}` : title;
+  };
+  /** Записи с добавленным именем клиента — по ним и ищем. */
+  const withClient = async <T extends { title: string; client_id?: number | null }>(list: T[]) =>
+    Promise.all(list.map(async (x) => ({ item: x, text: await searchText(x.title, x.client_id) })));
+
   const findTask = async (q: string, includeClosed = false): Promise<{ task: Task | null; ask: string | null }> => {
     const active = await db.listTasks({ visibleTo: uid });
     const closed = includeClosed ? await db.listTasks({ statuses: [TASK_DONE, TASK_FAILED], visibleTo: uid }) : [];
@@ -137,11 +155,14 @@ export async function performIntent(
       const prev = id ? [...active, ...closed].find((t) => t.id === id) : null;
       return { task: prev ?? null, ask: null };
     }
-    let { best, rivals } = bestMatch(active, (t) => t.title, q || rawText);
-    if (!best && !rivals.length && closed.length) ({ best, rivals } = bestMatch(closed, (t) => t.title, q || rawText));
-    if (best) return { task: best, ask: null };
+    const pool = await withClient(active);
+    let { best, rivals } = bestMatch(pool, (x) => x.text, q || rawText);
+    if (!best && !rivals.length && closed.length) {
+      ({ best, rivals } = bestMatch(await withClient(closed), (x) => x.text, q || rawText));
+    }
+    if (best) return { task: best.item, ask: null };
     if (rivals.length) {
-      const list = rivals.slice(0, 4).map((t) => `«${t.title}»`).join(", ");
+      const list = rivals.slice(0, 4).map((x) => `«${x.item.title}»`).join(", ");
       return { task: null, ask: `Под это подходит несколько задач: ${list}. Какую именно?` };
     }
     return { task: null, ask: null };
@@ -155,10 +176,10 @@ export async function performIntent(
       const prev = id ? events.find((e) => e.id === id) : null;
       return { event: prev ?? null, ask: null };
     }
-    const { best, rivals } = bestMatch(events, (e) => e.title, q || rawText);
-    if (best) return { event: best, ask: null };
+    const { best, rivals } = bestMatch(await withClient(events), (x) => x.text, q || rawText);
+    if (best) return { event: best.item, ask: null };
     if (rivals.length) {
-      const list = rivals.slice(0, 4).map((e) => `«${e.title}»`).join(", ");
+      const list = rivals.slice(0, 4).map((x) => `«${x.item.title}»`).join(", ");
       return { event: null, ask: `Под это подходит несколько встреч: ${list}. Какую именно?` };
     }
     return { event: null, ask: null };
@@ -255,7 +276,7 @@ export async function performIntent(
     if (ask) return ask;
     if (!task) return `Не нашла активную задачу${q ? ` «${q}»` : ""}. Скажи пару слов из её названия.`;
 
-    const fields: { title?: string; dueAt?: string | null; scope?: string; clientId?: number | null; repeat?: string } = {};
+    const fields: { title?: string; description?: string; dueAt?: string | null; scope?: string; priority?: number; clientId?: number | null; repeat?: string } = {};
     const done: string[] = [];
 
     const newTitle = (cmd.new_name ?? "").trim();
@@ -293,6 +314,17 @@ export async function performIntent(
     if (repeat && repeat !== (task.repeat_rule ?? "")) {
       fields.repeat = repeat;
       done.push(`повтор → ${repeatLabel(repeat)}`);
+    }
+
+    // Внутренности задачи: описание и важность
+    const inner = parseTaskFields(rawText);
+    if (inner.description) {
+      fields.description = inner.description;
+      done.push("описание записано");
+    }
+    if (inner.priority !== undefined && inner.priority !== task.priority) {
+      fields.priority = inner.priority;
+      done.push(inner.priority ? "отмечена важной" : "важность снята");
     }
 
     if (Object.keys(fields).length) await db.updateTask(task.id, fields, uid);
@@ -400,6 +432,21 @@ export async function performIntent(
   }
 
   if (cmd.action === "client_add") {
+    // Боевой случай: «добавь клиенту Таллер в карточке ведение 30000» заводило
+    // НОВОГО клиента с названием из всей фразы. Отличает правку от создания не
+    // формулировка, а факт: если такой клиент уже есть, речь о нём.
+    const known = mentionedClient(await db.listClients(uid), rawText || (cmd.name ?? ""));
+    if (known) {
+      const fields = parseClientFields(rawText);
+      if (hasFields(fields)) {
+        await db.updateClient(known.id, uid, fields);
+        const what = (Object.keys(fields) as (keyof typeof fields)[])
+          .map((k) => `${CLIENT_FIELD_RU[k]} → ${fields[k]}`)
+          .join("\n");
+        return `✏️ Обновила карточку: ${known.name}\n${what}`;
+      }
+      return `Клиент ${known.name} уже есть. Скажи, что вписать: «ведение 30000», «бюджет 150000», «оплата до 5 числа».`;
+    }
     const name = (cmd.name ?? cmd.title ?? "").trim();
     if (!name) return null;
     await db.addClient(uid, name, (cmd.platforms ?? "").trim(), (cmd.budget ?? "").trim(), {
@@ -425,17 +472,34 @@ export async function performIntent(
   }
 
   if (cmd.action === "client_edit") {
+    // Поля читаем и из фразы: модель вытаскивает не всё, а сказать могут
+    // «у Ромашки ведение 45 тыс и оплата до 5 числа» одной репликой.
+    const spoken = parseClientFields(rawText);
     const name = (cmd.name ?? "").trim();
-    if (!name) return null;
-    const client = await db.findClientByName(uid, name);
-    if (!client) return `Не нашла клиента «${name}».`;
-    const fields: { name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string } = {};
+    // Имя может не прийти от модели: «у Ромашки ведение 45 тыс» — тогда
+    // узнаём клиента прямо во фразе
+    const client = (name ? await db.findClientByName(uid, name) : null)
+      ?? mentionedClient(await db.listClients(uid), rawText);
+    if (!client) return name ? `Не нашла клиента «${name}».` : null;
+    const fields: {
+      name?: string; platforms?: string; budget?: string; payAmount?: string; payDue?: string;
+      contact?: string; metrikaCounter?: string; directLogin?: string; notes?: string;
+    } = {};
     if (cmd.new_name && cmd.new_name.trim()) fields.name = cmd.new_name.trim();
     if (cmd.platforms && cmd.platforms.trim()) fields.platforms = cmd.platforms.trim();
     if (cmd.budget && cmd.budget.trim()) fields.budget = cmd.budget.trim();
     if (cmd.fee && cmd.fee.trim()) fields.payAmount = cmd.fee.trim();
     if (cmd.pay_due && cmd.pay_due.trim()) fields.payDue = cmd.pay_due.trim();
-    if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Укажи название, площадки, бюджет, сумму ведения или дедлайн оплаты.`;
+    // Сказанное вслух дополняет разбор модели, но не затирает его
+    if (spoken.fee && !fields.payAmount) fields.payAmount = spoken.fee;
+    if (spoken.budget && !fields.budget) fields.budget = spoken.budget;
+    if (spoken.payDue && !fields.payDue) fields.payDue = spoken.payDue;
+    if (spoken.platforms && !fields.platforms) fields.platforms = spoken.platforms;
+    if (spoken.contact) fields.contact = spoken.contact;
+    if (spoken.metrikaCounter) fields.metrikaCounter = spoken.metrikaCounter;
+    if (spoken.directLogin) fields.directLogin = spoken.directLogin;
+    if (spoken.notes) fields.notes = spoken.notes;
+    if (!Object.keys(fields).length) return `Что изменить у клиента «${client.name}»? Скажи, например: «ведение 30000», «бюджет 150000», «оплата до 5 числа», «площадки Директ и VK».`;
     await db.updateClient(client.id, uid, fields);
     const changes = [
       fields.name && `название → ${fields.name}`,
@@ -443,8 +507,12 @@ export async function performIntent(
       fields.budget && `бюджет → ${fields.budget}`,
       fields.payAmount && `ведение → ${fields.payAmount}`,
       fields.payDue && `оплата → ${fields.payDue}`,
-    ].filter(Boolean).join(", ");
-    return `✏️ Клиент обновлён: ${client.name}\n${changes}`;
+      fields.contact && `контакт → ${fields.contact}`,
+      fields.metrikaCounter && `счётчик Метрики → ${fields.metrikaCounter}`,
+      fields.directLogin && `логин Директа → ${fields.directLogin}`,
+      fields.notes && `заметка записана`,
+    ].filter(Boolean).join("\n");
+    return `✏️ Карточка обновлена: ${client.name}\n${changes}`;
   }
 
   if (cmd.action === "note_add") {

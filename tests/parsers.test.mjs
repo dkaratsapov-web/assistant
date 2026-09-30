@@ -15,6 +15,7 @@ import { parseQuery } from "../.test-build/queries.js";
 import { extractIntents } from "../.test-build/ai.js";
 import { parseAppearance } from "../.test-build/appearance.js";
 import { parseRpcBody, pickTool, fitArgs } from "../.test-build/yougile.js";
+import { parseClientFields, parseTaskFields, parseMoney } from "../.test-build/cards.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -582,4 +583,57 @@ test("чего сервер не объявил — того не шлём", () 
   const tool = { name: "create_task", inputSchema: { properties: { title: {} } } };
   const args = fitArgs(tool, { title: ["title"], due: ["deadline"] }, { title: "Отчёт", due: "2026-10-01" });
   assert.deepEqual(args, { title: "Отчёт" }, "лишнее поле сервер отверг бы целиком");
+});
+
+/* ---------- Правки внутри карточек ---------- */
+
+test("суммы понимаются в разном виде", () => {
+  assert.equal(parseMoney("30000"), "30000");
+  assert.equal(parseMoney("30 000"), "30000");
+  assert.equal(parseMoney("30к"), "30000");
+  assert.equal(parseMoney("30 тыс"), "30000");
+  assert.equal(parseMoney("1 млн"), "1000000");
+});
+
+test("боевой случай: ведение вписывается, а не создаётся клиент", () => {
+  // Из-за этой фразы Сара завела клиента «таллер в карточке ведение 30000»
+  const f = parseClientFields("добавь клиенту таллер в карточке ведение 30000");
+  assert.equal(f.fee, "30000");
+});
+
+test("деньги в карточке клиента", () => {
+  assert.equal(parseClientFields("у Ромашки бюджет 150000").budget, "150000");
+  assert.equal(parseClientFields("поставь Лютику ведение 45 тыс").fee, "45000");
+  assert.equal(parseClientFields("абонентка 30к").fee, "30000");
+});
+
+test("срок оплаты", () => {
+  assert.equal(parseClientFields("оплата до 5 числа").payDue, "5 числа");
+  assert.equal(parseClientFields("платит 10 числа").payDue, "10 числа");
+  assert.equal(parseClientFields("оплата 15.08").payDue, "15.08");
+});
+
+test("площадки, метрика, директ и контакт", () => {
+  assert.equal(parseClientFields("площадки Директ и VK").platforms, "Директ и VK");
+  assert.equal(parseClientFields("счётчик метрики 12345678").metrikaCounter, "12345678");
+  assert.equal(parseClientFields("логин директа romashka-ads").directLogin, "romashka-ads");
+  assert.equal(parseClientFields("контакт +7 999 123-45-67").contact, "+7 999 123-45-67");
+  assert.equal(parseClientFields("почта info@romashka.ru").contact, "info@romashka.ru");
+});
+
+test("заметка берётся после двоеточия", () => {
+  assert.equal(parseClientFields("заметка: платят через раз, тянут с актами").notes, "платят через раз, тянут с актами");
+});
+
+test("обычная фраза ничего не меняет", () => {
+  assert.deepEqual(parseClientFields("добавь клиента Ромашка"), {});
+  assert.deepEqual(parseClientFields("что у меня завтра"), {});
+});
+
+test("поля задачи: описание и важность", () => {
+  assert.equal(parseTaskFields("описание: согласовать макет с юристами").description, "согласовать макет с юристами");
+  assert.equal(parseTaskFields("сделай задачу важной").priority, 1);
+  assert.equal(parseTaskFields("это срочно").priority, 1);
+  assert.equal(parseTaskFields("сними важность").priority, 0);
+  assert.deepEqual(parseTaskFields("позвонить в банк"), {});
 });

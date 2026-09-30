@@ -276,6 +276,36 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return json({ ok: true });
     }
 
+    /**
+     * GET/POST /api/admin/users/{id}/tabs — какие разделы доступны человеку.
+     *
+     * Владелец задаёт это за него: у сотрудника не должно быть лишнего, а сам
+     * он спрятанное вернуть не сможет. Меняются ТОЛЬКО разделы: остальные
+     * настройки человека — его дело, и трогать их владелец не вправе.
+     */
+    const tabsMatch = path.match(/^\/api\/admin\/users\/(\d+)\/tabs$/);
+    if (tabsMatch && request.method === "GET") {
+      const target = parseInt(tabsMatch[1], 10);
+      const p = await db.getPrefs(target);
+      return json({ hidden: p.hidden, locked: (await db.getSetting(`tabslock:${target}`)) === "1" });
+    }
+    if (tabsMatch && request.method === "POST") {
+      const target = parseInt(tabsMatch[1], 10);
+      if (target === uid) return json({ error: "self" }, 400);
+      const b = (await request.json().catch(() => ({}))) as { hidden?: unknown; locked?: boolean };
+      const cur = await db.getPrefs(target);
+      const hidden = (Array.isArray(b.hidden) ? b.hidden : [])
+        .map((x) => String(x))
+        .filter((x) => ["tasks", "calendar", "health", "clients", "ai"].includes(x))  // главную спрятать нельзя
+        .slice(0, 8);
+      // Если стартовый экран спрятали — переносим на главную, иначе человек
+      // откроет приложение в пустоту
+      const startTab = hidden.includes(cur.startTab) ? "home" : cur.startTab;
+      await db.setPrefs(target, { ...cur, hidden, startTab });
+      if (b.locked !== undefined) await db.setSetting(`tabslock:${target}`, b.locked ? "1" : "");
+      return json({ ok: true, hidden });
+    }
+
     const userDel = path.match(/^\/api\/admin\/users\/(\d+)$/);
     if (userDel && request.method === "DELETE") {
       const target = parseInt(userDel[1], 10);
@@ -498,6 +528,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (path === "/api/prefs" && request.method === "POST") {
     const b = (await request.json().catch(() => ({}))) as Partial<AppPrefs>;
     const cur = await db.getPrefs(uid);
+    // Разделы закрыл владелец — человек их себе не вернёт. Остальное меняет сам.
+    const tabsLocked = !isOwner && (await db.getSetting(`tabslock:${uid}`)) === "1";
     const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T =>
       typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;
     const next: AppPrefs = {
@@ -509,7 +541,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       motion: typeof b.motion === "boolean" ? b.motion : cur.motion,
       haptic: typeof b.haptic === "boolean" ? b.haptic : cur.haptic,
       startTab: oneOf(b.startTab, ["home", "tasks", "calendar", "health", "clients", "ai"] as const, cur.startTab as "home"),
-      hidden: Array.isArray(b.hidden) ? b.hidden.filter((x): x is string => typeof x === "string").slice(0, 8) : cur.hidden,
+      hidden: tabsLocked
+        ? cur.hidden
+        : Array.isArray(b.hidden) ? b.hidden.filter((x): x is string => typeof x === "string").slice(0, 8) : cur.hidden,
       callMe: typeof b.callMe === "string" ? b.callMe.trim().slice(0, 40) : cur.callMe,
       botName: typeof b.botName === "string" && b.botName.trim() ? b.botName.trim().slice(0, 24) : cur.botName,
       // аватар берём только по http(s): чужие схемы в webview небезопасны
