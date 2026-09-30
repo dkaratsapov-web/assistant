@@ -49,7 +49,7 @@ check(await mic.count() === 1, "кнопка голоса на месте");
 // их центры по вертикальной оси совпадают — иначе столбик кнопок кривой.
 // Меряем в «Задачах»: на главной «плюса» нет, добавлять там нечего.
 await page.evaluate(() => go("tasks"));
-await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+await page.waitForSelector("#tasklist .row-item, #tasklist .empty", { timeout: 6000 });
 const geom = await page.evaluate(() => {
   const m = document.getElementById("fab-mic").getBoundingClientRect();
   const p = document.getElementById("fab").getBoundingClientRect();

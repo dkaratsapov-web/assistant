@@ -327,7 +327,24 @@
     .tour-card .tx { color: var(--muted); font-size: 13.5px; line-height: 1.45; }
     .tour-card .row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
     .tour-card .step { color: var(--muted); font-size: 12px; margin-right: auto; }
-    :root[data-motion="off"] .tour-hole, :root[data-motion="off"] .tour-card { transition: none; }
+    /* Подсветка тихо пульсирует — глаз сразу находит, о чём речь.
+       На шаге, где надо нажать самому, пульс заметнее. */
+    .tour-hole { animation: tour-breathe 2.4s ease-in-out infinite; }
+    .tour-hole.wait { animation: tour-wait 1.1s ease-in-out infinite; }
+    @keyframes tour-breathe {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(255,255,255,.9), 0 0 0 9999px rgba(0,0,0,.74); }
+      50%      { box-shadow: 0 0 0 7px rgba(255,255,255,.55), 0 0 0 9999px rgba(0,0,0,.74); }
+    }
+    @keyframes tour-wait {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(255,255,255,.95), 0 0 0 9999px rgba(0,0,0,.74); }
+      50%      { box-shadow: 0 0 0 11px rgba(255,255,255,.35), 0 0 0 9999px rgba(0,0,0,.74); }
+    }
+    /* Карточка въезжает снизу — видно, что подсказка сменилась, а не «мигнула» */
+    .tour-card { opacity: 0; transform: translateY(10px); }
+    .tour-card.in { opacity: 1; transform: translateY(0); transition: opacity .22s ease, transform .22s ease, top .28s ease; }
+    .tour-card .wait-hint { font-size: 12.5px; font-weight: 700; color: var(--muted); padding: 9px 12px; }
+    :root[data-motion="off"] .tour-hole, :root[data-motion="off"] .tour-card { transition: none; animation: none; }
+    :root[data-motion="off"] .tour-card { opacity: 1; transform: none; }
     /* Питание. Плотный список: приём пищи и его блюда — одна карточка,
        строка в две короткие линии, вместо кнопки — компактный кружок. */
     .meal { padding: 10px 12px; margin-top: 8px; }
@@ -346,7 +363,9 @@
     .rows { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     .row-item + .row-item { border-top: 1px solid var(--border); }
     .rh { display: flex; align-items: center; gap: 8px; padding: 12px 13px; cursor: pointer; }
-    .rh .rn { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rh .rn { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    .rh .rn.done { text-decoration: line-through; color: var(--muted); font-weight: 500; }
+    .rh .rs { border-radius: 6px; padding: 2px 7px; }
     .rh .rs { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
     .rh .chev { color: var(--muted); font-size: 17px; line-height: 1; transition: transform .18s ease; flex: none; }
     .row-item.open .chev { transform: rotate(90deg); }
@@ -1043,7 +1062,7 @@
         // КБЖУ
         const remain = kc.goal - kc.consumed;
         const mbar = (v, g) => bar(g ? v / g * 100 : 0);
-        h += `<div class="card">
+        h += `<div class="card" id="health-kcal">
             <div style="display:flex;justify-content:space-between;align-items:baseline"><b>🔥 ${kc.consumed} / ${kc.goal} ккал</b><span style="color:var(--muted);font-size:12px">${remain >= 0 ? `осталось ${remain}` : `перебор ${-remain}`}</span></div>${bar(kc.goal?kc.consumed/kc.goal*100:0)}
             <div style="display:flex;gap:10px;margin-top:12px">
               <div style="flex:1"><div style="font-size:11.5px;color:var(--muted)">Белки ${kc.protein}/${kc.goalP}</div>${mbar(kc.protein,kc.goalP)}</div>
@@ -1051,9 +1070,9 @@
               <div style="flex:1"><div style="font-size:11.5px;color:var(--muted)">Углев. ${kc.carbs}/${kc.goalC}</div>${mbar(kc.carbs,kc.goalC)}</div>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><b>💧 ${(w.ml/1000).toFixed(1)} / ${(w.goal/1000).toFixed(1)} л</b></div>${bar(w.goal?w.ml/w.goal*100:0)}</div>`;
-        if (today) h += `<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(renderHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(renderHealth)">＋ 0.5 л</button><button class="btn" style="flex:1" onclick="openWater()">＋ мл</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
+        if (today) h += `<div id="health-quick" style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="waterQuick(250).then(renderHealth)">＋ стакан</button><button class="btn" style="flex:1" onclick="waterQuick(500).then(renderHealth)">＋ 0.5 л</button><button class="btn" style="flex:1" onclick="openWater()">＋ мл</button><button class="btn primary" style="flex:1" onclick="openFoodAdd()">＋ еда</button></div>`;
         // Питание по приёмам
-        h += `<div class="section-title">Питание</div>`;
+        h += `<div class="section-title" id="health-food">Питание</div>`;
         const MEALS = [["breakfast", "🌅 Завтрак"], ["lunch", "☀️ Обед"], ["dinner", "🌙 Ужин"], ["snack", "🍎 Перекус"], ["", "🍽 Другое"]];
         const byMeal = {};
         d.entries.forEach((e) => { const m = e.meal || ""; (byMeal[m] = byMeal[m] || []).push(e); });
@@ -1382,16 +1401,28 @@
         const c = ms < 3600000 ? ["rgba(229,72,77,.18)", "#ff6b6b"] : ms < 86400000 ? ["rgba(240,171,0,.18)", "#f2b705"] : ["rgba(48,164,108,.18)", "#43c883"];
         dueStyle = `background:${c[0]};color:${c[1]};border-color:transparent;font-weight:700`;
       }
-      return `<div class="card item ${done?'done':''}">
-        <div class="top"><div class="name ${done?'done':''}">${esc(t.title)}</div>${t.client && !closed ? `<span class="pill" style="background:var(--fg);color:var(--fg-contrast);border-color:transparent;font-weight:700;flex:none">📁 ${esc(t.client)}</span>` : ""}</div>
-        ${t.description && !closed ? `<div style="color:var(--muted);font-size:12.5px;line-height:1.4;margin:2px 0 6px;white-space:pre-wrap">${esc(t.description)}</div>` : ""}
-        <div class="meta">
-          ${done && doneTxt ? `<span class="pill">выполнено ${doneTxt}</span>` : (due.txt ? `<span class="pill" style="${dueStyle}">⏱ ${due.txt}</span>` : "")}
-          ${!closed && t.priority ? `<span class="pill strong">важно</span>` : ""}
-          ${t.repeat_rule ? `<span class="pill">🔁 ${esc(repeatRu(t.repeat_rule))}</span>` : ""}
-          ${closed && t.client ? `<span class="pill">📁 ${esc(t.client)}</span>` : ""}
+      // Тонкая строка: название и главный признак — срок. Описание, ярлыки и
+      // кнопки раскрываются по нажатию: список из десяти задач должен
+      // помещаться на экран, а не на три экрана.
+      const rowId = `task-row-${t.id}`;
+      const short = done && doneTxt ? `выполнено ${doneTxt}` : due.txt || "";
+      return `<div class="row-item${done ? " past" : ""}" id="${rowId}">
+        <div class="rh" onclick="toggleRow('${rowId}')">
+          <span class="rn${done ? " done" : ""}">${esc(t.title)}</span>
+          ${short ? `<span class="rs" style="${done ? "" : dueStyle ? dueStyle.replace("border-color:transparent;", "") : ""}">${esc(short)}</span>` : ""}
+          <span class="chev">›</span>
         </div>
-        <div class="actions">${taskActions(t)}</div></div>`;
+        <div class="rb">
+          ${t.description && !closed ? `<div style="color:var(--muted);font-size:12.5px;line-height:1.4;margin:0 0 6px;white-space:pre-wrap">${esc(t.description)}</div>` : ""}
+          <div class="meta">
+            ${!closed && t.priority ? `<span class="pill strong">важно</span>` : ""}
+            ${t.repeat_rule ? `<span class="pill">🔁 ${esc(repeatRu(t.repeat_rule))}</span>` : ""}
+            ${t.client ? `<span class="pill strong">📁 ${esc(t.client)}</span>` : ""}
+            ${t.grp ? `<span class="pill">${esc(t.grp)}</span>` : ""}
+          </div>
+          <div class="actions tight">${taskActions(t)}</div>
+        </div>
+      </div>`;
     }
     async function renderTasks(warm = tabHtml.tasks !== undefined) {
       const mine = tab;
@@ -1747,60 +1778,144 @@
       { el: "#avatar", title: "Сама Сара", text: "Нажми на лицо — можно сменить имя, внешность и манеру общения. Хоть на «вы», хоть покороче." },
     ];
 
+    /**
+     * Обучение внутри разделов. Открыл впервые — короткая экскурсия именно по
+     * этому экрану. Общий тур показывает, где что лежит; эти — как этим
+     * пользоваться.
+     *
+     * `act` делает шаг интерактивным: подсказка ждёт, пока человек сам нажмёт
+     * на подсвеченное, и только тогда идёт дальше. Прочитанное забывается,
+     * сделанное — нет.
+     */
+    const SECTION_TOURS = {
+      tasks: [
+        { el: ".seg", title: "Рабочие и личные", text: "Два мира разделены: рабочее не мешается с личным. Переключатель помнит, где ты был." },
+        { el: "#task-stages", title: "Стадии", text: "Неразобранное → в работе → выполнено. Цифра рядом показывает, сколько в каждой." },
+        { el: "#tasklist", title: "Сама задача", text: "Нажми «В работу» или «Готово» — статус меняется сразу. Под «…» спрятано редкое: перенести, изменить, удалить." },
+        { el: "#fab", title: "Завести задачу", act: "#fab", title2: "Нажми «+»", text: "Нажми «+» — откроется форма. Срок ставится календарём, есть быстрые кнопки «Сегодня» и «Завтра»." },
+      ],
+      calendar: [
+        { el: ".seg", title: "Список или месяц", text: "Список — что ближайшее. Месяц — сетка с точками занятых дней, удобно смотреть загрузку." },
+        { el: "#calbody", title: "Строка встречи", text: "Слева время, дальше название и клиент. Нажми на строку — раскроются кнопки. Прошедшие приглушены." },
+        { el: "#fab-mic", title: "Быстрее голосом", text: "«Встреча с Ромашкой завтра в 15:00» — и встреча заведена вместе с клиентом. Печатать не надо." },
+      ],
+      health: [
+        { el: "#health-kcal", title: "Калории и вода", text: "Полоски показывают, сколько съедено и выпито от цели. Цели задаются в профиле." },
+        { el: "#health-quick", title: "Вода в одно нажатие", text: "«＋ стакан» — 250 мл, «＋ 0.5 л» — пол-литра. Или скажи Саре «выпил 300 мл»." },
+        { el: "#health-food", title: "Еда", text: "Скажи «съел борщ и котлету» — Сара сама посчитает калории и БЖУ и разложит по приёмам пищи." },
+      ],
+      clients: [
+        { el: "#cllist", title: "Тонкий список", text: "Одна строка — один клиент, справа главная цифра. Нажми на строку — раскроются подробности и кнопки." },
+        { el: "#fab", title: "Новый клиент", text: "Кнопка «+» заводит карточку: площадки, бюджет, сумма за ведение, срок оплаты. Потом всё это можно править голосом." },
+      ],
+      ai: [
+        { el: ".ai-wrap", title: "Обычными словами", text: "«Напомни завтра отправить отчёт», «что у меня на неделе», «добавь клиенту Ромашка ведение 30000» — Сара разберётся сама." },
+        { el: "#ai-mic", title: "Голосом", text: "Нажми микрофон и скажи фразу. Работает так же, как текст, только быстрее." },
+      ],
+    };
+
     const TOUR_KEY = "sara-tour-done";
+    let tourSteps = [];        // шаги текущей экскурсии
     let tourStep = -1;
+    let tourKey = TOUR_KEY;    // под каким ключом запомнить, что пройдено
+    let tourWaiting = null;    // снять обработчик интерактивного шага
 
     function tourEnd(finished) {
       tourStep = -1;
+      if (tourWaiting) { tourWaiting(); tourWaiting = null; }
       document.querySelectorAll(".tour-hole, .tour-card").forEach((el) => el.remove());
-      if (finished) { try { localStorage.setItem(TOUR_KEY, "1"); } catch (e) {} }
+      if (finished) { try { localStorage.setItem(tourKey, "1"); } catch (e) {} }
     }
     window.tourSkip = () => { haptic(); tourEnd(true); };
 
     window.tourNext = async () => {
       haptic();
+      if (tourWaiting) { tourWaiting(); tourWaiting = null; }
       // Ищем следующий шаг, у которого элемент реально есть на экране
       let next = tourStep + 1;
-      while (next < TOUR.length) {
-        const s = TOUR[next];
+      while (next < tourSteps.length) {
+        const s = tourSteps[next];
         if (s.tab && tab !== s.tab) { await switchTab(s.tab, true); await new Promise((r) => setTimeout(r, 260)); }
         if (document.querySelector(s.el)) break;
         next++;
       }
-      if (next >= TOUR.length) { tourEnd(true); toast("Готово. Повторить можно в настройках"); return; }
+      if (next >= tourSteps.length) {
+        tourEnd(true);
+        toast("Готово. Повторить можно в настройках");
+        return;
+      }
       tourStep = next;
-      tourShow(TOUR[next], next);
+      tourShow(tourSteps[next], next);
     };
 
     function tourShow(step, idx) {
       const target = document.querySelector(step.el);
       if (!target) { tourNext(); return; }
-      const r = target.getBoundingClientRect();
-      const pad = 6;
-      let hole = document.querySelector(".tour-hole");
-      let card = document.querySelector(".tour-card");
-      if (!hole) { hole = document.createElement("div"); hole.className = "tour-hole"; document.body.appendChild(hole); }
-      if (!card) { card = document.createElement("div"); card.className = "tour-card"; document.body.appendChild(card); }
-      hole.style.top = `${r.top - pad}px`;
-      hole.style.left = `${r.left - pad}px`;
-      hole.style.width = `${r.width + pad * 2}px`;
-      hole.style.height = `${r.height + pad * 2}px`;
-      const last = idx >= TOUR.length - 1;
-      card.innerHTML = `<div class="tt">${esc(step.title)}</div><div class="tx">${esc(step.text)}</div>
-        <div class="row"><span class="step">${idx + 1} из ${TOUR.length}</span>
-          <button class="btn" onclick="tourSkip()">Пропустить</button>
-          <button class="btn primary" onclick="tourNext()">${last ? "Понятно" : "Дальше"}</button></div>`;
-      // Карточку ставим с той стороны, где больше места: под подсветкой или над ней
-      const below = window.innerHeight - r.bottom;
-      card.style.top = below > 220 ? `${r.bottom + 14}px` : `${Math.max(12, r.top - card.offsetHeight - 14)}px`;
+      target.scrollIntoView({ block: "center", behavior: prefs.motion ? "smooth" : "auto" });
+      const place = () => {
+        const r = target.getBoundingClientRect();
+        const pad = 6;
+        let hole = document.querySelector(".tour-hole");
+        let card = document.querySelector(".tour-card");
+        if (!hole) { hole = document.createElement("div"); hole.className = "tour-hole"; document.body.appendChild(hole); }
+        if (!card) { card = document.createElement("div"); card.className = "tour-card"; document.body.appendChild(card); }
+        hole.style.top = `${r.top - pad}px`;
+        hole.style.left = `${r.left - pad}px`;
+        hole.style.width = `${r.width + pad * 2}px`;
+        hole.style.height = `${r.height + pad * 2}px`;
+        // Интерактивный шаг: ждём нажатия на подсвеченное, кнопки «Дальше» нет
+        const wants = step.act ? document.querySelector(step.act) : null;
+        hole.classList.toggle("wait", !!wants);
+        const last = idx >= tourSteps.length - 1;
+        card.classList.remove("in");
+        card.innerHTML = `<div class="tt">${esc(step.title)}</div><div class="tx">${esc(step.text)}</div>
+          <div class="row"><span class="step">${idx + 1} из ${tourSteps.length}</span>
+            <button class="btn" onclick="tourSkip()">Пропустить</button>
+            ${wants ? `<span class="wait-hint">${esc(step.title2 || "Нажми сам")}</span>` : `<button class="btn primary" onclick="tourNext()">${last ? "Понятно" : "Дальше"}</button>`}</div>`;
+        // Карточку ставим с той стороны, где больше места
+        const below = window.innerHeight - r.bottom;
+        card.style.top = below > 220 ? `${r.bottom + 14}px` : `${Math.max(12, r.top - card.offsetHeight - 14)}px`;
+        requestAnimationFrame(() => card.classList.add("in"));
+        if (wants) {
+          const go = () => { setTimeout(tourNext, 420); };
+          wants.addEventListener("click", go, { once: true });
+          tourWaiting = () => wants.removeEventListener("click", go);
+        }
+      };
+      // Дадим прокрутке доехать, иначе подсветка встанет не туда
+      prefs.motion ? setTimeout(place, 300) : place();
     }
 
-    /** Показываем тур только новому человеку и только когда экран уже собран. */
-    window.startTour = (force) => {
-      try { if (!force && localStorage.getItem(TOUR_KEY)) return; } catch (e) { if (!force) return; }
+    /** Запустить экскурсию: набор шагов + ключ, под которым помним «пройдено». */
+    function runTour(steps, key, force) {
+      if (!steps || !steps.length) return;
+      try { if (!force && localStorage.getItem(key)) return; } catch (e) { if (!force) return; }
       tourEnd(false);
+      tourSteps = steps;
+      tourKey = key;
       tourStep = -1;
       tourNext();
+    }
+
+    /** Общий тур — для нового человека, один раз. */
+    window.startTour = (force) => runTour(TOUR, TOUR_KEY, force);
+
+    /**
+     * Экскурсия по разделу при первом заходе. Ждём, пока экран соберётся:
+     * подсвечивать скелетоны, которые вот-вот сменятся, бессмысленно.
+     */
+    window.startSectionTour = (name, force) => {
+      const steps = SECTION_TOURS[name];
+      if (!steps) return;
+      // Общий тур идёт — не мешаем ему
+      if (!force && tourStep >= 0) return;
+      setTimeout(() => runTour(steps, `sara-tour-${name}`, force), force ? 200 : 700);
+    };
+
+    /** Повторить экскурсию по разделу: сперва открываем сам раздел. */
+    window.replaySection = async (name) => {
+      if (tab !== name) { await switchTab(name, true); await new Promise((r) => setTimeout(r, 400)); }
+      startSectionTour(name, true);
     };
 
     /** Показать в настройках, какая сборка сейчас загружена. */
@@ -1867,7 +1982,10 @@
           <div style="display:flex;gap:8px"><input id="grp-new" placeholder="Название группы" style="flex:1"><button class="btn" onclick="addGroup()">Добавить</button></div>`)}
         ${block("Сама Сара", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Имя, лицо и манера общения — на отдельном экране.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(openSara, 180)">Открыть настройки Сары</button>`)}
         ${block("Версия", `<div style="color:var(--muted);font-size:12.5px">Если правка не видна, сверь эту строку с адресом <b>/version</b> — совпадают, значит у тебя свежая сборка.</div><div id="build-line" style="font-size:12.5px;margin-top:6px;font-weight:600">…</div>`)}
-        ${block("Знакомство с приложением", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Короткая экскурсия по разделам и кнопкам — ${TOUR.length} шагов.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(() => startTour(true), 260)">Пройти заново</button>`)}
+        ${block("Обучение", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Общая экскурсия — где что лежит (${TOUR.length} шагов). Разделы — как этим пользоваться.</div>
+          <button class="btn" style="width:100%;margin-bottom:8px" onclick="closeSheet(); setTimeout(() => startTour(true), 260)">Общая экскурсия</button>
+          <div class="chips">${Object.keys(SECTION_TOURS).map((k) => `<div class="chip" onclick="closeSheet(); setTimeout(() => replaySection('${k}'), 260)">${TAB_NAMES[k]}</div>`).join("")}</div>
+          <div style="color:var(--muted);font-size:11.5px;margin-top:8px">Показываются сами при первом заходе в раздел.</div>`)}
         <div class="actions" style="margin-top:4px">
           <button class="btn" onclick="resetPrefs()">Сбросить</button>
           <button class="btn primary" onclick="closeSheet()">Готово</button>
@@ -2810,7 +2928,13 @@
       const draw = { home: renderHome, tasks: renderTasks, calendar: renderCalendar, health: renderHealth, clients: renderClients, ai: renderAI }[t];
       if (!draw) return;
       const warm = restoreTab(t);
-      Promise.resolve(draw(warm)).then(() => rememberTab(t)).catch(() => {});
+      Promise.resolve(draw(warm))
+        .then(() => {
+          rememberTab(t);
+          // Впервые открыл раздел — короткая экскурсия именно по нему
+          try { startSectionTour(t, false); } catch (e) {}
+        })
+        .catch(() => {});
     }
     // viaNav=true — переход по нижнему меню (сбрасывает историю); иначе — вглубь (можно вернуться)
     function switchTab(t, viaNav) {

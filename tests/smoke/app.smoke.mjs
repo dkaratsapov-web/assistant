@@ -53,7 +53,7 @@ const browser = await launch();
 for (const [name, prefs] of CASES) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await ctx.addInitScript((p) => {
-    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {}
+    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {}
   }, prefs);
   const page = await ctx.newPage();
   const errors = [];
@@ -92,7 +92,7 @@ for (const [name, prefs] of CASES) {
 console.log("\nСценарий: создать задачу → закрыть → удалить");
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, { ...BASE, startTab: "tasks" });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, { ...BASE, startTab: "tasks" });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -172,7 +172,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await ctx.addInitScript((p) => {
-    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); localStorage.setItem("sara-tour-done", "1"); } catch (e) {}
+    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {}
   }, BASE);
   const page = await ctx.newPage();
   const errs = [];
@@ -216,7 +216,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 
   // Тумблер «Рабочие / Личные» переключает подсветку, а не только список
   await page.evaluate(() => go("tasks"));
-  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  await page.waitForSelector("#tasklist .row-item, #tasklist .empty", { timeout: 6000 });
   const before = await page.evaluate(() => [...document.querySelectorAll(".seg div")].findIndex((d) => d.classList.contains("on")));
   await page.evaluate(() => window.setScope("personal"));
   await page.waitForTimeout(600);
@@ -232,7 +232,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await ctx.addInitScript((p) => {
-    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); localStorage.setItem("sara-tour-done", "1"); } catch (e) {}
+    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {}
   }, BASE);
   const page = await ctx.newPage();
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
@@ -243,7 +243,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 
   // Три кнопки в ряду должны переноситься, а не выпихивать третью за экран
   await page.evaluate(() => go("tasks"));
-  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  await page.waitForSelector("#tasklist .row-item, #tasklist .empty", { timeout: 6000 });
   const wraps = await page.evaluate(() => {
     const el = document.querySelector(".actions");
     return el ? getComputedStyle(el).flexWrap : "нет ряда кнопок";
@@ -263,6 +263,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 /* ---------- Обучающий тур ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  // Здесь тур как раз и проверяем — поэтому отметки о пройденных экскурсиях не ставим
   await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
   const page = await ctx.newPage();
   const errs = [];
@@ -314,6 +315,24 @@ console.log("\nСценарий: создать задачу → закрыть 
   await page2.waitForTimeout(400);
   check(await page2.evaluate(() => !!document.querySelector(".tour-card")), "заново тур запускается");
 
+  // Экскурсия по разделу: открыл впервые — подсказка появилась сама
+  await page2.evaluate(() => window.tourSkip());
+  await page2.waitForTimeout(200);
+  await page2.evaluate(() => go("tasks"));
+  await page2.waitForSelector(".tour-card", { timeout: 9000 });
+  const secTxt = await page2.evaluate(() => document.querySelector(".tour-card .tt").textContent);
+  check(/Рабочие и личные/.test(secTxt), "экскурсия по разделу запускается сама", secTxt);
+  check(await page2.evaluate(() => getComputedStyle(document.querySelector(".tour-hole")).animationName !== "none"),
+    "подсветка анимирована");
+  await page2.evaluate(() => window.tourSkip());
+  await page2.waitForTimeout(200);
+  await page2.evaluate(() => go("home"));
+  await page2.waitForTimeout(300);
+  await page2.evaluate(() => go("tasks"));
+  await page2.waitForTimeout(1100);
+  check(await page2.evaluate(() => !document.querySelector(".tour-card")), "второй раз по разделу не всплывает");
+
+
   check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
   await ctx.close();
 }
@@ -321,7 +340,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 /* ---------- Группы и разделы ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, BASE);
   const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
@@ -355,7 +374,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 
   // Фильтр по группе в задачах
   await page.evaluate(() => go("tasks"));
-  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  await page.waitForSelector("#tasklist .row-item, #tasklist .empty", { timeout: 6000 });
   const chips = await page.evaluate(() => ($("task-groups") || {}).innerText || "");
   check(/Свои/.test(chips), "фильтр групп есть в задачах", JSON.stringify(chips));
   await page.evaluate(() => window.setTaskGroup("Свои"));
@@ -369,7 +388,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 /* ---------- Дедлайн задачи меняется календарём ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, BASE);
   const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
@@ -380,7 +399,7 @@ console.log("\nСценарий: создать задачу → закрыть 
   const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
 
   await page.evaluate(() => go("tasks"));
-  await page.waitForSelector("#tasklist .card", { timeout: 6000 });
+  await page.waitForSelector("#tasklist .row-item", { timeout: 6000 });
   // Берём ту задачу, что реально есть: предыдущий сценарий мог изменить список
   const taskId = await page.evaluate(() => (tasksCache[0] || {}).id);
   check(!!taskId, "есть задача для правки", String(taskId));
@@ -413,7 +432,7 @@ console.log("\nСценарий: создать задачу → закрыть 
 /* ---------- Бады: дни приёма ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, BASE);
   const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));

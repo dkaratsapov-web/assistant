@@ -66,7 +66,7 @@ check(blocked > 0, `зарубежные адреса действительно
 
 // Кнопки должны работать, а не просто нарисоваться
 await page.click('#nav [data-tab="tasks"]');
-await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: LIMIT_MS });
+await page.waitForSelector("#tasklist .row-item, #tasklist .empty", { timeout: LIMIT_MS });
 check(true, "раздел задач открывается");
 
 // Лицо Сары не должно быть «битой» картинкой (сторож меняет её через 1.5 с)
