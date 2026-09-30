@@ -44,6 +44,21 @@ await page.waitForSelector(".tiles .tile", { timeout: 8000 });
 // Кнопка голоса есть и в покое не размечена как записывающая
 const mic = page.locator("#fab-mic");
 check(await mic.count() === 1, "кнопка голоса на месте");
+
+// Размер и выравнивание: голосовая кнопка заметно крупнее «плюса», но
+// их центры по вертикальной оси совпадают — иначе столбик кнопок кривой.
+// Меряем в «Задачах»: на главной «плюса» нет, добавлять там нечего.
+await page.evaluate(() => go("tasks"));
+await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+const geom = await page.evaluate(() => {
+  const m = document.getElementById("fab-mic").getBoundingClientRect();
+  const p = document.getElementById("fab").getBoundingClientRect();
+  return { mic: Math.round(m.width), plus: Math.round(p.width), micMid: Math.round(m.left + m.width / 2), plusMid: Math.round(p.left + p.width / 2), gap: Math.round(p.top - m.bottom) };
+});
+check(geom.mic >= 56, "кнопка голоса крупная", `${geom.mic}px`);
+check(geom.mic > geom.plus, "крупнее «плюса»", `${geom.mic} против ${geom.plus}`);
+check(Math.abs(geom.micMid - geom.plusMid) <= 2, "центры кнопок совпадают", `${geom.micMid} и ${geom.plusMid}`);
+check(geom.gap >= 6, "кнопки не слипаются", `зазор ${geom.gap}px`);
 check(!(await mic.evaluate((el) => el.classList.contains("rec"))), "в покое запись не идёт");
 
 // Начинаем запись

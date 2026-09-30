@@ -191,7 +191,13 @@
     .fab svg { width: 21px; height: 21px; }
     /* Голосовая кнопка живёт рядом с «＋»: сказал фразу — Сара сама поняла,
        что это, и завела задачу, встречу, заметку или еду. */
-    .fab-mic { bottom: calc(var(--nav-h) + 76px + env(safe-area-inset-bottom)); background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    /* Голосовая кнопка — главное действие, поэтому крупнее «плюса».
+       Позиционируются обе по правому краю, поэтому широкая ушла бы левее:
+       сдвигаем её вправо на половину разницы, чтобы центры совпадали. */
+    .fab-mic { width: 60px; height: 60px; right: calc(50% - 307px);
+      bottom: calc(var(--nav-h) + 78px + env(safe-area-inset-bottom));
+      background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .fab-mic svg { width: 27px; height: 27px; }
     .fab-mic.rec { background: #ff3b30; color: #fff; border-color: #ff3b30; }
     .fab-mic.busy { opacity: .6; }
     /* Кольцо вокруг кнопки раздувается от громкости голоса: видно, что Сара
@@ -215,7 +221,7 @@
     :root[data-motion="off"] .fab-mic.rec::before,
     :root[data-motion="off"] .fab-mic.rec::after { transform: none; opacity: .4; }
     :root[data-motion="off"] .fab-mic.rec svg { transform: none; }
-    @media (max-width: 676px) { .fab { right: 16px; } }
+    @media (max-width: 676px) { .fab { right: 16px; } .fab-mic { right: 9px; } }
 
     /* Bottom nav */
     .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
