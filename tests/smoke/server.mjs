@@ -32,7 +32,7 @@ const API = {
   "/api/clients": { clients: [{ id: 1, name: "АйПапа", status: "active", platforms: "direct", budget: "", contact: "", notes: "", pay_amount: "", pay_due: "" }] },
   "/api/contacts": { contacts: [] },
   "/api/notes": { notes: [] },
-  "/api/health": { kcal: { consumed: 0, goal: 2200, protein: 0, fat: 0, carbs: 0, goalP: 165, goalF: 73, goalC: 220 }, water: { ml: 0, goal: 2500 }, entries: [], notes: [], weight: { latest: null, history: [] }, week: {}, activity: [], supplements: [] },
+  "/api/health": { kcal: { consumed: 0, goal: 2200, protein: 0, fat: 0, carbs: 0, goalP: 165, goalF: 73, goalC: 220 }, water: { ml: 0, goal: 2500 }, entries: [{ id: 1, title: "Овсянка с бананом", kcal: 320, protein: 9, fat: 6, carbs: 55, meal: "breakfast" }, { id: 2, title: "Борщ и котлета", kcal: 640, protein: 32, fat: 28, carbs: 48, meal: "lunch" }], notes: [], weight: { latest: null, history: [] }, week: {}, activity: [], supplements: [] },
   "/api/ai/history": { messages: [] },
   "/api/notifications": { morning: { on: true, hour: 9 }, tasks: { on: true, lead: 60 }, events: { on: true, lead: 30 }, birthdays: { on: true }, water: { on: false, everyHours: 2, from: 9, to: 21 }, meals: { on: false, breakfast: 9, lunch: 14, dinner: 19 } },
   "/api/supplements": {

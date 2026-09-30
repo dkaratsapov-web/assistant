@@ -73,7 +73,9 @@
       font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text);
       font-size: 15px; line-height: 1.45; letter-spacing: -.01em;
-      padding-bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
+      /* Место под круглые кнопки: без него последняя строка списка пряталась
+         под «плюсом» и микрофоном, и по ней было не попасть. */
+      padding-bottom: calc(var(--nav-h) + 150px + env(safe-area-inset-bottom));
       overflow-x: hidden; transition: background .25s ease, color .25s ease;
       -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     }
@@ -162,7 +164,14 @@
     .btn:active { transform: scale(.97); }
     .btn.primary { background: var(--fg); color: var(--fg-contrast); border-color: var(--fg); }
     .btn.ghost { flex: 0 0 40px; color: var(--muted); padding: 9px 0; }
-    .btn.sm { flex: 0 0 auto; padding: 9px 16px; }
+    .btn.sm { flex: 0 0 auto; padding: 8px 14px; min-height: 34px; font-size: 12.5px; }
+    /* Плотный ряд действий: в списках карточек полноразмерные кнопки съедали
+       столько же места, сколько сами данные. */
+    .actions.tight { margin-top: 8px; gap: 6px; }
+    .actions.tight .btn { min-height: 32px; padding: 6px 12px; }
+    .actions.tight .btn.ghost { flex: 0 0 auto; width: 34px; padding: 6px 0; text-align: center; }
+    .item.compact { padding: 10px 12px; }
+    .item.compact .meta { margin-top: 4px; }
 
     .empty { text-align: center; padding: 32px 16px; color: var(--muted); }
     .empty img { width: calc(96px * var(--img-k)); height: calc(96px * var(--img-k)); object-fit: cover; border-radius: 50%; margin-bottom: 16px; border: 1px solid var(--border); filter: grayscale(.15); }
@@ -319,6 +328,36 @@
     .tour-card .row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
     .tour-card .step { color: var(--muted); font-size: 12px; margin-right: auto; }
     :root[data-motion="off"] .tour-hole, :root[data-motion="off"] .tour-card { transition: none; }
+    /* Питание. Плотный список: приём пищи и его блюда — одна карточка,
+       строка в две короткие линии, вместо кнопки — компактный кружок. */
+    .meal { padding: 10px 12px; margin-top: 8px; }
+    .meal-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; font-size: 13px; }
+    .meal-h span { color: var(--muted); font-size: 12px; }
+    .food-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--border); }
+    .food-row:first-of-type { border-top: none; }
+    .food-row .fi { flex: 1; min-width: 0; }
+    .food-row .fn { display: block; font-size: 14px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .food-row .fm { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.2; }
+    .food-x { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 12px; line-height: 1; cursor: pointer; }
+    .food-x:active { transform: scale(.92); }
+    /* Тонкий список с раскрытием. Строка — одна линия: видно много сразу,
+       а подробности и кнопки появляются по нажатию, у нужной записи. */
+    .rows { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .row-item + .row-item { border-top: 1px solid var(--border); }
+    .rh { display: flex; align-items: center; gap: 8px; padding: 12px 13px; cursor: pointer; }
+    .rh .rn { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rh .rs { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .rh .chev { color: var(--muted); font-size: 17px; line-height: 1; transition: transform .18s ease; flex: none; }
+    .row-item.open .chev { transform: rotate(90deg); }
+    .rb { display: none; padding: 0 13px 12px; }
+    .row-item.open .rb { display: block; }
+    .row-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg); flex: none; }
+    .row-dot.off { background: var(--border-strong); }
+    .rh .rt { flex: none; font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 700; color: var(--muted); min-width: 42px; }
+    .rh .rt.over { color: #ff6b6b; }
+    .row-item.past .rh { opacity: .55; }
+    :root[data-motion="off"] .rh .chev { transition: none; }
     .check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--fg); }
     .seg.mini div { padding: 9px; font-size: 13px; }
@@ -1018,13 +1057,15 @@
         const MEALS = [["breakfast", "🌅 Завтрак"], ["lunch", "☀️ Обед"], ["dinner", "🌙 Ужин"], ["snack", "🍎 Перекус"], ["", "🍽 Другое"]];
         const byMeal = {};
         d.entries.forEach((e) => { const m = e.meal || ""; (byMeal[m] = byMeal[m] || []).push(e); });
-        const foodRow = (e) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px"><div style="min-width:0"><div>${esc(e.title)}</div><div style="font-size:12px;color:var(--muted)">${e.kcal} ккал · Б${e.protein} Ж${e.fat} У${e.carbs}</div></div><button class="btn ghost" onclick="delFood(${e.id})">✕</button></div>`;
+        // Строка еды намеренно плотная: обычная кнопка «✕» занимает 40px в
+        // высоту, и список из пяти блюд растягивался на пол-экрана.
+        const foodRow = (e) => `<div class="food-row"><div class="fi"><span class="fn">${esc(e.title)}</span><span class="fm">${e.kcal} ккал · Б${e.protein} Ж${e.fat} У${e.carbs}</span></div><button class="food-x" aria-label="Убрать" onclick="delFood(${e.id})">✕</button></div>`;
         let anyMeal = false;
         MEALS.forEach(([key, label]) => {
           const items = byMeal[key]; if (!items || !items.length) return;
           anyMeal = true;
           const sub = items.reduce((s, e) => s + e.kcal, 0);
-          h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 2px 4px"><b style="font-size:13px">${label}</b><span style="color:var(--muted);font-size:12px">${sub} ккал</span></div><div class="card">${items.map(foodRow).join("")}</div>`;
+          h += `<div class="card meal"><div class="meal-h"><b>${label}</b><span>${sub} ккал</span></div>${items.map(foodRow).join("")}</div>`;
         });
         if (!anyMeal) h += `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Ничего не записано. Скажи Саре «съел…» или жми «＋ еда».</div></div>`;
         // Тренировки / активность
@@ -1431,9 +1472,22 @@
       const tag = it.kind === "event" ? "встреча" : (it.scope === "personal" ? "личная" : "рабочая");
       const edit = it.kind === "event" ? `editEvent(${it.id})` : `editTask(${it.id})`;
       const del = it.kind === "event" ? `delEvent(${it.id})` : `delTask(${it.id})`;
-      return `<div class="card item"><div class="top"><div class="name">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</div>${it.client ? `<span class="pill" style="background:var(--fg);color:var(--fg-contrast);border-color:transparent;font-weight:700;flex:none">📁 ${esc(it.client)}</span>` : ""}</div>
-        <div class="meta"><span class="pill ${over?'strong':''}">${t}</span><span class="pill">${tag}</span></div>
-        <div class="actions"><button class="btn" onclick="${edit}">Изменить</button><button class="btn ghost" onclick="${del}">✕</button></div></div>`;
+      // Тонкая строка: время, название и клиент. Кнопки — по нажатию,
+      // иначе день из четырёх встреч занимал весь экран.
+      const rowId = `cal-${it.kind}-${it.id}`;
+      const past = new Date(it.at) < new Date();
+      return `<div class="row-item${past ? " past" : ""}" id="${rowId}">
+        <div class="rh" onclick="toggleRow('${rowId}')">
+          <span class="rt${over ? " over" : ""}">${t}</span>
+          <span class="rn">${it.kind === "event" ? "📅 " : "✅ "}${esc(it.title)}</span>
+          ${it.client ? `<span class="rs">📁 ${esc(it.client)}</span>` : ""}
+          <span class="chev">›</span>
+        </div>
+        <div class="rb">
+          <div class="meta"><span class="pill">${tag}</span>${past ? `<span class="pill">прошло</span>` : ""}</div>
+          <div class="actions tight"><button class="btn sm primary" onclick="${edit}">Изменить</button><button class="btn sm ghost" title="Удалить" onclick="${del}">✕</button></div>
+        </div>
+      </div>`;
     }
 
     function calRenderList() {
@@ -1447,7 +1501,7 @@
       Object.keys(groups).sort().forEach((k) => {
         const d = new Date(k + "T00:00");
         const label = k === today ? "Сегодня" : k === tmr ? "Завтра" : d.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "long" });
-        h += `<div class="section-title">${label}</div>` + groups[k].map(calItemRow).join("");
+        h += `<div class="section-title">${label}</div><div class="rows">` + groups[k].map(calItemRow).join("") + `</div>`;
       });
       el.innerHTML = h;
     }
@@ -1534,17 +1588,30 @@
         const el = $("cllist");
         if (!el) return;
         if (!clients.length) { el.innerHTML = head + emptyBox(`Пока пусто`, `Нажми «+» или скажи Саре: «добавь ${KIND_ONE[clientKind]} …».`); return; }
-        el.innerHTML = head + clients.map((c) => {
+        // Тонкая строка: имя и главная цифра. Подробности и кнопки — по нажатию,
+        // чтобы на экран помещался весь список, а не три карточки.
+        el.innerHTML = head + `<div class="rows">` + clients.map((c) => {
           const plats = (c.platforms || "").split(",").filter(Boolean).map((p) => PLAT[p] || p).join(", ");
-          return `<div class="card item"><div class="top" onclick="openClientCard(${c.id})" style="cursor:pointer"><div class="name">${c.status === "active" ? "● " : "○ "}${esc(c.name)}</div><span style="color:var(--muted)">›</span></div>
-            <div class="meta"><span class="pill">${plats || "—"}</span>${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}${c.grp ? `<span class="pill strong">${esc(c.grp)}</span>` : ""}</div>
-            <div class="actions">
-              ${c.metrika_counter ? `<button class="btn primary" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
-              <button class="btn" onclick="editClient(${c.id})">Изменить</button>
-              <button class="btn" onclick="toggleClient(${c.id},'${c.status === "active" ? "paused" : "active"}')">${c.status === "active" ? "Пауза" : "Вернуть"}</button>
-              <button class="btn ghost" onclick="delClient(${c.id})">✕</button>
-            </div></div>`;
-        }).join("");
+          const money2 = c.pay_amount ? `ведение ${money(c.pay_amount)}` : c.budget ? `бюджет ${money(c.budget)}` : plats;
+          return `<div class="row-item" id="cl-row-${c.id}">
+            <div class="rh" onclick="toggleClientRow(${c.id})">
+              <span class="row-dot${c.status === "active" ? "" : " off"}"></span>
+              <span class="rn">${esc(c.name)}</span>
+              ${money2 ? `<span class="rs">${esc(money2)}</span>` : ""}
+              <span class="chev">›</span>
+            </div>
+            <div class="rb">
+              <div class="meta">${plats ? `<span class="pill">${esc(plats)}</span>` : ""}${c.budget ? `<span class="pill">бюджет ${money(c.budget)}</span>` : ""}${c.pay_amount ? `<span class="pill strong">ведение ${money(c.pay_amount)}</span>` : ""}${c.pay_due ? `<span class="pill">оплата ${esc(c.pay_due)}</span>` : ""}${c.status !== "active" ? `<span class="pill">на паузе</span>` : ""}${c.grp ? `<span class="pill strong">${esc(c.grp)}</span>` : ""}</div>
+              <div class="actions tight">
+                <button class="btn sm primary" onclick="openClientCard(${c.id})">Открыть</button>
+                ${c.metrika_counter ? `<button class="btn sm" onclick="openReport(${c.id})">📊 Отчёт</button>` : ""}
+                <button class="btn sm" onclick="editClient(${c.id})">Изменить</button>
+                <button class="btn sm ghost" title="${c.status === "active" ? "Пауза" : "Вернуть"}" onclick="toggleClient(${c.id},'${c.status === "active" ? "paused" : "active"}')">${c.status === "active" ? "⏸" : "▶"}</button>
+                <button class="btn sm ghost" title="Удалить" onclick="delClient(${c.id})">✕</button>
+              </div>
+            </div>
+          </div>`;
+        }).join("") + `</div>`;
       } catch (e) { setHTML("cllist", err(e)); }
     }
 
@@ -2395,7 +2462,13 @@
     };
 
     /* ---------- Действия по элементам ---------- */
-    window.setScope = (s) => { taskScope = s; renderTasks(); };
+    /**
+     * Рабочие / Личные. Перерисовываем ЦЕЛИКОМ, а не только список: подсветка
+     * тумблера живёт в шапке экрана, а она бралась из кэша вкладки — список
+     * менялся, а выбранным оставался прежний пункт, и выглядело это как
+     * «тумблер не работает».
+     */
+    window.setScope = (s) => { haptic(); taskScope = s; delete tabHtml.tasks; renderTasks(false); };
     window.setStage = (s) => { taskStage = s; renderTasks(); };
     window.setTask = async (id, status) => { haptic(); await api(`/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }); renderTasks(); };
     window.delTask = async (id) => { if (!(await ask("Удалить задачу?", { ok: "Удалить", danger: true }))) return; await api(`/tasks/${id}`, { method: "DELETE" }); renderTab(tab); };
@@ -2692,6 +2765,17 @@
       orgCache.kinds = on ? [...new Set([...orgCache.kinds, k])] : orgCache.kinds.filter((x) => x !== k);
       await saveOrg();
     };
+
+    /** Раскрыть строку списка. Открытая всегда одна: так список не разъезжается. */
+    window.toggleRow = (rowId) => {
+      haptic();
+      const row = $(rowId);
+      if (!row) return;
+      const wasOpen = row.classList.contains("open");
+      document.querySelectorAll(".row-item.open").forEach((r) => r.classList.remove("open"));
+      if (!wasOpen) row.classList.add("open");
+    };
+    window.toggleClientRow = (id) => toggleRow(`cl-row-${id}`);
 
     window.setClientKind = (k) => { haptic(); clientKind = k; clientGroup = ""; delete tabHtml.clients; renderClients(false); };
     window.setClientGroup = (g) => { haptic(); clientGroup = g; delete tabHtml.clients; renderClients(false); };

@@ -168,6 +168,66 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Тонкие списки и тумблер задач ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => {
+    try { localStorage.setItem("sara-prefs", JSON.stringify(p)); localStorage.setItem("sara-tour-done", "1"); } catch (e) {}
+  }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: тонкие списки и тумблер");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  // Клиенты: строка тонкая, кнопки появляются только по нажатию
+  await page.evaluate(() => go("clients"));
+  await page.waitForSelector("#cllist .row-item", { timeout: 6000 });
+  const shut = await page.evaluate(() => {
+    const r = document.querySelector(".row-item");
+    return { h: Math.round(r.getBoundingClientRect().height), btns: r.querySelector(".rb").offsetParent !== null };
+  });
+  check(shut.h <= 56, "строка клиента тонкая", `${shut.h}px`);
+  check(!shut.btns, "кнопки спрятаны, пока строка закрыта");
+
+  await page.evaluate(() => document.querySelector(".row-item .rh").click());
+  await page.waitForTimeout(300);
+  const open = await page.evaluate(() => {
+    const r = document.querySelector(".row-item");
+    return { open: r.classList.contains("open"), btns: r.querySelector(".rb").offsetParent !== null };
+  });
+  check(open.open && open.btns, "по нажатию раскрывается с кнопками");
+
+  // Открыта всегда одна строка
+  await page.evaluate(() => {
+    const rows = document.querySelectorAll(".row-item .rh");
+    if (rows[1]) rows[1].click();
+  });
+  await page.waitForTimeout(300);
+  check(await page.evaluate(() => document.querySelectorAll(".row-item.open").length <= 1), "открыта только одна строка");
+
+  // Календарь — такой же тонкий список
+  await page.evaluate(() => go("calendar"));
+  await page.waitForTimeout(700);
+  check(await page.evaluate(() => !!document.querySelector("#calbody .row-item")), "встречи тоже тонким списком");
+
+  // Тумблер «Рабочие / Личные» переключает подсветку, а не только список
+  await page.evaluate(() => go("tasks"));
+  await page.waitForSelector("#tasklist .card, #tasklist .empty", { timeout: 6000 });
+  const before = await page.evaluate(() => [...document.querySelectorAll(".seg div")].findIndex((d) => d.classList.contains("on")));
+  await page.evaluate(() => window.setScope("personal"));
+  await page.waitForTimeout(600);
+  const after = await page.evaluate(() => [...document.querySelectorAll(".seg div")].findIndex((d) => d.classList.contains("on")));
+  check(before !== after && after === 1, "тумблер задач переключает подсветку", `${before} → ${after}`);
+  check(await page.evaluate(() => taskScope === "personal"), "и сам выбор");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
 /* ---------- Ничего не уезжает за край экрана ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -272,7 +332,7 @@ console.log("\nСценарий: создать задачу → закрыть 
   const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
 
   await page.evaluate(() => go("clients"));
-  await page.waitForSelector("#cllist .card, #cllist .empty", { timeout: 6000 });
+  await page.waitForSelector("#cllist .row-item, #cllist .empty", { timeout: 6000 });
 
   // Включён раздел «Коллеги» — значит над списком есть переключатель
   const segText = await page.evaluate(() => (document.querySelector("#cllist .seg") || {}).innerText || "");
