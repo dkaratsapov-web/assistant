@@ -34,7 +34,7 @@ const API = {
   "/api/notes": { notes: [] },
   "/api/health": { kcal: { consumed: 0, goal: 2200, protein: 0, fat: 0, carbs: 0, goalP: 165, goalF: 73, goalC: 220 }, water: { ml: 0, goal: 2500 }, entries: [], notes: [], weight: { latest: null, history: [] }, week: {}, activity: [], supplements: [] },
   "/api/ai/history": { messages: [] },
-  "/api/notifications": { morning: { on: true, hour: 9 }, tasks: { on: true }, events: { on: true, lead: 30 }, birthdays: { on: true }, water: { on: false, everyHours: 2, from: 9, to: 21 }, meals: { on: false, breakfast: 9, lunch: 14, dinner: 19 } },
+  "/api/notifications": { morning: { on: true, hour: 9 }, tasks: { on: true, lead: 60 }, events: { on: true, lead: 30 }, birthdays: { on: true }, water: { on: false, everyHours: 2, from: 9, to: 21 }, meals: { on: false, breakfast: 9, lunch: 14, dinner: 19 } },
   "/api/supplements": {
     supplements: [
       { id: 1, name: "Витамин D", dose: "5000 МЕ", times: ["09:00"], days: 0, weekdays: "", start_date: "", notes: "" },

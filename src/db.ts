@@ -292,6 +292,9 @@ export class DB {
       // канал, из которого пришёл пользователь (tg | max), и его настоящий id в этом канале
       "ALTER TABLE users ADD COLUMN channel TEXT DEFAULT 'tg'",
       "ALTER TABLE users ADD COLUMN ext_id INTEGER",
+      // отметка «предупредили заранее»: отдельно от reminded_at, иначе
+      // напоминание за час съедало бы напоминание в сам срок
+      "ALTER TABLE tasks ADD COLUMN pre_reminded_at TEXT",
       // дни недели приёма бада: "" — каждый день, иначе "1,3,5" (1=Пн..7=Вс)
       "ALTER TABLE supplement ADD COLUMN weekdays TEXT DEFAULT ''",
     ];
@@ -372,6 +375,7 @@ export class DB {
     clientId?: number | null;
     scope?: string | null;
     orderByDone?: boolean;
+    limit?: number;
   } = {}): Promise<Task[]> {
     await this.ensureSchema();
     const statuses = opts.statuses ?? [TASK_OPEN, TASK_IN_PROGRESS];
@@ -396,6 +400,12 @@ export class DB {
     q += opts.orderByDone
       ? " ORDER BY (done_at IS NULL), done_at DESC, created_at DESC"
       : " ORDER BY (due_at IS NULL), due_at, priority DESC, created_at";
+    // Предел выборки: без него список рос вместе с историей, и раздел задач
+    // открывался тем дольше, чем дольше человек пользуется ботом.
+    if (opts.limit && opts.limit > 0) {
+      q += " LIMIT ?";
+      binds.push(opts.limit);
+    }
     const { results } = await this.d1.prepare(q).bind(...binds).all<Task>();
     return results ?? [];
   }
@@ -482,6 +492,87 @@ export class DB {
       .bind(nowIsoStr)
       .all<Task>();
     return results ?? [];
+  }
+
+  /**
+   * Задачи, у которых дедлайн ВПЕРЕДИ, но уже близко. Окно берём с запасом на
+   * сутки: за сколько именно предупреждать, каждый решает сам в настройках,
+   * и отбор по личному значению делает планировщик.
+   */
+  async tasksDueSoon(fromIsoStr: string, toIsoStr: string): Promise<Task[]> {
+    await this.ensureSchema();
+    const { results } = await this.d1
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE status IN ('open','in_progress') AND due_at IS NOT NULL
+           AND due_at > ? AND due_at <= ? AND pre_reminded_at IS NULL
+         ORDER BY due_at`
+      )
+      .bind(fromIsoStr, toIsoStr)
+      .all<Task>();
+    return results ?? [];
+  }
+
+  /**
+   * Числа для главного экрана одним запросом.
+   *
+   * Раньше ради трёх чисел выгружалась ВСЯ история выполненных задач — и первый
+   * экран тем дольше открывался, чем дольше человек пользуется ботом. Считать
+   * должна база, а не воркер.
+   */
+  async taskStats(userId: number, dayStartIso: string, weekAgoIso: string): Promise<{ doneToday: number; doneWeek: number; doneTotal: number }> {
+    await this.ensureSchema();
+    const row = await this.d1
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN done_at >= ? THEN 1 ELSE 0 END) AS today,
+                SUM(CASE WHEN done_at >= ? THEN 1 ELSE 0 END) AS week
+         FROM tasks
+         WHERE status = 'done' AND (creator_id = ? OR assignee_id = ?)`
+      )
+      .bind(dayStartIso, weekAgoIso, userId, userId)
+      .first<{ total: number; today: number; week: number }>();
+    return { doneToday: row?.today ?? 0, doneWeek: row?.week ?? 0, doneTotal: row?.total ?? 0 };
+  }
+
+  /** Сколько активных задач по видам — тоже считаем запросом, а не перебором. */
+  async activeTaskCounts(userId: number): Promise<{ work: number; personal: number }> {
+    await this.ensureSchema();
+    const { results } = await this.d1
+      .prepare(
+        `SELECT scope, COUNT(*) AS c FROM tasks
+         WHERE status IN ('open','in_progress') AND (creator_id = ? OR assignee_id = ?)
+         GROUP BY scope`
+      )
+      .bind(userId, userId)
+      .all<{ scope: string; c: number }>();
+    let work = 0, personal = 0;
+    for (const r of results ?? []) {
+      if (r.scope === "personal") personal += r.c; else work += r.c;
+    }
+    return { work, personal };
+  }
+
+  /**
+   * Задачи для повестки: просроченные и сегодняшние. Берём сразу нужные и
+   * сразу немного — загружать все активные ради восьми строк незачем.
+   */
+  async tasksAgenda(userId: number, untilIso: string, limit = 8): Promise<Task[]> {
+    await this.ensureSchema();
+    const { results } = await this.d1
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE status IN ('open','in_progress') AND due_at IS NOT NULL AND due_at < ?
+           AND (creator_id = ? OR assignee_id = ?)
+         ORDER BY due_at LIMIT ?`
+      )
+      .bind(untilIso, userId, userId, limit)
+      .all<Task>();
+    return results ?? [];
+  }
+
+  async markPreReminded(id: number): Promise<void> {
+    await this.d1.prepare("UPDATE tasks SET pre_reminded_at = ? WHERE id = ?").bind(nowIso(), id).run();
   }
 
   async markReminded(id: number): Promise<void> {
@@ -945,7 +1036,7 @@ export class DB {
     const raw = await this.getSetting(`notif:${userId}`);
     const def: NotifSettings = {
       morning: { on: true, hour: 9 },
-      tasks: { on: true },
+      tasks: { on: true, lead: 60 },
       events: { on: true, lead: 30 },
       birthdays: { on: true },
       water: { on: false, everyHours: 2, from: 9, to: 21 },

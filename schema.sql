@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   repeat_rule TEXT DEFAULT '',                -- daily | weekdays | weekly | monthly | w:1..w:7
   created_at  TEXT NOT NULL,
   done_at     TEXT,
-  reminded_at TEXT
+  reminded_at TEXT,
+  pre_reminded_at TEXT             -- предупредили заранее (отдельно от напоминания в сам срок)
 );
 
 CREATE TABLE IF NOT EXISTS notes (

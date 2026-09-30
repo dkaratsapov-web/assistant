@@ -488,6 +488,28 @@ export default {
       // Причина из жизни: пока воркер час отвечал ошибкой, MAX отписал вебхук, и бот
       // молчал до следующего часового прогона. Проверка дешёвая — два запроса.
       await ensureWebhooks(env, db, `https://${env.PUBLIC_HOST || "assistant.d-karatsapov.workers.dev"}`);
+      // Предупреждение ЗАРАНЕЕ: «дедлайн через час». Раньше напоминание
+      // приходило только в сам момент срока — когда сделать уже нечего.
+      const nowMs = Date.now();
+      const soon = await db.tasksDueSoon(new Date(nowMs).toISOString(), new Date(nowMs + 1440 * 60_000).toISOString());
+      for (const t of soon) {
+        const recipient = t.assignee_id ?? t.creator_id;
+        try {
+          const notif = await notifOf(recipient);
+          const lead = notif.tasks.lead ?? 0;
+          if (!notif.tasks.on || lead <= 0) continue;
+          const left = Math.round((new Date(t.due_at!).getTime() - nowMs) / 60_000);
+          if (left > lead) continue;                       // ещё рано
+          await db.markPreReminded(t.id);                  // отмечаем до отправки: повтор хуже молчания
+          const u = await userOf(recipient);
+          if (!u) continue;
+          const when = left >= 120 ? `через ${Math.round(left / 60)} ч` : left >= 2 ? `через ${left} мин` : "совсем скоро";
+          await notify(env, u, `⏳ Дедлайн ${when}\n${t.title}\nСрок: ${formatDue(t.due_at, tz)}`);
+        } catch (e) {
+          console.error("task pre-reminder failed", t.id, e);
+        }
+      }
+
       // Напоминания о наступивших дедлайнах задач (если включено у получателя)
       const tasks = await db.tasksDueForReminder(new Date().toISOString());
       for (const t of tasks) {

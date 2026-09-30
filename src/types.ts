@@ -146,7 +146,7 @@ export interface SupplementRow {
 
 export interface NotifSettings {
   morning: { on: boolean; hour: number };
-  tasks: { on: boolean };
+  tasks: { on: boolean; lead: number };   // lead — за сколько минут предупредить до дедлайна (0 — только по факту)
   events: { on: boolean; lead: number }; // lead — минут до встречи
   birthdays: { on: boolean };
   water: { on: boolean; everyHours: number; from: number; to: number };

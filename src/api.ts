@@ -502,7 +502,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     };
     const next: NotifSettings = {
       morning: { on: !!(b.morning?.on ?? cur.morning.on), hour: clamp(b.morning?.hour, 0, 23, cur.morning.hour) },
-      tasks: { on: !!(b.tasks?.on ?? cur.tasks.on) },
+      tasks: { on: !!(b.tasks?.on ?? cur.tasks.on), lead: Math.min(1440, Math.max(0, Math.round(+(b.tasks?.lead ?? cur.tasks.lead) || 0))) },
       events: { on: !!(b.events?.on ?? cur.events.on), lead: clamp(b.events?.lead, 0, 1440, cur.events.lead) },
       birthdays: { on: !!(b.birthdays?.on ?? cur.birthdays.on) },
       water: {
@@ -928,7 +928,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       : filter === "in_progress" ? [TASK_IN_PROGRESS]
       : filter === "all" ? [TASK_OPEN, TASK_IN_PROGRESS, TASK_DONE, TASK_FAILED]
       : [TASK_OPEN, TASK_IN_PROGRESS];
-    const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, orderByDone: filter === "done" });
+    // Выполненных показываем последние: дальше вглубь истории никто не листает,
+    // а выгрузка всего архива — то, из-за чего раздел тяжелел со временем.
+    const tasks = await db.listTasks({ statuses, visibleTo: uid, scope, orderByDone: filter === "done", limit: filter === "done" ? 100 : 300 });
     const out = [];
     for (const t of tasks) {
       const client = t.client_id ? await db.getClient(t.client_id, uid) : null;
@@ -1133,21 +1135,15 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   // GET /api/home — агенда: сегодня/просрочка, ближайшие встречи и ДР
   if (path === "/api/home" && request.method === "GET") {
-    const active = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: uid });
     const nowMs = Date.now();
     const todayLocalDay = Math.floor((nowMs + tz * 3600_000) / 86400_000);
     // Список клиентов нужен и задачам, и встречам — берём его один раз
     const clientsForEv = await db.listClients(uid);
     const cName = (id: number | null) => (id ? clientsForEv.find((c) => c.id === id)?.name ?? null : null);
 
-    const agendaTasks = active
-      .filter((t) => {
-        if (!t.due_at) return false;
-        const dueMs = new Date(t.due_at).getTime();
-        const dueDay = Math.floor((dueMs + tz * 3600_000) / 86400_000);
-        return dueMs < nowMs || dueDay === todayLocalDay;
-      })
-      .slice(0, 8)
+    // Просроченное и сегодняшнее: спрашиваем у базы ровно это и сразу немного.
+    // Раньше выгружались ВСЕ активные задачи ради восьми строк.
+    const agendaTasks = (await db.tasksAgenda(uid, startOfLocalDayOffsetIso(tz, 1), 8))
       // client: у встреч на главной клиент показан, а у задач его не было —
       // хотя привязка есть. Чинится здесь, одним полем.
       .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, client: cName(t.client_id), overdue: new Date(t.due_at!).getTime() < nowMs }));
@@ -1177,24 +1173,20 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     upcomingBirthdays.sort((a, b) => a.in_days - b.in_days);
 
-    // Статистика по выполненным задачам
-    const done = await db.listTasks({ statuses: [TASK_DONE], visibleTo: uid, orderByDone: true });
-    const weekAgo = nowMs - 7 * 86400_000;
-    const stats = {
-      doneToday: done.filter((t) => t.done_at && Math.floor((new Date(t.done_at).getTime() + tz * 3600_000) / 86400_000) === todayLocalDay).length,
-      doneWeek: done.filter((t) => t.done_at && new Date(t.done_at).getTime() >= weekAgo).length,
-      doneTotal: done.length,
-    };
+    // Статистика и счётчики — запросами. Выгружать историю выполненного ради
+    // трёх чисел значило делать первый экран тем медленнее, чем дольше человек
+    // пользуется ботом.
+    const [stats, counts] = await Promise.all([
+      db.taskStats(uid, startOfLocalDayIso(tz), new Date(nowMs - 7 * 86400_000).toISOString()),
+      db.activeTaskCounts(uid),
+    ]);
 
     return json({
       tasks: agendaTasks,
       events: todayEvents,
       upcomingEvents,
       birthdays: upcomingBirthdays,
-      counts: {
-        personal: active.filter((t) => t.scope === SCOPE_PERSONAL).length,
-        work: active.filter((t) => t.scope === SCOPE_WORK).length,
-      },
+      counts,
       stats,
     });
   }

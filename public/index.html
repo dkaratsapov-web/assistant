@@ -1677,7 +1677,7 @@
         const n = await api("/notifications");
         const row = (label, id, checked) => `<label class="check" style="justify-content:space-between;width:100%"><span>${label}</span><input type="checkbox" id="${id}" ${checked ? "checked" : ""}></label>`;
         let h = `<div class="card" style="padding:12px">${row("☀️ Утренний брифинг", "n-morning", n.morning.on)}<div class="field" style="margin:8px 0 0"><label>Час брифинга (0–23)</label><input id="n-morning-h" type="number" inputmode="numeric" min="0" max="23" value="${n.morning.hour}"></div></div>`;
-        h += `<div class="card" style="padding:12px;margin-top:8px">${row("✅ Дедлайны задач", "n-tasks", n.tasks.on)}</div>`;
+        h += `<div class="card" style="padding:12px;margin-top:8px">${row("✅ Дедлайны задач", "n-tasks", n.tasks.on)}<div class="field" style="margin:8px 0 0"><label>Предупредить заранее, минут (0 — только в срок)</label><input id="n-tasks-lead" type="number" inputmode="numeric" min="0" max="1440" value="${n.tasks.lead ?? 60}"></div></div>`;
         h += `<div class="card" style="padding:12px;margin-top:8px">${row("📅 Встречи", "n-events", n.events.on)}<div class="field" style="margin:8px 0 0"><label>За сколько минут напоминать</label><input id="n-events-lead" type="number" inputmode="numeric" value="${n.events.lead}"></div></div>`;
         h += `<div class="card" style="padding:12px;margin-top:8px">${row("🎂 Дни рождения", "n-bd", n.birthdays.on)}</div>`;
         h += `<div class="card" style="padding:12px;margin-top:8px">${row("💧 Напоминать пить воду", "n-water", n.water.on)}<div style="display:flex;gap:8px;margin-top:8px"><div class="field" style="flex:1"><label>Каждые, ч</label><input id="n-water-every" type="number" inputmode="numeric" value="${n.water.everyHours}"></div><div class="field" style="flex:1"><label>С часа</label><input id="n-water-from" type="number" inputmode="numeric" value="${n.water.from}"></div><div class="field" style="flex:1"><label>До часа</label><input id="n-water-to" type="number" inputmode="numeric" value="${n.water.to}"></div></div></div>`;
@@ -1691,7 +1691,7 @@
       const num = (id) => ($(id) ? +$(id).value : 0);
       const body = {
         morning: { on: on("n-morning"), hour: num("n-morning-h") },
-        tasks: { on: on("n-tasks") },
+        tasks: { on: on("n-tasks"), lead: +($("n-tasks-lead") || {}).value || 0 },
         events: { on: on("n-events"), lead: num("n-events-lead") },
         birthdays: { on: on("n-bd") },
         water: { on: on("n-water"), everyHours: num("n-water-every"), from: num("n-water-from"), to: num("n-water-to") },
