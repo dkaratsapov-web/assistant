@@ -14,6 +14,7 @@ import { needsSearch, parseSearchXml, renderHits, decodeBase64 } from "../.test-
 import { parseQuery } from "../.test-build/queries.js";
 import { extractIntents } from "../.test-build/ai.js";
 import { parseAppearance } from "../.test-build/appearance.js";
+import { parseRpcBody, pickTool, fitArgs } from "../.test-build/yougile.js";
 
 const TZ = 3;
 /** Локальные часы/минуты из UTC-строки — чтобы проверять время без привязки к дате. */
@@ -534,4 +535,51 @@ test("если от названия ничего не остаётся — ос
 test("короткое или пустое имя клиента ничего не ломает", () => {
   assert.equal(stripClientName("Встреча с АП", "АП"), "Встреча с АП");
   assert.equal(stripClientName("Встреча", ""), "Встреча");
+});
+
+/* ---------- MCP: разбор ответа и подбор инструмента ---------- */
+
+test("обычный JSON-ответ разбирается", () => {
+  const got = parseRpcBody('{"jsonrpc":"2.0","id":3,"result":{"tools":[]}}', 3);
+  assert.deepEqual(got.result, { tools: [] });
+});
+
+test("ответ потоком событий разбирается", () => {
+  // Спецификация разрешает серверу отвечать потоком, и клиент обязан это понимать
+  const body = [
+    "event: message",
+    'data: {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"create_task"}]}}',
+    "",
+  ].join("\n");
+  const got = parseRpcBody(body, 3);
+  assert.equal(got.result.tools[0].name, "create_task");
+});
+
+test("служебные строки потока не мешают", () => {
+  const body = [": ping", "event: message", 'data: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}', "data: [DONE]"].join("\n");
+  assert.equal(parseRpcBody(body, 7).result.ok, true);
+});
+
+test("мусор и пустое тело не роняют разбор", () => {
+  assert.equal(parseRpcBody("", 1), null);
+  assert.equal(parseRpcBody("не json", 1), null);
+});
+
+test("инструмент подбирается по словам в имени", () => {
+  const tools = [{ name: "list_projects" }, { name: "create_task" }, { name: "create_task_comment" }];
+  assert.equal(pickTool(tools, ["create", "task"]).name, "create_task", "берём самое короткое подходящее");
+  assert.equal(pickTool(tools, ["project"]).name, "list_projects");
+  assert.equal(pickTool(tools, ["нет", "такого"]), null);
+});
+
+test("аргументы подгоняются под объявленные сервером поля", () => {
+  const tool = { name: "create_task", inputSchema: { properties: { name: {}, deadline: {} } } };
+  const args = fitArgs(tool, { title: ["title", "name"], due: ["dueDate", "deadline"] }, { title: "Отчёт", due: "2026-10-01" });
+  assert.deepEqual(args, { name: "Отчёт", deadline: "2026-10-01" });
+});
+
+test("чего сервер не объявил — того не шлём", () => {
+  const tool = { name: "create_task", inputSchema: { properties: { title: {} } } };
+  const args = fitArgs(tool, { title: ["title"], due: ["deadline"] }, { title: "Отчёт", due: "2026-10-01" });
+  assert.deepEqual(args, { title: "Отчёт" }, "лишнее поле сервер отверг бы целиком");
 });

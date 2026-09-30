@@ -17,6 +17,8 @@ export interface Env {
   YANDEX_SEARCH_URL?: string;      // адрес поискового API (XML-GET), если он изменится
   YANDEX_SEARCH_URL_V2?: string;   // адрес второго способа (POST-JSON), если он изменится
   YANDEX_SEARCH_API?: string;      // "v2" — начинать с POST-JSON, иначе с XML-GET
+  YOUGILE_TOKEN?: string;          // токен подключения YouGile (ИИ-ассистенты → MCP)
+  YOUGILE_MCP_URL?: string;        // адрес MCP-сервера YouGile, если он изменится
   WEB_SEARCH?: string;             // "off" — выключить поиск в интернете целиком
   YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
   YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"

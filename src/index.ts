@@ -4,6 +4,7 @@ import { DB } from "./db";
 import { BUILD } from "./build";
 import { aiConfig, askAI } from "./ai";
 import { searchConfigured, webSearch } from "./search";
+import { mcpConnect, mcpTools, pickTool, yougileConfigured, yougileUrl } from "./yougile";
 import { telemostAuthUrl, telemostExchangeCode, telemostState } from "./telemost";
 import { MaxClient, MaxUpdate } from "./max/client";
 import { handleMaxUpdate } from "./max/bot";
@@ -435,6 +436,36 @@ export default {
       try {
         const hits = await webSearch(env, q, 3);
         body.результат = hits.length ? hits.map((h) => `${h.title} — ${h.url}`) : "поиск ответил, но ничего не нашёл";
+      } catch (e) {
+        body.ошибка = (e as Error).message;
+      }
+      return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    // Живая проверка YouGile: рукопожатие и список инструментов, которые
+    // сервер реально отдаёт. Их имена заранее неизвестны — узнать можно
+    // только спросив, и без этого писать вызовы было бы гаданием.
+    if (url.pathname === "/diag/yougile") {
+      if (!maxAdminAllowed(url, env)) {
+        return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+      }
+      const body: Record<string, unknown> = {
+        подключён: yougileConfigured(env),
+        адрес: yougileUrl(env),
+        токен: env.YOUGILE_TOKEN ? "задан" : "нет",
+      };
+      try {
+        const session = await mcpConnect(env);
+        body.сервер = session.server;
+        body.сессия = session.id ? "выдана" : "без сессии";
+        const tools = await mcpTools(env, session);
+        body.инструментов = tools.length;
+        body.инструменты = tools.map((t) => ({
+          имя: t.name,
+          описание: (t.description ?? "").slice(0, 120),
+          поля: Object.keys(t.inputSchema?.properties ?? {}),
+        }));
+        const create = pickTool(tools, ["task"]);
+        body.похоже_на_задачи = create ? create.name : "не нашлось";
       } catch (e) {
         body.ошибка = (e as Error).message;
       }

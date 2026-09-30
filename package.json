@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "db:init": "wrangler d1 execute assistant-db --file=./schema.sql",
     "db:init:local": "wrangler d1 execute assistant-db --local --file=./schema.sql",
-    "test": "esbuild src/utils.ts src/intent.ts src/phrases.ts src/search.ts src/queries.ts src/ai.ts src/appearance.ts --bundle --format=esm --platform=neutral --outdir=.test-build --log-level=error && node --test tests/*.test.mjs",
+    "test": "esbuild src/utils.ts src/intent.ts src/phrases.ts src/search.ts src/queries.ts src/ai.ts src/appearance.ts src/yougile.ts --bundle --format=esm --platform=neutral --outdir=.test-build --log-level=error && node --test tests/*.test.mjs",
     "smoke": "node tests/smoke/app.smoke.mjs",
     "stamp": "node scripts/stamp-build.mjs",
     "smoke:ru": "node tests/smoke/russia.smoke.mjs",
