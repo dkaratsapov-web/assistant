@@ -168,6 +168,50 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Дедлайн задачи меняется календарём ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: правка дедлайна задачи");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  await page.evaluate(() => go("tasks"));
+  await page.waitForSelector("#tasklist .card", { timeout: 6000 });
+  // Берём ту задачу, что реально есть: предыдущий сценарий мог изменить список
+  const taskId = await page.evaluate(() => (tasksCache[0] || {}).id);
+  check(!!taskId, "есть задача для правки", String(taskId));
+  await page.evaluate((id) => window.editTask(id), taskId);
+  await page.waitForSelector("#f-due-date", { timeout: 6000 });
+
+  // Поля календаря и времени, а не свободный текст: у текста сервер разбирал
+  // значение заново и понимал иначе, чем человек выбрал.
+  check(await page.evaluate(() => $("f-due-date").type === "date"), "дедлайн выбирается календарём");
+  check(await page.evaluate(() => $("f-due-time").type === "time"), "время выбирается часами");
+  check(await page.evaluate(() => !document.getElementById("f-due")), "свободного текстового поля больше нет");
+
+  // Быстрые кнопки работают и в правке
+  await page.evaluate(() => window.dueQuick(1));
+  const picked = await page.evaluate(() => $("f-due-date").value);
+  check(/^\d{4}-\d{2}-\d{2}$/.test(picked), "кнопка «Завтра» ставит дату", picked);
+
+  // На сервер уходит ровно выбранное значение
+  const sent = await page.evaluate(() => dueValue());
+  check(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sent), "на сервер уходит выбранная дата и время", sent);
+
+  // «Без срока» прячет поля и отдаёт пусто
+  await page.evaluate(() => window.dueQuick(null));
+  check(await page.evaluate(() => dueValue() === ""), "«Без срока» отдаёт пустой дедлайн");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
 /* ---------- Бады: дни приёма ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });

@@ -279,6 +279,18 @@
       background: var(--surface-2); color: var(--text); font-size: 15px; outline: none; transition: border-color .15s ease; }
     .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--border-strong); }
     .field select option { color: #111; background: #fff; }  /* читаемо в нативном меню при любой теме */
+    /* Поля даты и времени. Без этого Safari рисует их своим виджетом: он шире
+       остальных полей, выравнивает текст по центру и не сжимается до ширины
+       формы — поле заметно «разъезжалось». Шрифт ровно 16px: при меньшем
+       iOS зумит всю страницу, как только в поле ставят курсор. */
+    .field input[type="datetime-local"], .field input[type="date"], .field input[type="time"] {
+      -webkit-appearance: none; appearance: none;
+      min-width: 0; max-width: 100%;
+      font-family: inherit; font-size: 16px; text-align: left;
+    }
+    .field input[type="datetime-local"]::-webkit-date-and-time-value,
+    .field input[type="date"]::-webkit-date-and-time-value,
+    .field input[type="time"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
     input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--surface-2); outline: none; }
     input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
       background: var(--fg); border: 3px solid var(--surface); box-shadow: var(--shadow-sm); cursor: pointer; }
@@ -687,7 +699,6 @@
     function fmtEv(iso) { return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
     const p2 = (n) => String(n).padStart(2, "0");
     function isoToLocalInput(iso) { const d = new Date(iso); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; }
-    function isoToDueText(iso) { if (!iso) return ""; const d = new Date(iso); return `${p2(d.getDate())}.${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; }
     const MON_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
     function money(v) {
       v = (v || "").trim();
@@ -763,7 +774,7 @@
           h += `<div class="section-title">⚠️ Просрочено</div><div class="card">`;
           overdue.forEach((t) => {
             const due = fmtDue(t.due_at);
-            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m" style="color:#ff6b6b">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m" style="color:#ff6b6b">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}${t.client ? " · 📁 " + esc(t.client) : ""}</div></div></div>`;
           });
           h += `</div>`;
         }
@@ -775,7 +786,7 @@
           h += `<div class="card">`;
           todayTasks.forEach((t) => {
             const due = fmtDue(t.due_at);
-            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}</div></div></div>`;
+            h += `<div class="agenda-item"><div class="dot"></div><div class="t"><div class="ttl">${esc(t.title)}</div><div class="m">${due.txt} · ${t.scope === "personal" ? "личное" : "работа"}${t.client ? " · 📁 " + esc(t.client) : ""}</div></div></div>`;
           });
           d.events.forEach((e) => {
             h += `<div class="agenda-item"><div class="dot strong"></div><div class="t"><div class="ttl">${esc(e.title)}</div><div class="m">встреча · сегодня ${tOnly(e.starts_at)}${e.client ? " · 📁 " + esc(e.client) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div></div>`;
@@ -2241,20 +2252,6 @@
         <div class="field"><label class="check"><input type="checkbox" id="f-prio">Важная задача</label></div>
         <div class="field" id="f-client-wrap"><label>Клиент</label><select id="f-client">${opts}</select></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTask()">Создать</button></div>`);
-      /** Быстрый выбор дня: 0 — сегодня, 1 — завтра, null — убрать срок. */
-      window.dueQuick = (days) => {
-        haptic();
-        const d = $("f-due-date"), t = $("f-due-time");
-        const row = $("f-due-row"), none = $("f-due-none");
-        document.querySelectorAll("#f-due-chips .chip").forEach((c, i) => c.classList.toggle("on", i === [0, 1, 7, null].indexOf(days)));
-        if (days === null) {                       // «Без срока»: прячем поля, чтобы не мозолила пустая дата
-          d.value = ""; row.style.display = "none"; none.style.display = "block"; return;
-        }
-        row.style.display = "flex"; none.style.display = "none";
-        const dt = new Date(); dt.setDate(dt.getDate() + days);
-        d.value = `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())}`;
-        if (!t.value) t.value = "10:00";
-      };
       dueQuick(0);                                  // по умолчанию сегодня — без английской заглушки в поле
       window.__ts = taskScope;
       window.tsSet = (s) => { window.__ts = s; $("ts-work").classList.toggle("on", s === "work"); $("ts-personal").classList.toggle("on", s === "personal"); $("f-client-wrap").style.display = s === "personal" ? "none" : "block"; };
@@ -2264,6 +2261,29 @@
       const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
       await api("/tasks", { method: "POST", body: JSON.stringify({ title, description: ($("f-desc") || {}).value || "", due: dueValue(), repeat: ($("f-repeat") || {}).value || "", scope: window.__ts, priority: $("f-prio").checked ? 1 : 0, client_id: window.__ts === "personal" ? null : ($("f-client").value || null) }) });
       closeSheet(); taskScope = window.__ts; switchTab("tasks", true);
+    };
+
+    /**
+     * Быстрый выбор дня: 0 — сегодня, 1 — завтра, 7 — через неделю,
+     * null — убрать срок.
+     *
+     * Объявлено здесь, а не внутри формы создания: те же кнопки есть в форме
+     * правки, и когда функция жила внутри одной формы, в другой она просто
+     * не существовала — нажатие роняло обработчик.
+     */
+    window.dueQuick = (days) => {
+      haptic();
+      const d = $("f-due-date"), t = $("f-due-time");
+      const row = $("f-due-row"), none = $("f-due-none");
+      if (!d || !row) return;
+      document.querySelectorAll("#f-due-chips .chip").forEach((c, i) => c.classList.toggle("on", i === [0, 1, 7, null].indexOf(days)));
+      if (days === null) {                       // «Без срока»: прячем поля, чтобы не мозолила пустая дата
+        d.value = ""; row.style.display = "none"; if (none) none.style.display = "block"; return;
+      }
+      row.style.display = "flex"; if (none) none.style.display = "none";
+      const dt = new Date(); dt.setDate(dt.getDate() + days);
+      d.value = `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())}`;
+      if (!t.value) t.value = "10:00";
     };
 
     /** Дедлайн из полей формы: «2026-09-28T14:00» или пусто, если день не выбран. */
@@ -2334,7 +2354,19 @@
       openSheet(`<h3>Изменить задачу</h3>
         <div class="field"><div class="seg mini"><div id="ts-work" onclick="tsSet('work')">Рабочая</div><div id="ts-personal" onclick="tsSet('personal')">Личная</div></div></div>
         <div class="field"><label>Что нужно сделать</label><input id="f-title" value="${esc(t.title)}"></div>
-        <div class="field"><label>Дедлайн</label><input id="f-due" value="${isoToDueText(t.due_at)}" placeholder="завтра, в пятницу, 15.03 14:00"></div>
+        <div class="field"><label>Дедлайн</label>
+          <div class="chips" id="f-due-chips" style="margin-bottom:8px">
+            <div class="chip" onclick="dueQuick(0)">Сегодня</div>
+            <div class="chip" onclick="dueQuick(1)">Завтра</div>
+            <div class="chip" onclick="dueQuick(7)">Через неделю</div>
+            <div class="chip" onclick="dueQuick(null)">Без срока</div>
+          </div>
+          <div id="f-due-row" style="display:${t.due_at ? "flex" : "none"};gap:8px">
+            <input id="f-due-date" type="date" style="flex:1.4" value="${t.due_at ? isoToLocalInput(t.due_at).slice(0, 10) : ""}">
+            <input id="f-due-time" type="time" step="300" style="flex:1" value="${t.due_at ? isoToLocalInput(t.due_at).slice(11, 16) : "10:00"}">
+          </div>
+          <div id="f-due-none" style="display:${t.due_at ? "none" : "block"};color:var(--muted);font-size:13px;padding:6px 2px">Срок не задан — задача просто будет в списке.</div>
+        </div>
         <div class="field"><label class="check"><input type="checkbox" id="f-prio" ${t.priority ? "checked" : ""}>Важная задача</label></div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="saveTaskEdit(${id})">Сохранить</button></div>`);
       window.__ts = t.scope || "work";
@@ -2343,7 +2375,10 @@
     };
     window.saveTaskEdit = async (id) => {
       const title = $("f-title").value.trim(); if (!title) return tg.showAlert("Введи название");
-      await api(`/tasks/${id}`, { method: "POST", body: JSON.stringify({ title, due: $("f-due").value, scope: window.__ts, priority: $("f-prio").checked ? 1 : 0 }) });
+      // dueValue() отдаёт «ГГГГ-ММ-ДДTЧЧ:ММ» — ровно то, что выбрано в полях.
+      // Раньше тут уходил свободный текст вроде «30.09 23:09», сервер разбирал
+      // его заново и то и дело понимал иначе, чем человек имел в виду.
+      await api(`/tasks/${id}`, { method: "POST", body: JSON.stringify({ title, due: dueValue(), scope: window.__ts, priority: $("f-prio").checked ? 1 : 0 }) });
       closeSheet(); renderTasks();
     };
 

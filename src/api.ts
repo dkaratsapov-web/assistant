@@ -120,6 +120,18 @@ function suggestKcal(p: Profile, weightKg: number | null): { kcal: number; prote
 }
 
 /** Обрабатывает /api/* с проверкой доступа. */
+/**
+ * Срок из запроса. Из формы он приходит как «2026-09-28T14:00» (локальное
+ * время устройства), голосом и текстом — словами («завтра», «в пятницу»).
+ * Понимать надо оба вида и одинаково во всех местах: разный разбор при
+ * создании и при правке — это дедлайн, который «не меняется или лагает».
+ */
+function readDue(value: string, tz: number): string | null {
+  const v = String(value ?? "").trim();
+  if (!v) return null;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? localInputToUtc(v, tz) : parseDue(v, tz);
+}
+
 export async function handleApi(request: Request, env: Env): Promise<Response> {
   const db = new DB(env.DB);
   const url = new URL(request.url);
@@ -936,13 +948,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     };
     const title = (body.title ?? "").trim();
     if (!title) return json({ error: "empty_title" }, 400);
-    // Из формы дедлайн приходит как «2026-09-28T14:00», голосом и текстом —
-    // словами («завтра», «в пятницу»). Понимаем оба вида.
-    const dueAt = body.due
-      ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.due)
-        ? localInputToUtc(body.due, tz)
-        : parseDue(body.due, tz)
-      : null;
+    const dueAt = body.due ? readDue(body.due, tz) : null;
     const scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const id = await db.addTask({
       title, description: (body.description ?? "").trim().slice(0, 2000), creatorId: uid, assigneeId: uid, scope,
@@ -973,7 +979,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (!t) return json({ error: "empty_title" }, 400);
       fields.title = t;
     }
-    if (body.due !== undefined) fields.dueAt = body.due.trim() ? parseDue(body.due, tz) : null;
+    // Тот же разбор, что и при создании. Раньше здесь был только parseDue, и
+    // значение из календаря («2026-09-30T14:00») понималось иначе, чем то же
+    // самое при создании: дедлайн при правке то не менялся, то уезжал.
+    if (body.due !== undefined) fields.dueAt = body.due.trim() ? readDue(body.due, tz) : null;
     if (body.scope !== undefined) fields.scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     if (body.priority !== undefined) fields.priority = body.priority ? 1 : 0;
     await db.updateTask(parseInt(editMatch[1], 10), fields, uid);
@@ -1127,6 +1136,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const active = await db.listTasks({ statuses: [TASK_OPEN, TASK_IN_PROGRESS], visibleTo: uid });
     const nowMs = Date.now();
     const todayLocalDay = Math.floor((nowMs + tz * 3600_000) / 86400_000);
+    // Список клиентов нужен и задачам, и встречам — берём его один раз
+    const clientsForEv = await db.listClients(uid);
+    const cName = (id: number | null) => (id ? clientsForEv.find((c) => c.id === id)?.name ?? null : null);
+
     const agendaTasks = active
       .filter((t) => {
         if (!t.due_at) return false;
@@ -1135,11 +1148,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         return dueMs < nowMs || dueDay === todayLocalDay;
       })
       .slice(0, 8)
-      .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, overdue: new Date(t.due_at!).getTime() < nowMs }));
+      // client: у встреч на главной клиент показан, а у задач его не было —
+      // хотя привязка есть. Чинится здесь, одним полем.
+      .map((t) => ({ id: t.id, title: t.title, scope: t.scope, status: t.status, due_at: t.due_at, client: cName(t.client_id), overdue: new Date(t.due_at!).getTime() < nowMs }));
 
     const evAll = await db.listEvents(uid, startOfLocalDayIso(tz));
-    const clientsForEv = await db.listClients(uid);
-    const cName = (id: number | null) => (id ? clientsForEv.find((c) => c.id === id)?.name ?? null : null);
     const evDay = (e: { starts_at: string }) => Math.floor((new Date(e.starts_at).getTime() + tz * 3600_000) / 86400_000);
     const mapEv = (e: { id: number; title: string; starts_at: string; location: string; client_id: number | null }) => ({
       id: e.id, title: e.title, starts_at: e.starts_at, location: e.location, client: cName(e.client_id),

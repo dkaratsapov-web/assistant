@@ -18,7 +18,7 @@ const API = {
   // проходит на выдуманных данных и не замечает поломку главного экрана.
   "/api/home": {
     tasks: [
-      { id: 1, title: "Просроченное дело", due_at: new Date(Date.now() - 86400000).toISOString(), scope: "work", overdue: true },
+      { id: 1, title: "Просроченное дело", due_at: new Date(Date.now() - 86400000).toISOString(), scope: "work", client: "АйПапа", overdue: true },
       { id: 2, title: "Дело на сегодня", due_at: new Date().toISOString(), scope: "personal", overdue: false },
     ],
     events: [{ id: 1, title: "Планёрка", starts_at: new Date().toISOString(), location: "", client: null }],

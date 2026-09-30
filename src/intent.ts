@@ -8,7 +8,7 @@ import { DB } from "./db";
 import { answerQuery, parseQuery } from "./queries";
 import { parseAppearance, renderPrefsChange } from "./appearance";
 import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, WB_END, WB_START, wordRe } from "./utils";
+import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, stripClientName, WB_END, WB_START, wordRe } from "./utils";
 
 export const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -205,14 +205,18 @@ export async function performIntent(
     const client = scope === SCOPE_PERSONAL ? null : await findClient();
     // «каждый вторник», «по будням» — задача должна возвращаться сама
     const repeat = parseRepeat(`${rawText} ${title}`);
-    const id = await db.addTask({ title, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null, repeat });
+    // Клиента человек называет, чтобы Сара поняла, о ком речь. В названии он не
+    // нужен: рядом и так стоит ярлык с именем, и получается «Отчёт для Ромашки
+    // · Ромашка».
+    const clean = client ? stripClientName(title, client.name) : title;
+    const id = await db.addTask({ title: clean, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null, repeat });
     await remember("task", id);
     await setFocus("task", id);
     const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
     const sc = scope === SCOPE_PERSONAL ? "🙋 Личная" : "💼 Рабочая";
     const cl = client ? `\n🤝 ${client.name}` : "";
     const rp = repeat ? `\n🔁 ${repeatLabel(repeat)}` : "";
-    return `✅ Добавила задачу\n«${title}»\n${sc}${due}${cl}${rp}`;
+    return `✅ Добавила задачу\n«${clean}»\n${sc}${due}${cl}${rp}`;
   }
 
   if (cmd.action === "task_done") {
@@ -317,12 +321,14 @@ export async function performIntent(
       return `📝 Добавила как задачу «Встреча: ${title}» — не поняла точное время. Скажи время, и перенесу в календарь.`;
     }
     const client = await findClient();
-    const id = await db.addEvent({ userId: uid, title, startsAt, location: cmd.location ?? "", notes: "", clientId: client?.id ?? null });
+    // То же самое, что и у задачи: имя клиента показывает ярлык, а не название
+    const clean = client ? stripClientName(title, client.name) : title;
+    const id = await db.addEvent({ userId: uid, title: clean, startsAt, location: cmd.location ?? "", notes: "", clientId: client?.id ?? null });
     await remember("event", id);
     await setFocus("event", id);
     const loc = cmd.location ? `\n📍 ${cmd.location}` : "";
     const cl = client ? `\n🤝 ${client.name}` : "";
-    return `📅 Встреча добавлена\n«${title}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
+    return `📅 Встреча добавлена\n«${clean}»\n🕒 ${formatEventTime(startsAt, tz)}${loc}${cl}`;
   }
 
   if (cmd.action === "event_edit") {

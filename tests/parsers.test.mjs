@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch } from "../.test-build/utils.js";
+import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch, stripClientName, splitWhen, guessScope } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 import { needsSearch, parseSearchXml, renderHits, decodeBase64 } from "../.test-build/search.js";
@@ -498,4 +498,40 @@ test("переносы строк внутри base64 не мешают", () => 
   const xml = "<doc><url>https://ya.ru</url><title>Тест</title></doc>";
   const b64 = Buffer.from(xml, "utf8").toString("base64").replace(/(.{10})/g, "$1\n");
   assert.equal(decodeBase64(b64), xml);
+});
+
+/* ---------- Имя клиента не дублируется в названии ---------- */
+
+test("имя клиента убирается вместе с предлогом и словом «клиент»", () => {
+  assert.equal(stripClientName("Встреча с клиентом Глобал стекло", "Глобал Стекло"), "Встреча");
+  assert.equal(stripClientName("Встреча с Ромашкой", "Ромашка"), "Встреча");
+  assert.equal(stripClientName("Созвон с клиентом ДиАвто69", "ДиАвто69"), "Созвон");
+});
+
+test("имя в любом падеже и в середине фразы", () => {
+  assert.equal(stripClientName("По школа Дмитровский связаться узнать что решили по сайту", "Школа Дмитровский"),
+    "Связаться узнать что решили по сайту");
+  assert.equal(stripClientName("Отправить смету для Ромашки", "Ромашка"), "Отправить смету");
+  assert.equal(stripClientName("Подготовить отчёт по Лютику", "Лютик"), "Подготовить отчёт");
+});
+
+test("чужие слова не трогаем", () => {
+  assert.equal(stripClientName("Инфа по сайту", "Глобал Стекло"), "Инфа по сайту");
+  assert.equal(stripClientName("Позвонить в банк", "Ромашка"), "Позвонить в банк");
+});
+
+test("имя без предлога — это объект действия, его оставляем", () => {
+  // «Позвонить Ромашке» без имени превращается в бессмысленное «Позвонить»
+  assert.equal(stripClientName("Позвонить Ромашке", "Ромашка"), "Позвонить Ромашке");
+  assert.equal(stripClientName("Напомнить Лютику про акты", "Лютик"), "Напомнить Лютику про акты");
+});
+
+test("если от названия ничего не остаётся — оставляем как было", () => {
+  assert.equal(stripClientName("Ромашка", "Ромашка"), "Ромашка");
+  assert.equal(stripClientName("Глобал Стекло", "Глобал Стекло"), "Глобал Стекло");
+});
+
+test("короткое или пустое имя клиента ничего не ломает", () => {
+  assert.equal(stripClientName("Встреча с АП", "АП"), "Встреча с АП");
+  assert.equal(stripClientName("Встреча", ""), "Встреча");
 });

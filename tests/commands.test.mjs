@@ -196,6 +196,35 @@ test("пустой день — честный ответ, а не выдума�
   assert.match(said, /ничего не запланировано/);
 });
 
+/* ---------- Имя клиента не попадает в название ---------- */
+
+test("клиент назван в фразе — в названии его нет", async () => {
+  const db = fakeDb({ clients: [{ id: 7, name: "Глобал Стекло" }] });
+  const said = await performIntent(
+    { action: "event", title: "Встреча с клиентом Глобал стекло", at: "завтра 12:00", client: "Глобал Стекло" },
+    db, 1, TZ, "встреча с клиентом Глобал Стекло завтра в 12"
+  );
+  assert.match(said, /Встреча добавлена/);
+  assert.equal(db.store.events[0].title, "Встреча");
+  assert.equal(db.store.events[0].client_id, 7, "но сам клиент привязан");
+});
+
+test("у задачи имя клиента тоже вырезается", async () => {
+  const db = fakeDb({ clients: [{ id: 7, name: "Школа Дмитровский" }] });
+  await performIntent(
+    { action: "task", title: "По школа Дмитровский связаться узнать что решили по сайту", client: "Школа Дмитровский" },
+    db, 1, TZ, "по школа Дмитровский связаться узнать что решили по сайту"
+  );
+  assert.equal(db.store.tasks[0].title, "Связаться узнать что решили по сайту");
+  assert.equal(db.store.tasks[0].client_id, 7);
+});
+
+test("название без имени клиента остаётся как есть", async () => {
+  const db = fakeDb({ clients: [{ id: 7, name: "Глобал Стекло" }] });
+  await performIntent({ action: "task", title: "Инфа по сайту", client: "Глобал Стекло" }, db, 1, TZ, "инфа по сайту для Глобал Стекло");
+  assert.equal(db.store.tasks[0].title, "Инфа по сайту");
+});
+
 /* ---------- Настройки приложения словами ---------- */
 
 test("«сделай шрифт крупнее» правда меняет настройку", async () => {
