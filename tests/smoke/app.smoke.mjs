@@ -168,6 +168,64 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Обучающий тур ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: знакомство с приложением");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  // Новому человеку тур показывается сам
+  await page.waitForSelector(".tour-card", { timeout: 6000 });
+  check(true, "новому пользователю тур открывается сам");
+  check(await page.evaluate(() => !!document.querySelector(".tour-hole")), "подсветка есть");
+
+  // Подсветка стоит на элементе, а не в углу экрана
+  const fits = await page.evaluate(() => {
+    const h = document.querySelector(".tour-hole").getBoundingClientRect();
+    const t = document.querySelector(".tiles").getBoundingClientRect();
+    return Math.abs(h.top + 6 - t.top) < 3 && Math.abs(h.width - 12 - t.width) < 3;
+  });
+  check(fits, "подсветка совпадает с элементом");
+
+  // Шаги переключаются и счётчик растёт
+  const first = await page.evaluate(() => document.querySelector(".tour-card .step").textContent);
+  await page.evaluate(() => window.tourNext());
+  await page.waitForTimeout(400);
+  const second = await page.evaluate(() => document.querySelector(".tour-card .step").textContent);
+  check(first !== second, "шаг переключается", `${first} → ${second}`);
+
+  // Интерфейс под подсветкой остаётся нажимаемым
+  check(await page.evaluate(() => getComputedStyle(document.querySelector(".tour-hole")).pointerEvents === "none"),
+    "подсветка не перехватывает нажатия");
+
+  // Пропуск закрывает тур и больше не показывает его
+  await page.evaluate(() => window.tourSkip());
+  await page.waitForTimeout(300);
+  check(await page.evaluate(() => !document.querySelector(".tour-card")), "«Пропустить» закрывает тур");
+
+  const page2 = await ctx.newPage();
+  page2.on("pageerror", (e) => errs.push(String(e)));
+  await page2.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page2.waitForSelector(".tiles .tile", { timeout: 8000 });
+  await page2.waitForTimeout(900);
+  check(await page2.evaluate(() => !document.querySelector(".tour-card")), "второй раз тур не всплывает");
+
+  // Но его можно позвать заново
+  await page2.evaluate(() => window.startTour(true));
+  await page2.waitForTimeout(400);
+  check(await page2.evaluate(() => !!document.querySelector(".tour-card")), "заново тур запускается");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
 /* ---------- Группы и разделы ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });

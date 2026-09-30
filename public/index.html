@@ -297,6 +297,20 @@
     input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--surface);
       background: var(--fg); box-shadow: var(--shadow-sm); cursor: pointer; }
     .field textarea { resize: vertical; min-height: 56px; }
+    /* Обучающий тур: подсветка элемента и пояснение рядом.
+       Затемнение делаем огромной тенью вокруг «окошка» — так вырез всегда
+       ровно по элементу, без четырёх подгоняемых прямоугольников. */
+    .tour-hole { position: fixed; z-index: 1200; border-radius: 14px; pointer-events: none;
+      box-shadow: 0 0 0 4px rgba(255,255,255,.9), 0 0 0 9999px rgba(0,0,0,.74);
+      transition: top .28s ease, left .28s ease, width .28s ease, height .28s ease; }
+    .tour-card { position: fixed; z-index: 1201; left: 16px; right: 16px; max-width: 420px; margin: 0 auto;
+      background: var(--surface); color: var(--text); border-radius: var(--radius); padding: 16px;
+      box-shadow: var(--shadow); transition: top .28s ease; }
+    .tour-card .tt { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+    .tour-card .tx { color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+    .tour-card .row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+    .tour-card .step { color: var(--muted); font-size: 12px; margin-right: auto; }
+    :root[data-motion="off"] .tour-hole, :root[data-motion="off"] .tour-card { transition: none; }
     .check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--fg); }
     .seg.mini div { padding: 9px; font-size: 13px; }
@@ -1633,6 +1647,83 @@
     };
 
     /* ---------- Настройки ---------- */
+    /* ---------- Обучающий тур ---------- */
+
+    /**
+     * Шаги знакомства. `el` — что подсветить, `tab` — на какой экран перейти
+     * перед шагом. Шаг молча пропускается, если элемента нет: разделы можно
+     * спрятать в настройках, и тур не должен из-за этого спотыкаться.
+     */
+    const TOUR = [
+      { el: ".tiles", title: "Сколько дел висит", text: "Две плитки — рабочие и личные задачи. Нажми на любую, чтобы открыть список." },
+      { el: ".cta", title: "Спросить Сару", text: "Скажи или напиши своими словами: «напомни завтра отправить отчёт», «что у меня на неделе». Сара сама поймёт, задача это, встреча или вопрос." },
+      { el: "#fab-mic", title: "Голосом — быстрее всего", text: "Нажми и просто скажи фразу. Кольцо вокруг кнопки показывает, что Сара слышит. Второе нажатие — и запись уходит." },
+      { el: "#fab", title: "Добавить руками", text: "Плюс заводит запись в том разделе, где ты сейчас: задачу, встречу, еду или клиента." },
+      { el: '#nav [data-tab="tasks"]', title: "Задачи", text: "Рабочие и личные, по стадиям: неразобранное, в работе, выполнено. Срок ставится календарём." },
+      { el: '#nav [data-tab="calendar"]', title: "Календарь", text: "Встречи списком или месяцем. Напомню заранее — за сколько, настраивается." },
+      { el: '#nav [data-tab="health"]', title: "Здоровье", text: "Калории, вода, вес, тренировки и БАДы. Скажи «съел борщ» или «выпил 300 мл» — запишу." },
+      { el: '#nav [data-tab="clients"]', title: "Клиенты", text: "Карточка, бюджет, оплата, задачи и встречи по каждому. Можно разложить по своим группам." },
+      { el: "#notif-btn", title: "Уведомления", text: "Утренняя сводка, дедлайны, встречи, дни рождения. Всё включается и выключается по отдельности." },
+      { el: "#prefs-btn", title: "Настройки", text: "Размер текста, тема, что показывать в меню, свои группы и разделы. Меняется сразу." },
+      { el: "#avatar", title: "Сама Сара", text: "Нажми на лицо — можно сменить имя, внешность и манеру общения. Хоть на «вы», хоть покороче." },
+    ];
+
+    const TOUR_KEY = "sara-tour-done";
+    let tourStep = -1;
+
+    function tourEnd(finished) {
+      tourStep = -1;
+      document.querySelectorAll(".tour-hole, .tour-card").forEach((el) => el.remove());
+      if (finished) { try { localStorage.setItem(TOUR_KEY, "1"); } catch (e) {} }
+    }
+    window.tourSkip = () => { haptic(); tourEnd(true); };
+
+    window.tourNext = async () => {
+      haptic();
+      // Ищем следующий шаг, у которого элемент реально есть на экране
+      let next = tourStep + 1;
+      while (next < TOUR.length) {
+        const s = TOUR[next];
+        if (s.tab && tab !== s.tab) { await switchTab(s.tab, true); await new Promise((r) => setTimeout(r, 260)); }
+        if (document.querySelector(s.el)) break;
+        next++;
+      }
+      if (next >= TOUR.length) { tourEnd(true); toast("Готово. Повторить можно в настройках"); return; }
+      tourStep = next;
+      tourShow(TOUR[next], next);
+    };
+
+    function tourShow(step, idx) {
+      const target = document.querySelector(step.el);
+      if (!target) { tourNext(); return; }
+      const r = target.getBoundingClientRect();
+      const pad = 6;
+      let hole = document.querySelector(".tour-hole");
+      let card = document.querySelector(".tour-card");
+      if (!hole) { hole = document.createElement("div"); hole.className = "tour-hole"; document.body.appendChild(hole); }
+      if (!card) { card = document.createElement("div"); card.className = "tour-card"; document.body.appendChild(card); }
+      hole.style.top = `${r.top - pad}px`;
+      hole.style.left = `${r.left - pad}px`;
+      hole.style.width = `${r.width + pad * 2}px`;
+      hole.style.height = `${r.height + pad * 2}px`;
+      const last = idx >= TOUR.length - 1;
+      card.innerHTML = `<div class="tt">${esc(step.title)}</div><div class="tx">${esc(step.text)}</div>
+        <div class="row"><span class="step">${idx + 1} из ${TOUR.length}</span>
+          <button class="btn" onclick="tourSkip()">Пропустить</button>
+          <button class="btn primary" onclick="tourNext()">${last ? "Понятно" : "Дальше"}</button></div>`;
+      // Карточку ставим с той стороны, где больше места: под подсветкой или над ней
+      const below = window.innerHeight - r.bottom;
+      card.style.top = below > 220 ? `${r.bottom + 14}px` : `${Math.max(12, r.top - card.offsetHeight - 14)}px`;
+    }
+
+    /** Показываем тур только новому человеку и только когда экран уже собран. */
+    window.startTour = (force) => {
+      try { if (!force && localStorage.getItem(TOUR_KEY)) return; } catch (e) { if (!force) return; }
+      tourEnd(false);
+      tourStep = -1;
+      tourNext();
+    };
+
     window.openSettings = () => {
       const seg = (key, opts) =>
         `<div class="seg" style="margin:0">${opts
@@ -1686,6 +1777,7 @@
           <div class="chips" id="grp-list" style="margin-bottom:8px">${groupChips()}</div>
           <div style="display:flex;gap:8px"><input id="grp-new" placeholder="Название группы" style="flex:1"><button class="btn" onclick="addGroup()">Добавить</button></div>`)}
         ${block("Сама Сара", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Имя, лицо и манера общения — на отдельном экране.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(openSara, 180)">Открыть настройки Сары</button>`)}
+        ${block("Знакомство с приложением", `<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">Короткая экскурсия по разделам и кнопкам — ${TOUR.length} шагов.</div><button class="btn" style="width:100%" onclick="closeSheet(); setTimeout(() => startTour(true), 260)">Пройти заново</button>`)}
         <div class="actions" style="margin-top:4px">
           <button class="btn" onclick="resetPrefs()">Сбросить</button>
           <button class="btn primary" onclick="closeSheet()">Готово</button>
@@ -2858,8 +2950,11 @@
       const start = prefs.hidden.includes(prefs.startTab) ? "home" : prefs.startTab;
       tab = start; navStack.length = 0; navStack.push(start);
       applyHiddenTabs();
-      renderTab(start); updateBack();
+      await renderTab(start); updateBack();
       if (window.__appBooted) window.__appBooted();
+      // Тур запускаем только когда первый экран уже собран: подсвечивать
+      // скелетоны, которые вот-вот сменятся, бессмысленно.
+      setTimeout(() => { try { startTour(false); } catch (e) {} }, 500);
     })();
   </script>
 </body>
