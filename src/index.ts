@@ -123,19 +123,37 @@ async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<voi
  * на месте, и восстанавливает их. Благодаря этому открывать /init и /max/init руками
  * не нужно — достаточно задать секреты, остальное бот делает сам.
  */
+/**
+ * Отпечаток секрета — чтобы замечать его смену, не храня сам секрет.
+ *
+ * Зачем. Telegram и MAX подписываются НА секрет: он передаётся при подписке и
+ * потом приходит с каждым обновлением. Если поменять секрет в настройках и не
+ * переподписаться, мессенджер продолжит слать старый — воркер начнёт его
+ * отвергать, и бот замолчит. Причём молча: адрес-то не изменился.
+ */
+async function secretFingerprint(secret: string): Promise<string> {
+  const data = new TextEncoder().encode(`sara:${secret}`);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function ensureWebhooks(env: Env, db: DB, origin: string): Promise<void> {
-  // Telegram: setWebhook идемпотентен, но лишний раз не дёргаем — сверяем текущий адрес
+  // Telegram: setWebhook идемпотентен, но лишний раз не дёргаем — сверяем адрес
+  // И ОТПЕЧАТОК СЕКРЕТА: сменили секрет — надо переподписаться, иначе бот замолчит.
   try {
     const want = `${origin}/webhook`;
+    const fp = await secretFingerprint(env.WEBHOOK_SECRET ?? "");
+    const knownFp = await db.getSetting("tg_hook_fp");
     const info = (await (await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getWebhookInfo`)).json()) as {
       result?: { url?: string };
     };
-    if (info.result?.url !== want) {
+    if (info.result?.url !== want || knownFp !== fp) {
       const bot = createBot(env, origin);
       await bot.api.setWebhook(want, { secret_token: env.WEBHOOK_SECRET, allowed_updates: ["message", "callback_query"] });
       await bot.api.setMyCommands(COMMANDS);
       await bot.api.setChatMenuButton({ menu_button: { type: "web_app", text: "📲 Открыть", web_app: { url: origin } } });
       await db.setSetting("tg_init_at", new Date().toISOString());
+      await db.setSetting("tg_hook_fp", fp);
     }
   } catch (e) {
     console.error("tg webhook ensure failed", e);
@@ -146,11 +164,14 @@ async function ensureWebhooks(env: Env, db: DB, origin: string): Promise<void> {
   try {
     const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
     const want = `${origin}/max/webhook`;
+    const fp = await secretFingerprint(env.MAX_WEBHOOK_SECRET);
+    const knownFp = await db.getSetting("max_hook_fp");
     const subs = (await client.getSubscriptions()) as { subscriptions?: { url?: string }[] };
     const has = (subs?.subscriptions ?? []).some((x) => x.url === want);
-    if (!has) {
+    if (!has || knownFp !== fp) {
       await client.subscribe(want, env.MAX_WEBHOOK_SECRET, MAX_UPDATE_TYPES);
       await db.setSetting("max_init_at", new Date().toISOString());
+      await db.setSetting("max_hook_fp", fp);
       console.log("max webhook subscribed", want);
     }
   } catch (e) {
