@@ -93,6 +93,14 @@ async function runSupplementReminders(env: Env, db: DB, tz: number): Promise<voi
     try {
       if (c.start_date && today < c.start_date) continue;
       if (c.days && c.start_date && today >= addDays(c.start_date, c.days)) continue;
+      // Курс не каждый день: "1,3,5" — только Пн, Ср, Пт. День недели берём из
+      // самой даты, а не из времени сервера: воркер живёт в UTC, и у человека
+      // с другим часовым поясом день недели уехал бы на сутки.
+      const wd = (c.weekdays ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      if (wd.length) {
+        const dow = new Date(`${today}T00:00:00Z`).getUTCDay();   // 0 = Вс
+        if (!wd.includes(String(dow === 0 ? 7 : dow))) continue;  // 1 = Пн … 7 = Вс
+      }
       const slots = JSON.parse(c.times || "[]") as string[];
       for (const slot of slots) {
         const [hh, mm] = slot.split(":").map(Number);

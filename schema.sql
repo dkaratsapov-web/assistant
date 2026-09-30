@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS supplement (
   times      TEXT DEFAULT '[]',      -- JSON-массив "HH:MM"
   start_date TEXT DEFAULT '',
   days       INTEGER DEFAULT 0,      -- 0 = бессрочно
+  weekdays   TEXT DEFAULT '',        -- дни недели "1,3,5" (1=Пн..7=Вс); пусто = каждый день
   notes      TEXT DEFAULT '',
   active     INTEGER DEFAULT 1,
   created_at TEXT NOT NULL

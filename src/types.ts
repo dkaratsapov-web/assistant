@@ -137,7 +137,8 @@ export interface SupplementRow {
   dose: string;
   times: string; // JSON массив "HH:MM"
   start_date: string;
-  days: number; // 0 = бессрочно
+  days: number;
+  weekdays?: string;            // "1,3,5" (1=Пн..7=Вс); пусто — каждый день // 0 = бессрочно
   notes: string;
   active: number;
   created_at: string;

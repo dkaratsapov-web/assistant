@@ -346,10 +346,30 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const tzs = tzOffsetOf(env);
     const dStr = (off: number) => new Date(Date.parse(startOfLocalDayOffsetIso(tzs, off)) + tzs * 3600_000).toISOString().slice(0, 10);
     const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
-    const activeOn = (c: { start_date: string; days: number }, d: string) => {
+    /**
+     * Идёт ли курс в этот день. Кроме срока теперь смотрим дни недели:
+     * пустое поле — каждый день, иначе «1,3,5» (1=Пн … 7=Вс).
+     *
+     * День недели считаем по самой дате, а не по new Date().getDay() от
+     * локального времени сервера: воркер живёт в UTC, и у человека с другим
+     * часовым поясом день недели уехал бы на сутки.
+     */
+    const weekdayOf = (d: string) => {
+      const wd = new Date(`${d}T00:00:00Z`).getUTCDay();   // 0=Вс
+      return wd === 0 ? 7 : wd;                            // 1=Пн … 7=Вс
+    };
+    const activeOn = (c: { start_date: string; days: number; weekdays?: string }, d: string) => {
       if (c.start_date && d < c.start_date) return false;
       if (c.days && c.start_date && d >= addDays(c.start_date, c.days)) return false;
+      const wd = (c.weekdays ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      if (wd.length && !wd.includes(String(weekdayOf(d)))) return false;
       return true;
+    };
+    /** Дни недели из запроса: только 1..7, по возрастанию, без повторов. */
+    const cleanWeekdays = (v: unknown): string => {
+      const list = Array.isArray(v) ? v : String(v ?? "").split(",");
+      const set = new Set(list.map((x) => parseInt(String(x), 10)).filter((n) => n >= 1 && n <= 7));
+      return set.size === 7 ? "" : [...set].sort((a, b) => a - b).join(",");
     };
 
     // GET /api/supplements — курсы + чек-лист на сегодня + адхеренс за 7 дней
@@ -376,16 +396,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         }
         adherence.push({ date: d, taken, total });
       }
-      return json({ supplements: list.map((c) => ({ id: c.id, name: c.name, dose: c.dose, times: JSON.parse(c.times || "[]"), days: c.days, start_date: c.start_date, notes: c.notes })), today: { date: today, items }, adherence });
+      return json({ supplements: list.map((c) => ({ id: c.id, name: c.name, dose: c.dose, times: JSON.parse(c.times || "[]"), days: c.days, weekdays: c.weekdays ?? "", start_date: c.start_date, notes: c.notes })), today: { date: today, items }, adherence });
     }
 
     // POST /api/supplements — добавить курс
     if (path === "/api/supplements" && request.method === "POST") {
-      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; notes?: string };
+      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; weekdays?: unknown; notes?: string };
       const name = (b.name ?? "").trim();
       if (!name) return json({ error: "empty_name" }, 400);
       const times = (Array.isArray(b.times) ? b.times : []).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, "0"));
-      const id = await db.addSupplement(uid, { name, dose: (b.dose ?? "").trim(), times, startDate: dStr(0), days: Math.max(0, Math.round(+(b.days ?? 0) || 0)), notes: (b.notes ?? "").trim() });
+      const id = await db.addSupplement(uid, { name, dose: (b.dose ?? "").trim(), times, startDate: dStr(0), days: Math.max(0, Math.round(+(b.days ?? 0) || 0)), weekdays: cleanWeekdays(b.weekdays), notes: (b.notes ?? "").trim() });
       return json({ ok: true, id });
     }
 
@@ -401,12 +421,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     // POST /api/supplements/{id} — изменить / пауза
     const supEdit = path.match(/^\/api\/supplements\/(\d+)$/);
     if (supEdit && request.method === "POST") {
-      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number };
-      const fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number } = {};
+      const b = (await request.json()) as { name?: string; dose?: string; times?: string[]; days?: number; weekdays?: unknown; notes?: string; active?: number };
+      const fields: { name?: string; dose?: string; times?: string[]; days?: number; weekdays?: string; notes?: string; active?: number } = {};
       if (b.name !== undefined) fields.name = b.name.trim();
       if (b.dose !== undefined) fields.dose = b.dose;
       if (b.times !== undefined) fields.times = (Array.isArray(b.times) ? b.times : []).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, "0"));
       if (b.days !== undefined) fields.days = Math.max(0, Math.round(+b.days || 0));
+      if (b.weekdays !== undefined) fields.weekdays = cleanWeekdays(b.weekdays);
       if (b.notes !== undefined) fields.notes = b.notes;
       if (b.active !== undefined) fields.active = b.active ? 1 : 0;
       if (!(await db.updateSupplement(parseInt(supEdit[1], 10), uid, fields))) return json({ error: "not_found" }, 404);

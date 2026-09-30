@@ -1163,21 +1163,75 @@
         }).join("") + `</div>`;
         h += `<div class="section-title">Курсы</div>`;
         h += d.supplements.length
-          ? d.supplements.map((c) => `<div class="card item"><div class="top"><div class="name">${esc(c.name)}</div></div><div class="meta">${c.dose?`<span class="pill">${esc(c.dose)}</span>`:''}${(c.times||[]).map((t)=>`<span class="pill">${t}</span>`).join("")}<span class="pill">${c.days?c.days+' дн.':'бессрочно'}</span></div><div class="actions"><button class="btn" onclick="editSup(${c.id})">Изменить</button><button class="btn ghost" onclick="delSup(${c.id})">✕</button></div></div>`).join("")
+          ? d.supplements.map((c) => `<div class="card item"><div class="top"><div class="name">${esc(c.name)}</div></div><div class="meta">${c.dose?`<span class="pill">${esc(c.dose)}</span>`:''}${(c.times||[]).map((t)=>`<span class="pill">${t}</span>`).join("")}<span class="pill">${c.days?c.days+' дн.':'бессрочно'}</span>${c.weekdays?`<span class="pill strong">${supDaysLabel(c.weekdays)}</span>`:''}</div><div class="actions"><button class="btn" onclick="editSup(${c.id})">Изменить</button><button class="btn ghost" onclick="delSup(${c.id})">✕</button></div></div>`).join("")
           : `<div class="card"><div style="color:var(--muted);text-align:center;padding:6px">Курсов нет. Добавь первый.</div></div>`;
         if (box) box.innerHTML = h;
       } catch (e) { if (box) box.innerHTML = `<div class="card"><div style="padding:6px;color:var(--muted)">Ошибка: ${esc(e.message||e)}</div></div>`; }
     }
+    /** «1,3,5» → «Пн · Ср · Пт»; будни и выходные подписываем словом. */
+    function supDaysLabel(wd) {
+      const list = String(wd || "").split(",").map((x) => +x).filter((n) => n >= 1 && n <= 7).sort((a, b) => a - b);
+      if (!list.length || list.length === 7) return "";
+      if (list.join() === "1,2,3,4,5") return "по будням";
+      if (list.join() === "6,7") return "выходные";
+      const NAMES = { 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Вс" };
+      return list.map((n) => NAMES[n]).join(" · ");
+    }
+
     window.toggleSup = async (supId, slot) => { haptic(); try { await api("/supplements/check", { method: "POST", body: JSON.stringify({ supId, slot }) }); } catch (e) {} loadSupplements(); };
     function supForm(title, c, save) {
+      // Пустой список дней в базе означает «каждый день» — так курс и заводится
+      // по умолчанию, чтобы обычный случай не требовал лишних нажатий.
+      const picked = String((c && c.weekdays) || "").split(",").map((x) => +x).filter((n) => n >= 1 && n <= 7);
+      const everyDay = picked.length === 0;
       openSheet(`<h3>${title}</h3>
         <div class="field"><label>Название</label><div class="with-mic"><input id="s-name" value="${c?esc(c.name):''}" placeholder="напр. Витамин D">${micButton("s-name")}</div></div>
         <div class="field"><label>Дозировка</label><input id="s-dose" value="${c?esc(c.dose||''):''}" placeholder="напр. 5000 МЕ, 1 капсула"></div>
         <div class="field"><label>Время приёма (через запятую)</label><input id="s-times" value="${c?(c.times||[]).join(', '):'09:00'}" placeholder="09:00, 21:00"></div>
         <div class="field"><label>Длительность, дней (0 — бессрочно)</label><input id="s-days" type="number" inputmode="numeric" value="${c?c.days:0}"></div>
+        <div class="field"><label>Дни приёма</label>
+          <div class="seg" id="s-mode">
+            <div class="${everyDay?'on':''}" onclick="supMode(1)">Каждый день</div>
+            <div class="${everyDay?'':'on'}" onclick="supMode(0)">По дням недели</div>
+          </div>
+          <div class="chips" id="s-wd" style="margin-top:8px;${everyDay?'display:none':''}">
+            ${WEEKDAYS.map(([n, l]) => `<div class="chip ${picked.includes(n)?'on':''}" onclick="supWd(${n})" data-wd="${n}">${l}</div>`).join("")}
+          </div>
+        </div>
         <div class="actions"><button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="${save}">Сохранить</button></div>`);
     }
-    function supBody() { return { name: $("s-name").value.trim(), dose: $("s-dose").value, times: ($("s-times").value||"").split(",").map((x)=>x.trim()).filter(Boolean), days: +$("s-days").value||0 }; }
+    /** Пн..Вс. Номера как в ISO: 1 = понедельник, 7 = воскресенье. */
+    const WEEKDAYS = [[1,"Пн"],[2,"Вт"],[3,"Ср"],[4,"Чт"],[5,"Пт"],[6,"Сб"],[7,"Вс"]];
+    window.supMode = (every) => {
+      const seg = $("s-mode"), wd = $("s-wd");
+      if (!seg || !wd) return;
+      [...seg.children].forEach((el, i) => el.classList.toggle("on", i === (every ? 0 : 1)));
+      wd.style.display = every ? "none" : "";
+      // Переключились на «по дням» и ничего не выбрано — ставим сегодняшний день,
+      // иначе пустой выбор молча означал бы «каждый день» и сбивал с толку.
+      if (!every && !wd.querySelector(".chip.on")) {
+        const today = new Date().getDay() || 7;
+        const chip = wd.querySelector(`[data-wd="${today}"]`);
+        if (chip) chip.classList.add("on");
+      }
+      haptic();
+    };
+    window.supWd = (n) => {
+      const chip = document.querySelector(`#s-wd [data-wd="${n}"]`);
+      if (chip) chip.classList.toggle("on");
+      haptic();
+    };
+    function supBody() {
+      const everyDay = $("s-mode") && $("s-mode").children[0].classList.contains("on");
+      const days = everyDay ? [] : [...document.querySelectorAll("#s-wd .chip.on")].map((el) => +el.dataset.wd);
+      return {
+        name: $("s-name").value.trim(),
+        dose: $("s-dose").value,
+        times: ($("s-times").value||"").split(",").map((x)=>x.trim()).filter(Boolean),
+        days: +$("s-days").value||0,
+        weekdays: days,
+      };
+    }
     window.openAddSup = () => supForm("Новый курс", null, "saveSup()");
     window.saveSup = async () => { const b = supBody(); if (!b.name) return tg.showAlert("Введи название"); try { await api("/supplements", { method: "POST", body: JSON.stringify(b) }); } catch (e) { return tg.showAlert("Ошибка"); } openSupplements(); };
     window.editSup = (id) => { const c = supCache.find((x) => x.id === id); if (c) supForm("Изменить курс", c, `saveSupEdit(${id})`); };

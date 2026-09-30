@@ -168,6 +168,54 @@ console.log("\nСценарий: создать задачу → закрыть 
   await ctx.close();
 }
 
+/* ---------- Бады: дни приёма ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: курс бадов по дням недели");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+  await page.evaluate(() => window.openSupplements());
+  await page.waitForSelector("#s-name, .card .name", { timeout: 6000 }).catch(() => {});
+  // Курс «Магний» идёт по Пн/Ср/Пт — это должно быть видно на карточке
+  const label = await page.evaluate(() => document.body.innerText);
+  check(/Пн · Ср · Пт/.test(label), "дни приёма видны на карточке курса");
+
+  // В форме нового курса по умолчанию «каждый день», дни спрятаны
+  await page.evaluate(() => window.openAddSup());
+  await page.waitForSelector("#s-mode", { timeout: 6000 });
+  check(await page.evaluate(() => $("s-mode").children[0].classList.contains("on")), "по умолчанию — каждый день");
+  check(await page.evaluate(() => $("s-wd").style.display === "none"), "выбор дней спрятан, пока он не нужен");
+
+  // Переключаем на «по дням недели» — день подставляется сам
+  await page.evaluate(() => window.supMode(0));
+  check(await page.evaluate(() => $("s-wd").style.display !== "none"), "выбор дней появился");
+  check(await page.evaluate(() => document.querySelectorAll("#s-wd .chip.on").length === 1), "текущий день выбран сам");
+
+  // Выбираем Пн и Пт, снимаем подставленный — в теле запроса должны быть только они
+  const body = await page.evaluate(() => {
+    document.querySelectorAll("#s-wd .chip.on").forEach((c) => c.classList.remove("on"));
+    document.querySelector('#s-wd [data-wd="1"]').classList.add("on");
+    document.querySelector('#s-wd [data-wd="5"]').classList.add("on");
+    $("s-name").value = "Омега";
+    return supBody();
+  });
+  check(JSON.stringify(body.weekdays) === "[1,5]", "выбранные дни уходят на сервер", JSON.stringify(body.weekdays));
+
+  // Возврат на «каждый день» очищает список
+  await page.evaluate(() => window.supMode(1));
+  const every = await page.evaluate(() => supBody().weekdays);
+  check(Array.isArray(every) && every.length === 0, "«каждый день» — пустой список дней");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
 console.log(failed ? `\nДымовой тест провален: ${failed} проверок` : `\nДымовой тест пройден полностью`);

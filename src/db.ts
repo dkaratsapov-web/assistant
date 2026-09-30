@@ -292,6 +292,8 @@ export class DB {
       // канал, из которого пришёл пользователь (tg | max), и его настоящий id в этом канале
       "ALTER TABLE users ADD COLUMN channel TEXT DEFAULT 'tg'",
       "ALTER TABLE users ADD COLUMN ext_id INTEGER",
+      // дни недели приёма бада: "" — каждый день, иначе "1,3,5" (1=Пн..7=Вс)
+      "ALTER TABLE supplement ADD COLUMN weekdays TEXT DEFAULT ''",
     ];
     for (const sql of alters) {
       try {
@@ -847,7 +849,7 @@ export class DB {
     if (ready.supp) return;
     await this.d1
       .prepare(
-        "CREATE TABLE IF NOT EXISTS supplement (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, dose TEXT DEFAULT '', times TEXT DEFAULT '[]', start_date TEXT DEFAULT '', days INTEGER DEFAULT 0, notes TEXT DEFAULT '', active INTEGER DEFAULT 1, created_at TEXT NOT NULL)"
+        "CREATE TABLE IF NOT EXISTS supplement (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, dose TEXT DEFAULT '', times TEXT DEFAULT '[]', start_date TEXT DEFAULT '', days INTEGER DEFAULT 0, weekdays TEXT DEFAULT '', notes TEXT DEFAULT '', active INTEGER DEFAULT 1, created_at TEXT NOT NULL)"
       )
       .run();
     await this.d1
@@ -856,11 +858,11 @@ export class DB {
     ready.supp = true;
   }
 
-  async addSupplement(userId: number, s: { name: string; dose?: string; times?: string[]; startDate?: string; days?: number; notes?: string }): Promise<number> {
+  async addSupplement(userId: number, s: { name: string; dose?: string; times?: string[]; startDate?: string; days?: number; weekdays?: string; notes?: string }): Promise<number> {
     await this.ensureSupp();
     const res = await this.d1
-      .prepare("INSERT INTO supplement (user_id, name, dose, times, start_date, days, notes, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)")
-      .bind(userId, s.name, s.dose ?? "", JSON.stringify(s.times ?? []), s.startDate ?? "", s.days ?? 0, s.notes ?? "", nowIso())
+      .prepare("INSERT INTO supplement (user_id, name, dose, times, start_date, days, weekdays, notes, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")
+      .bind(userId, s.name, s.dose ?? "", JSON.stringify(s.times ?? []), s.startDate ?? "", s.days ?? 0, s.weekdays ?? "", s.notes ?? "", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
@@ -881,7 +883,7 @@ export class DB {
     return results ?? [];
   }
 
-  async updateSupplement(id: number, userId: number, fields: { name?: string; dose?: string; times?: string[]; days?: number; notes?: string; active?: number }): Promise<boolean> {
+  async updateSupplement(id: number, userId: number, fields: { name?: string; dose?: string; times?: string[]; days?: number; weekdays?: string; notes?: string; active?: number }): Promise<boolean> {
     await this.ensureSupp();
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -889,6 +891,7 @@ export class DB {
     if (fields.dose !== undefined) { sets.push("dose = ?"); binds.push(fields.dose); }
     if (fields.times !== undefined) { sets.push("times = ?"); binds.push(JSON.stringify(fields.times)); }
     if (fields.days !== undefined) { sets.push("days = ?"); binds.push(fields.days); }
+    if (fields.weekdays !== undefined) { sets.push("weekdays = ?"); binds.push(fields.weekdays); }
     if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
     if (fields.active !== undefined) { sets.push("active = ?"); binds.push(fields.active); }
     if (!sets.length) return false;
