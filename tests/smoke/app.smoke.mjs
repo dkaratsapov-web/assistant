@@ -113,6 +113,17 @@ console.log("\nСценарий: создать задачу → закрыть 
     step("задача появилась в списке", afterCreate.includes("Задача из теста"));
     step("описание видно на карточке", afterCreate.includes("Описание из теста"));
 
+    // Набрано строчными и с кривыми знаками — в списке должно быть грамотно
+    await page.evaluate(() => window.openAddTask());
+    await page.waitForSelector("#f-title", { timeout: 5000 });
+    await page.fill("#f-title", "позвонить в банк , уточнить лимит.");
+    await page.click("text=Создать");
+    await page.waitForTimeout(900);
+    const tidy = await page.textContent("#view");
+    step("название выправлено до грамотного", tidy.includes("Позвонить в банк, уточнить лимит"),
+      (tidy.match(/[^\n]*банк[^\n]*/) || [""])[0].slice(0, 80));
+    step("кривого варианта в списке нет", !tidy.includes("позвонить в банк ,"));
+
     // закрываем её
     const id = await page.evaluate(() => {
       const t = (window.tasksCacheForTest || []);

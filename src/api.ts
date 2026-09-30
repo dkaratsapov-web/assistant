@@ -30,6 +30,7 @@ import {
 } from "./types";
 import { lookupWeb } from "./search";
 import { bytesToBase64, nowContext } from "./utils";
+import { spellTitle } from "./spell";
 import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
@@ -236,6 +237,17 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   const isOwner = user.role === ROLE_OWNER;
   const uid = user.user_id;
+
+  // Имена клиентов нужны проверке орфографии: свои названия («Ромашка»,
+  // «ДиАвто69») словарь не знает и норовит «исправить». Читаем их лениво —
+  // только когда действительно что-то пишем.
+  let knownNames: string[] | null = null;
+  const clientNames = async (): Promise<string[]> => {
+    if (!knownNames) knownNames = (await db.listClients(uid)).map((c) => c.name);
+    return knownNames;
+  };
+  /** Название по-человечески: заглавная буква, знаки, орфография. */
+  const nice = async (text: string): Promise<string> => await spellTitle(text, await clientNames());
 
   // GET /api/me
   if (path === "/api/me" && request.method === "GET") {
@@ -1019,12 +1031,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const body = (await request.json()) as {
       title?: string; description?: string; due?: string; client_id?: number | null; scope?: string; priority?: number; repeat?: string; grp?: string;
     };
-    const title = (body.title ?? "").trim();
+    const title = await nice((body.title ?? "").trim());
     if (!title) return json({ error: "empty_title" }, 400);
     const dueAt = body.due ? readDue(body.due, tz) : null;
     const scope = body.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
     const id = await db.addTask({
-      title, description: (body.description ?? "").trim().slice(0, 2000), creatorId: uid, assigneeId: uid, scope,
+      title, description: (await nice((body.description ?? "").trim())).slice(0, 2000), creatorId: uid, assigneeId: uid, scope,
       clientId: body.client_id ?? null, priority: body.priority ? 1 : 0, dueAt,
       repeat: validRepeat(body.repeat),
     });
@@ -1048,7 +1060,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const body = (await request.json()) as { title?: string; due?: string; scope?: string; priority?: number; grp?: string };
     const fields: { title?: string; dueAt?: string | null; scope?: string; priority?: number; grp?: string } = {};
     if (body.title !== undefined) {
-      const t = body.title.trim();
+      const t = await nice(body.title.trim());
       if (!t) return json({ error: "empty_title" }, 400);
       fields.title = t;
     }
@@ -1293,7 +1305,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // POST /api/events
   if (path === "/api/events" && request.method === "POST") {
     const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; telemost?: boolean; client_id?: number | null };
-    const title = (body.title ?? "").trim();
+    const title = await nice((body.title ?? "").trim());
     if (!title) return json({ error: "empty_title" }, 400);
     const startsAt = body.at ? localInputToUtc(body.at, tz) : null;
     if (!startsAt) return json({ error: "bad_date" }, 400);
@@ -1318,7 +1330,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const body = (await request.json()) as { title?: string; at?: string; location?: string; notes?: string; client_id?: number | null };
     const fields: { title?: string; startsAt?: string; location?: string; notes?: string; clientId?: number | null } = {};
     if (body.title !== undefined) {
-      const t = body.title.trim();
+      const t = await nice(body.title.trim());
       if (!t) return json({ error: "empty_title" }, 400);
       fields.title = t;
     }

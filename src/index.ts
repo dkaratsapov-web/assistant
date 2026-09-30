@@ -11,7 +11,8 @@ import { handleMaxUpdate } from "./max/bot";
 import { CHANNEL_MAX } from "./max/ids";
 import { buildDigest } from "./reports";
 import { Env, ROLE_MEMBER, ROLE_OWNER, User } from "./types";
-import { formatDue, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { formatDue, tidyTitle, formatEventTime, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
+import { spellTitle } from "./spell";
 
 const MAX_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
@@ -457,6 +458,28 @@ export default {
       try {
         const hits = await webSearch(env, q, 3);
         body.результат = hits.length ? hits.map((h) => `${h.title} — ${h.url}`) : "поиск ответил, но ничего не нашёл";
+      } catch (e) {
+        body.ошибка = (e as Error).message;
+      }
+      return new Response(JSON.stringify(body, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    // Живая проверка орфографии: что именно отвечает Яндекс.Спеллер и что из
+    // его подсказок мы согласились применить. Нужна потому, что из контейнера
+    // разработки сервис недоступен — увидеть настоящий ответ можно только из боя.
+    if (url.pathname === "/diag/spell") {
+      if (!maxAdminAllowed(url, env)) {
+        return new Response("forbidden: добавь ?secret=WEBHOOK_SECRET", { status: 403 });
+      }
+      const text = url.searchParams.get("text") || "сделать атчёт для ромашки и праверить цыфры";
+      const body: Record<string, unknown> = { запрос: text, оформлено: tidyTitle(text) };
+      try {
+        const res = await fetch(
+          `https://speller.yandex.net/services/spellservice.json/checkText?lang=ru&options=534&text=${encodeURIComponent(tidyTitle(text))}`
+        );
+        body.код = res.status;
+        const raw = await res.text();
+        body.ответ = raw.slice(0, 2000);
+        body.итог = await spellTitle(text);
       } catch (e) {
         body.ошибка = (e as Error).message;
       }

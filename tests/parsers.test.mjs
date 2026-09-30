@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch, stripClientName, splitWhen, guessScope } from "../.test-build/utils.js";
+import { parseDue, matchWaterMl, mealFromText, wordRe, parseRepeat, nextDue, repeatLabel, keyWords, matchScore, bestMatch, stripClientName, splitWhen, guessScope, tidyTitle, tidyName } from "../.test-build/utils.js";
 import { localRoute, looksLikeFoodText, mentionedClient, parseCorrection } from "../.test-build/intent.js";
 import { PHRASES, pickExamples, pickLessons, renderExamples } from "../.test-build/phrases.js";
 import { needsSearch, parseSearchXml, renderHits, decodeBase64 } from "../.test-build/search.js";
@@ -636,4 +636,99 @@ test("поля задачи: описание и важность", () => {
   assert.equal(parseTaskFields("это срочно").priority, 1);
   assert.equal(parseTaskFields("сними важность").priority, 0);
   assert.deepEqual(parseTaskFields("позвонить в банк"), {});
+});
+
+/* ---------- Грамотная запись названий ---------- */
+
+test("название пишется с заглавной буквы", () => {
+  assert.equal(tidyTitle("позвонить в банк"), "Позвонить в банк");
+  assert.equal(tidyTitle("  отчёт по директу  "), "Отчёт по директу");
+  // уже грамотное не портим
+  assert.equal(tidyTitle("Позвонить в банк"), "Позвонить в банк");
+  // повторный вызов ничего не меняет
+  assert.equal(tidyTitle(tidyTitle("позвонить в банк")), "Позвонить в банк");
+});
+
+test("знаки расставляются по-человечески", () => {
+  assert.equal(tidyTitle("оплата , потом отчёт"), "Оплата, потом отчёт");
+  assert.equal(tidyTitle("оплата,потом отчёт"), "Оплата, потом отчёт");
+  assert.equal(tidyTitle("оплата,, потом"), "Оплата, потом");
+  assert.equal(tidyTitle("срочно !!!!"), "Срочно!!");
+  assert.equal(tidyTitle("подумать..."), "Подумать…");
+  assert.equal(tidyTitle("отчёт  по   директу"), "Отчёт по директу");
+});
+
+test("точка на конце названия не нужна, а сокращения целы", () => {
+  assert.equal(tidyTitle("купить хлеб."), "Купить хлеб");
+  assert.equal(tidyTitle("купить хлеб, молоко и т. д."), "Купить хлеб, молоко и т. д.");
+  // вопрос и восклицание — часть смысла, их оставляем
+  assert.equal(tidyTitle("успеем?"), "Успеем?");
+});
+
+test("второе предложение тоже с заглавной", () => {
+  assert.equal(tidyTitle("позвонить в банк. уточнить лимит"), "Позвонить в банк. Уточнить лимит");
+  assert.equal(tidyTitle("сделать отчёт.проверить цифры"), "Сделать отчёт. Проверить цифры");
+});
+
+test("кавычки — ёлочками", () => {
+  assert.equal(tidyTitle('отчёт по "ромашке"'), "Отчёт по «ромашке»");
+});
+
+test("мягкий знак в начальном глаголе", () => {
+  assert.equal(tidyTitle("созвонится с ромашкой"), "Созвониться с ромашкой");
+  assert.equal(tidyTitle("встретится в офисе"), "Встретиться в офисе");
+  assert.equal(tidyTitle("договорится о цене"), "Договориться о цене");
+  // не глагол из списка — не выдумываем
+  assert.equal(tidyTitle("получится ли"), "Получится ли");
+});
+
+test("частые опечатки исправляются", () => {
+  assert.equal(tidyTitle("зделать отчёт"), "Сделать отчёт");
+  assert.equal(tidyTitle("оплата в течении часа"), "Оплата в течение часа");
+});
+
+test("имя клиента пишется с заглавных", () => {
+  assert.equal(tidyName("глобал стекло"), "Глобал Стекло");
+  assert.equal(tidyName("ооо ромашка"), "ООО Ромашка");
+  assert.equal(tidyName("ип петров"), "ИП Петров");
+  assert.equal(tidyName("школа в дмитровском"), "Школа в Дмитровском");
+  assert.equal(tidyName("санкт-петербург медиа"), "Санкт-Петербург Медиа");
+  // руками поставленный регистр не ломаем: иначе имя перестанет находиться
+  assert.equal(tidyName("ДиАвто69"), "ДиАвто69");
+  assert.equal(tidyName("iPhone сервис"), "iPhone Сервис");
+  assert.equal(tidyName("  два   пробела "), "Два Пробела");
+});
+
+test("пустое остаётся пустым", () => {
+  assert.equal(tidyTitle(""), "");
+  assert.equal(tidyTitle("   "), "");
+  assert.equal(tidyName(""), "");
+});
+
+test("в описании из нескольких предложений точка остаётся", () => {
+  assert.equal(
+    tidyTitle("нужно собрать цифры за сентябрь. сравнить с августом."),
+    "Нужно собрать цифры за сентябрь. Сравнить с августом."
+  );
+  // одна фраза — точка лишняя
+  assert.equal(tidyTitle("собрать цифры за сентябрь."), "Собрать цифры за сентябрь");
+});
+
+test("ссылки чистка не ломает", () => {
+  // Боевой случай: в заметках встречи лежит ссылка на Телемост
+  const notes = "🎥 Телемост: https://telemost.yandex.ru/j/123456";
+  assert.equal(tidyTitle(notes), notes);
+  assert.equal(
+    tidyTitle("созвон, ссылка https://telemost.yandex.ru/j/9 в 15:00"),
+    "Созвон, ссылка https://telemost.yandex.ru/j/9 в 15:00"
+  );
+  // домен без схемы тоже цел
+  assert.equal(tidyTitle("настроить метрику на romashka.ru"), "Настроить метрику на romashka.ru");
+  // почта цела
+  assert.equal(tidyTitle("написать на info@romashka.ru"), "Написать на info@romashka.ru");
+  // а обычный текст рядом со ссылкой всё равно выправляется
+  assert.equal(
+    tidyTitle("позвонить , потом открыть https://ya.ru"),
+    "Позвонить, потом открыть https://ya.ru"
+  );
 });

@@ -20,7 +20,7 @@ import {
   User,
 } from "./types";
 
-import { nextDue } from "./utils";
+import { nextDue, tidyName, tidyTitle } from "./utils";
 
 const nowIso = () => new Date().toISOString();
 
@@ -213,7 +213,7 @@ export class DB {
         `INSERT INTO clients (owner_id, name, platforms, status, budget, contact, notes, pay_amount, pay_due, grp, kind, created_at)
          VALUES (?, ?, ?, 'active', ?, ?, '', ?, ?, ?, ?, ?)`
       )
-      .bind(ownerId, name, platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", opts.grp ?? "", opts.kind ?? "client", nowIso())
+      .bind(ownerId, tidyName(name), platforms, budget, opts.contact ?? "", opts.payAmount ?? "", opts.payDue ?? "", opts.grp ?? "", opts.kind ?? "client", nowIso())
       .run();
     return res.meta.last_row_id as number;
   }
@@ -260,7 +260,7 @@ export class DB {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
-    if (fields.name !== undefined) { sets.push("name = ?"); binds.push(fields.name); }
+    if (fields.name !== undefined) { sets.push("name = ?"); binds.push(tidyName(fields.name)); }
     if (fields.platforms !== undefined) { sets.push("platforms = ?"); binds.push(fields.platforms); }
     if (fields.grp !== undefined) { sets.push("grp = ?"); binds.push(fields.grp); }
     if (fields.kind !== undefined) { sets.push("kind = ?"); binds.push(fields.kind); }
@@ -337,8 +337,8 @@ export class DB {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
       )
       .bind(
-        opts.title,
-        opts.description ?? "",
+        tidyTitle(opts.title),
+        tidyTitle(opts.description ?? ""),
         opts.scope ?? "work",
         opts.grp ?? "",
         opts.clientId ?? null,
@@ -470,8 +470,8 @@ export class DB {
   ): Promise<void> {
     const sets: string[] = [];
     const binds: unknown[] = [];
-    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
-    if (fields.description !== undefined) { sets.push("description = ?"); binds.push(fields.description); }
+    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(tidyTitle(fields.title)); }
+    if (fields.description !== undefined) { sets.push("description = ?"); binds.push(tidyTitle(fields.description)); }
     if (fields.dueAt !== undefined) { sets.push("due_at = ?"); binds.push(fields.dueAt); }
     if (fields.scope !== undefined) { sets.push("scope = ?"); binds.push(fields.scope); }
     if (fields.priority !== undefined) { sets.push("priority = ?"); binds.push(fields.priority); }
@@ -646,10 +646,10 @@ export class DB {
       )
       .bind(
         opts.userId,
-        opts.title,
+        tidyTitle(opts.title),
         opts.startsAt,
-        opts.location ?? "",
-        opts.notes ?? "",
+        tidyTitle(opts.location ?? ""),
+        tidyTitle(opts.notes ?? ""),
         opts.remindBeforeMin ?? 30,
         opts.clientId ?? null,
         nowIso()
@@ -700,10 +700,10 @@ export class DB {
     await this.ensureSchema();
     const sets: string[] = [];
     const binds: unknown[] = [];
-    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(fields.title); }
+    if (fields.title !== undefined) { sets.push("title = ?"); binds.push(tidyTitle(fields.title)); }
     if (fields.startsAt !== undefined) { sets.push("starts_at = ?"); binds.push(fields.startsAt); }
-    if (fields.location !== undefined) { sets.push("location = ?"); binds.push(fields.location); }
-    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(fields.notes); }
+    if (fields.location !== undefined) { sets.push("location = ?"); binds.push(tidyTitle(fields.location)); }
+    if (fields.notes !== undefined) { sets.push("notes = ?"); binds.push(tidyTitle(fields.notes)); }
     if (fields.clientId !== undefined) { sets.push("client_id = ?"); binds.push(fields.clientId); }
     if (!sets.length) return false;
     binds.push(id, userId);

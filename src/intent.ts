@@ -9,7 +9,8 @@ import { answerQuery, parseQuery } from "./queries";
 import { parseAppearance, renderPrefsChange } from "./appearance";
 import { CLIENT_FIELD_RU, hasFields, parseClientFields, parseTaskFields } from "./cards";
 import { Env, Event, SCOPE_PERSONAL, SCOPE_WORK, Task, TASK_DONE, TASK_FAILED, TASK_IN_PROGRESS, TASK_OPEN } from "./types";
-import { formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, stripClientName, WB_END, WB_START, wordRe } from "./utils";
+import { spellTitle } from "./spell";
+import { tidyName, tidyTitle, formatDue, formatEventTime, matchWaterMl, mealByHour, mealFromText, nowContext, parseWaterMl, resolveWhen, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf, parseRepeat, repeatLabel, bestMatch, keyWords, isTimeWord, splitWhen, guessScope, stripClientName, WB_END, WB_START, wordRe } from "./utils";
 
 export const MEAL_RU: Record<string, string> = { breakfast: "завтрак", lunch: "обед", dinner: "ужин", snack: "перекус" };
 
@@ -69,6 +70,20 @@ export async function performIntent(
   const remember = async (kind: string, id: number) => {
     if (!rawText) return;
     await db.setSetting(`last:${uid}`, JSON.stringify({ phrase: rawText, kind, id }));
+  };
+
+  /**
+   * Название по-человечески: заглавная буква, знаки, орфография.
+   *
+   * Голосом всё приходит строчными и без знаков — «созвонится с ромашкой по
+   * оплате». В списке это выглядит неряшливо, поэтому правим до записи, чтобы
+   * и в подтверждении человек увидел уже грамотный текст.
+   */
+  const nice = async (text: string): Promise<string> => {
+    const t = String(text ?? "").trim();
+    if (!t) return t;
+    // Свои названия словарь не знает и норовит «исправить» — защищаем их
+    return await spellTitle(t, (await db.listClients(uid)).map((c) => c.name));
   };
 
   const findClient = async (): Promise<{ id: number; name: string } | null> => {
@@ -229,7 +244,7 @@ export async function performIntent(
     // Клиента человек называет, чтобы Сара поняла, о ком речь. В названии он не
     // нужен: рядом и так стоит ярлык с именем, и получается «Отчёт для Ромашки
     // · Ромашка».
-    const clean = client ? stripClientName(title, client.name) : title;
+    const clean = await nice(client ? stripClientName(title, client.name) : title);
     const id = await db.addTask({ title: clean, creatorId: uid, assigneeId: uid, scope, dueAt, clientId: client?.id ?? null, repeat });
     await remember("task", id);
     await setFocus("task", id);
@@ -279,7 +294,7 @@ export async function performIntent(
     const fields: { title?: string; description?: string; dueAt?: string | null; scope?: string; priority?: number; clientId?: number | null; repeat?: string } = {};
     const done: string[] = [];
 
-    const newTitle = (cmd.new_name ?? "").trim();
+    const newTitle = await nice((cmd.new_name ?? "").trim());
     if (newTitle && newTitle.toLowerCase() !== task.title.toLowerCase()) {
       fields.title = newTitle;
       done.push(`название → «${newTitle}»`);
@@ -319,7 +334,7 @@ export async function performIntent(
     // Внутренности задачи: описание и важность
     const inner = parseTaskFields(rawText);
     if (inner.description) {
-      fields.description = inner.description;
+      fields.description = await nice(inner.description);
       done.push("описание записано");
     }
     if (inner.priority !== undefined && inner.priority !== task.priority) {
@@ -354,7 +369,7 @@ export async function performIntent(
     }
     const client = await findClient();
     // То же самое, что и у задачи: имя клиента показывает ярлык, а не название
-    const clean = client ? stripClientName(title, client.name) : title;
+    const clean = await nice(client ? stripClientName(title, client.name) : title);
     const id = await db.addEvent({ userId: uid, title: clean, startsAt, location: cmd.location ?? "", notes: "", clientId: client?.id ?? null });
     await remember("event", id);
     await setFocus("event", id);
@@ -372,7 +387,7 @@ export async function performIntent(
     const fields: { title?: string; startsAt?: string; location?: string; clientId?: number | null } = {};
     const done: string[] = [];
 
-    const newTitle = (cmd.new_name ?? "").trim();
+    const newTitle = await nice((cmd.new_name ?? "").trim());
     if (newTitle && newTitle.toLowerCase() !== event.title.toLowerCase()) {
       fields.title = newTitle;
       done.push(`название → «${newTitle}»`);
@@ -447,7 +462,8 @@ export async function performIntent(
       }
       return `Клиент ${known.name} уже есть. Скажи, что вписать: «ведение 30000», «бюджет 150000», «оплата до 5 числа».`;
     }
-    const name = (cmd.name ?? cmd.title ?? "").trim();
+    // Имя клиента — с заглавных: голосом оно приходит строчными
+    const name = tidyName((cmd.name ?? cmd.title ?? "").trim());
     if (!name) return null;
     await db.addClient(uid, name, (cmd.platforms ?? "").trim(), (cmd.budget ?? "").trim(), {
       payAmount: (cmd.fee ?? "").trim(),
@@ -879,7 +895,7 @@ export async function tryPerformCommand(
   // Страховка: явная команда (или голос), но роутер промахнулся → создаём задачу
   if (!action && (forceTask || ACTION_RE.test(text))) {
     const p = await parseTaskFromText(ai, text, now);
-    const title = (p?.title || text).trim();
+    const title = tidyTitle((p?.title || text).trim());
     if (title) {
       const dueAt = p?.due ? resolveWhen(p.due, tz, 10) : resolveWhen(text, tz, 10);
       const scope = p?.scope === SCOPE_PERSONAL ? SCOPE_PERSONAL : SCOPE_WORK;
@@ -923,6 +939,8 @@ async function applyCorrection(
   await db.addLesson(uid, phrase, kind);
 
   const learned = "\n\n🧠 Запомнила: такие фразы разбираю как " + KIND_RU[kind] + ".";
+  // В подтверждении человек должен увидеть текст таким же, как он лёг в список
+  const said = tidyTitle(phrase);
 
   if (kind === "water") {
     const ml = parseWaterMl(phrase) || 250;
@@ -931,8 +949,8 @@ async function applyCorrection(
     return `💧 Исправила: +${ml} мл. Сегодня: ${(total / 1000).toFixed(1)} л.${learned}`;
   }
   if (kind === "note") {
-    const id = await db.addNote(uid, phrase);
-    return `📝 Исправила: заметка\n«${phrase}»${learned}`;
+    const id = await db.addNote(uid, said);
+    return `📝 Исправила: заметка\n«${said}»${learned}`;
   }
   const ai = aiConfig(env);
   if (kind === "food") {
@@ -950,19 +968,19 @@ async function applyCorrection(
     if (!startsAt) return `Понадобится время встречи. Скажи, например: «${phrase} завтра в 15:00».`;
     const clients = await db.listClients(uid);
     const client = mentionedClient(clients, phrase);
-    const id = await db.addEvent({ userId: uid, title: phrase, startsAt, location: "", notes: "", clientId: client?.id ?? null });
+    const id = await db.addEvent({ userId: uid, title: said, startsAt, location: "", notes: "", clientId: client?.id ?? null });
     await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "event", id }));
     const cl = client ? `\n🤝 ${client.name}` : "";
-    return `📅 Исправила: встреча\n«${phrase}»\n🕒 ${formatEventTime(startsAt, tz)}${cl}${learned}`;
+    return `📅 Исправила: встреча\n«${said}»\n🕒 ${formatEventTime(startsAt, tz)}${cl}${learned}`;
   }
   // задача
   const dueAt = resolveWhen(phrase, tz, 10);
   const clients = await db.listClients(uid);
   const client = mentionedClient(clients, phrase);
-  const id = await db.addTask({ title: phrase, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt, clientId: client?.id ?? null });
+  const id = await db.addTask({ title: said, creatorId: uid, assigneeId: uid, scope: SCOPE_WORK, dueAt, clientId: client?.id ?? null });
   await db.setSetting(`last:${uid}`, JSON.stringify({ phrase, kind: "task", id }));
   const due = dueAt ? `\n⏰ ${formatDue(dueAt, tz)}` : "";
-  return `✅ Исправила: задача\n«${phrase}»${due}${learned}`;
+  return `✅ Исправила: задача\n«${said}»${due}${learned}`;
 }
 
 const KIND_RU: Record<string, string> = {

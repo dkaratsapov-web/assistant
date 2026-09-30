@@ -5,6 +5,11 @@
  * доезжал до пользователя.
  */
 import http from "node:http";
+// Ровно та же чистка названий, что в бою: заглушка, которая пишет текст «как
+// пришло», проверяла бы не приложение, а сама себя. Один раз на этом уже
+// обожглись — заглушка отдавала /api/home не той формы, и главный экран
+// оставался непроверенным.
+import { tidyTitle } from "../../.test-build/utils.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -76,7 +81,7 @@ export function startStubServer(prefs, port = 8977) {
         req.on("end", () => {
           let t = {};
           try { t = JSON.parse(body); } catch (e) {}
-          const task = { id: ++lastId, title: t.title || "", description: t.description || "", scope: t.scope || "work",
+          const task = { id: ++lastId, title: tidyTitle(t.title || ""), description: tidyTitle(t.description || ""), scope: t.scope || "work",
             status: "open", priority: t.priority || 0, due_at: t.due || null, done_at: null, client: null, repeat_rule: t.repeat || "" };
           tasks.push(task);
           res.end(JSON.stringify({ ok: true, id: task.id }));

@@ -256,3 +256,51 @@ test("непонятную настройку не угадываем, а пок
   assert.match(said, /Могу поменять/);
   assert.equal(db.store.prefs, null, "ничего меняться не должно");
 });
+
+/* ---------- Грамотная запись при постановке голосом ---------- */
+
+test("задача голосом ложится с заглавной буквы", async () => {
+  const db = fakeDb();
+  const said = await performIntent(
+    { action: "task", title: "позвонить в банк" }, db, 1, TZ, "поставь задачу позвонить в банк"
+  );
+  assert.equal(db.store.tasks.at(-1).title, "Позвонить в банк");
+  assert.match(said, /Позвонить в банк/, said);
+});
+
+test("в подтверждении человек видит уже грамотный текст", async () => {
+  const db = fakeDb();
+  const said = await performIntent(
+    { action: "task", title: "созвонится по оплате , потом отчёт." }, db, 1, TZ, "задача созвонится по оплате"
+  );
+  assert.equal(db.store.tasks.at(-1).title, "Созвониться по оплате, потом отчёт");
+  assert.match(said, /Созвониться по оплате, потом отчёт/, said);
+});
+
+test("встреча голосом тоже с заглавной", async () => {
+  const db = fakeDb();
+  await performIntent(
+    { action: "event", title: "планёрка с командой", at: "завтра в 10:00" }, db, 1, TZ, "встреча планёрка с командой завтра в 10:00"
+  );
+  assert.equal(db.store.events.at(-1).title, "Планёрка с командой");
+});
+
+test("новое название при правке тоже выправляется", async () => {
+  const db = fakeDb({ tasks: [task(1, "Сделать лендинг")] });
+  await performIntent(
+    { action: "task_edit", title: "лендинг", new_name: "собрать лендинг на тильде" }, db, 1, TZ, "переименуй задачу про лендинг"
+  );
+  assert.equal(db.store.tasks[0].title, "Собрать лендинг на тильде");
+});
+
+test("имя клиента при поиске не ломается от заглавных", async () => {
+  // Клиент назван строчными — карточка всё равно должна найтись, а имя в
+  // названии задачи не дублируется
+  const db = fakeDb({ clients: [{ id: 7, name: "ДиАвто69" }] });
+  await performIntent(
+    { action: "task", title: "отчёт для диавто69" }, db, 1, TZ, "задача отчёт для диавто69"
+  );
+  const t = db.store.tasks.at(-1);
+  assert.equal(t.client_id, 7, `клиент не привязался: ${JSON.stringify(t)}`);
+  assert.ok(!/диавто/i.test(t.title), `имя клиента осталось в названии: ${t.title}`);
+});
