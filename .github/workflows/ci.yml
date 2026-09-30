@@ -44,3 +44,37 @@ jobs:
       # выключенным ИИ: что работает здесь — переживёт недоступность модели.
       - name: Аудит голосовых команд
         run: npm run audit
+
+  # ---------------------------------------------------------------------------
+  # Деплой. Раньше его тут не было вовсе: CI только собирал воркер вхолостую
+  # (--dry-run), а настоящая выкладка жила в кабинете Cloudflare — и «доехало
+  # или нет» приходилось угадывать по внешним признакам.
+  #
+  # Работает, только если в репозитории заданы секреты Cloudflare. Нет их —
+  # шаг просто пропускается и ничего не ломает.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: build
+    if: ${{ github.ref == 'refs/heads/claude/telegram-marketing-bot-p7f3xk' && secrets.CLOUDFLARE_API_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Deploy на Cloudflare
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Сразу спрашиваем у боевого адреса, какая сборка там теперь. Это и есть
+      # ответ на вопрос «деплой доехал?» — виден прямо в логе, без догадок.
+      - name: Проверить, что доехало
+        run: |
+          sleep 12
+          echo "Живая сборка:"
+          curl -sS --max-time 20 "https://${PUBLIC_HOST}/version" || echo "адрес не ответил"
+        env:
+          PUBLIC_HOST: assistant.d-karatsapov.workers.dev
