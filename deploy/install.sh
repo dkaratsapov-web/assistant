@@ -122,8 +122,36 @@ echo "==> Node.js 22"
 # node:sqlite, на котором держится база, появился в Node 22. Системный пакет
 # в Debian/Ubuntu обычно старее, поэтому ставим из репозитория NodeSource.
 if ! command -v node >/dev/null || [[ "$(node -v | sed 's/v\([0-9]*\).*/\1/')" -lt 22 ]]; then
+  # Если прошлый запуск упал на середине установки пакета, apt остаётся в
+  # сломанном состоянии и любая следующая установка падает тоже. Чиним молча.
+  dpkg --configure -a >/dev/null 2>&1 || true
+  apt-get -f install -y -qq >/dev/null 2>&1 || true
+
+  # Боевой случай: в образе Рег.ру предустановлен Node 12 вместе с libnode-dev.
+  # Пакет NodeSource владеет теми же файлами в /usr/include/node, и установка
+  # падает на «trying to overwrite /usr/include/node/common.gypi, which is also
+  # in package libnode-dev». Поэтому системные пакеты Node сначала убираем —
+  # имена версий у libnode разные в разных выпусках Ubuntu, поэтому ищем их
+  # по образцу, а не списком.
+  OLD_NODE="$(dpkg-query -W -f='${Package}\n' 'nodejs' 'nodejs-doc' 'npm' 'libnode*' 2>/dev/null | grep -v '^$' || true)"
+  if [[ -n "$OLD_NODE" ]]; then
+    echo "   убираю системный Node: $(echo $OLD_NODE | tr '\n' ' ')"
+    apt-get purge -y -qq $OLD_NODE >/dev/null 2>&1 || true
+    apt-get autoremove -y -qq >/dev/null 2>&1 || true
+  fi
+
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -qq nodejs
+fi
+
+# Проверяем, что получилось: дальше без Node 22 делать нечего, а падать лучше
+# здесь с внятным сообщением, чем через минуту на непонятной ошибке сборки.
+if ! command -v node >/dev/null || [[ "$(node -v | sed 's/v\([0-9]*\).*/\1/')" -lt 22 ]]; then
+  echo "Node 22 поставить не удалось. Сейчас: $(command -v node >/dev/null && node -v || echo 'нет вовсе')" >&2
+  echo "Посмотри ошибку выше. Чаще всего помогает:" >&2
+  echo "    apt-get purge -y nodejs npm 'libnode*' && apt-get autoremove -y" >&2
+  echo "    bash deploy/install.sh $DOMAIN" >&2
+  exit 1
 fi
 node -v
 
