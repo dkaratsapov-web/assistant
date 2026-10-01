@@ -1,0 +1,42 @@
+# Запуск ассистента как системной службы.
+# Копируется в /etc/systemd/system/sara.service
+[Unit]
+Description=Сара — ассистент (Telegram + MAX)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sara
+Group=sara
+WorkingDirectory=/opt/sara
+ExecStart=/usr/bin/node /opt/sara/dist/server.mjs
+Environment=NODE_ENV=production
+# Порт слушаем только на себя: наружу смотрит nginx, он же держит сертификат
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=APP_ROOT=/opt/sara
+Environment=DB_FILE=/opt/sara/data/assistant.db
+EnvironmentFile=/opt/sara/.env
+
+# Падать нельзя: без бота человек остаётся без напоминаний
+Restart=always
+RestartSec=3
+# Защита от бесконечного цикла перезапусков при сломанной сборке
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+# Журнал — в journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sara
+
+# Приложению нужен только свой каталог
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sara/data
+
+[Install]
+WantedBy=multi-user.target

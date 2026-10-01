@@ -1,2 +1,2 @@
 // Файл создаётся скриптом scripts/stamp-build.mjs при каждой сборке.
-export const BUILD = "2026-09-30 17:57 · ui 24f0e21 · после 62eae6f";
+export const BUILD = "2026-10-01 14:37 · ui 24f0e21 · после e7957e7";
