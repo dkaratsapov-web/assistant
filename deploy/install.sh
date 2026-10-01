@@ -17,9 +17,23 @@ APP_DIR=/opt/sara
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "$DOMAIN" ]]; then
-  echo "Укажи домен: bash deploy/install.sh ваш-домен.ру" >&2
+  echo "Укажи домен: bash deploy/install.sh имя-вашего-домена.ру" >&2
   exit 1
 fi
+# Аргумент проверяем первым делом. Иначе человек ждёт установки пакетов,
+# чтобы узнать, что домен не тот: именно так и вышло в первый раз — подпись из
+# инструкции подставили буквально.
+case "$DOMAIN" in
+  ваш-домен*|имя-вашего-домена*|ДОМЕН|example.com|domain.ru)
+    echo "«$DOMAIN» — это подпись из инструкции, а не домен." >&2
+    echo "Подставь свой: bash deploy/install.sh sara.мойсайт.ру" >&2
+    exit 1 ;;
+esac
+if [[ ! "$DOMAIN" =~ ^[A-Za-zА-Яа-я0-9.-]+\.[A-Za-zА-Яа-я]{2,}$ ]]; then
+  echo "«$DOMAIN» не похож на домен. Нужно вида sara.мойсайт.ру" >&2
+  exit 1
+fi
+
 if [[ $EUID -ne 0 ]]; then
   echo "Нужны права root: sudo bash deploy/install.sh $DOMAIN" >&2
   exit 1
@@ -28,7 +42,53 @@ fi
 echo "==> Системные пакеты"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg nginx certbot python3-certbot-nginx sqlite3 git
+apt-get install -y -qq curl ca-certificates gnupg nginx certbot python3-certbot-nginx sqlite3 git idn2
+
+echo "==> Проверяю домен $DOMAIN"
+# Стоит после установки пакетов нарочно: кириллический домен без idn2 не
+# перевести в вид, который понимает DNS, а свой адрес без curl не узнать.
+# Пакеты ставятся полминуты, а вот Node и сборка — минуты, и до них ошибку
+# домена надо поймать.
+ASCII_DOMAIN="$DOMAIN"
+if command -v idn2 >/dev/null 2>&1; then
+  ASCII_DOMAIN="$(idn2 "$DOMAIN" 2>/dev/null || echo "$DOMAIN")"
+fi
+
+# «|| true» обязателен: вверху стоит pipefail, а getent возвращает 2, когда
+# имя не найдено, и скрипт молча умирал ровно там, где должен был объяснить,
+# что A-записи нет.
+DOMAIN_IP="$(getent ahostsv4 "$ASCII_DOMAIN" 2>/dev/null | awk 'NR==1{print $1}' || true)"
+if [[ -z "$DOMAIN_IP" ]]; then
+  echo "   Домен никуда не ведёт: A-записи нет." >&2
+  echo "   В панели регистратора добавь A-запись $DOMAIN на адрес этого сервера" >&2
+  echo "   и подожди несколько минут — DNS расходится не мгновенно." >&2
+  exit 1
+fi
+
+# Свой адрес определяем тремя способами подряд: на разных машинах работает
+# разное, а ошибиться тут нельзя — ложный запрет хуже отсутствия проверки.
+MY_IP="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+[[ -z "$MY_IP" ]] && MY_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)"
+[[ -z "$MY_IP" ]] && MY_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+# Последняя строка с [[ ]] вернёт 1, если адрес уже нашёлся, — а это при set -e
+# означает конец скрипта. Поэтому ставим точку, на которой он не спотыкается.
+true
+
+if [[ -z "$MY_IP" ]]; then
+  echo "   Свой адрес определить не вышло — проверю домен выпуском сертификата."
+elif [[ "$DOMAIN_IP" == "$MY_IP" ]]; then
+  echo "   $DOMAIN → $MY_IP, всё верно"
+else
+  # Сервер может стоять за NAT, и тогда расхождение законно. Поэтому
+  # предупреждаем, но не запрещаем.
+  echo
+  echo "   ВНИМАНИЕ: домен ведёт на $DOMAIN_IP, а этот сервер видит себя как $MY_IP."
+  echo "   Если сервер за NAT — так и должно быть, продолжаем."
+  echo "   Если нет — сертификат не выпишется, поправь A-запись у регистратора."
+  echo "   Остановить: Ctrl+C. Продолжу через 10 секунд."
+  sleep 10
+fi
+
 
 echo "==> Node.js 22"
 # node:sqlite, на котором держится база, появился в Node 22. Системный пакет
@@ -90,26 +150,26 @@ chown -R sara:sara "$APP_DIR"
 chmod 600 "$APP_DIR/.env"
 
 echo "==> nginx"
-sed "s/ДОМЕН/$DOMAIN/g" deploy/nginx.conf > /etc/nginx/sites-available/sara
+sed "s/ДОМЕН/$ASCII_DOMAIN/g" deploy/nginx.conf > /etc/nginx/sites-available/sara
 ln -sf /etc/nginx/sites-available/sara /etc/nginx/sites-enabled/sara
 rm -f /etc/nginx/sites-enabled/default
 
 echo "==> Сертификат Let's Encrypt"
 # До выписки сертификата конфиг ссылается на несуществующие файлы и nginx не
 # стартует. Поэтому сначала поднимаем временный сервер только на 80 порту.
-if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+if [[ ! -f "/etc/letsencrypt/live/$ASCII_DOMAIN/fullchain.pem" ]]; then
   cat > /etc/nginx/sites-available/sara <<TMP
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name $ASCII_DOMAIN;
     location /.well-known/acme-challenge/ { root /var/www/html; }
     location / { return 200 'ставлю сертификат'; add_header content-type text/plain; }
 }
 TMP
   mkdir -p /var/www/html
   nginx -t && systemctl reload nginx
-  certbot certonly --webroot -w /var/www/html -d "$DOMAIN" --agree-tos --register-unsafely-without-email --non-interactive
-  sed "s/ДОМЕН/$DOMAIN/g" "$SRC_DIR/deploy/nginx.conf" > /etc/nginx/sites-available/sara
+  certbot certonly --webroot -w /var/www/html -d "$ASCII_DOMAIN" --agree-tos --register-unsafely-without-email --non-interactive
+  sed "s/ДОМЕН/$ASCII_DOMAIN/g" "$SRC_DIR/deploy/nginx.conf" > /etc/nginx/sites-available/sara
 fi
 nginx -t && systemctl reload nginx
 
