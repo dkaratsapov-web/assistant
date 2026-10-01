@@ -90,6 +90,26 @@ else
 fi
 
 
+echo "==> Память"
+# На тарифах с 1 ГБ сборка (npm ci + esbuild) упирается в память и процесс
+# убивает OOM — причём на середине установки, оставляя её недоделанной.
+# Подкачка стоит дёшево и снимает вопрос. Если своп уже есть, не трогаем.
+TOTAL_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+SWAP_MB=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)
+echo "   памяти ${TOTAL_MB} МБ, подкачки ${SWAP_MB} МБ"
+if [[ "$TOTAL_MB" -lt 2048 && "$SWAP_MB" -lt 512 ]]; then
+  if [[ ! -f /swapfile ]]; then
+    echo "   добавляю 2 ГБ подкачки"
+    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    swapon /swapfile 2>/dev/null || true
+  fi
+fi
+
 echo "==> Node.js 22"
 # node:sqlite, на котором держится база, появился в Node 22. Системный пакет
 # в Debian/Ubuntu обычно старее, поэтому ставим из репозитория NodeSource.
