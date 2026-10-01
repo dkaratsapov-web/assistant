@@ -10,11 +10,19 @@ import assert from "node:assert/strict";
 import { performIntent } from "../.test-build/intent.js";
 
 const TZ = 3;
+/**
+ * Момент времени «через столько-то дней, в такой-то час ПО МЕСТНОМУ времени».
+ *
+ * Считать надо именно от местного дня, а не от UTC. Раньше здесь был простой
+ * сдвиг по UTC, и тест «что у меня завтра» падал каждый вечер после 21:00 UTC:
+ * по Москве к этому часу уже наступал следующий день, и «завтра» из теста
+ * оказывалось сегодняшним. Ловушка тихая — днём всё зелёное.
+ */
 const iso = (dayOffset, hour = 12) => {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + dayOffset);
-  d.setUTCHours(hour, 0, 0, 0);
-  return d.toISOString();
+  const local = new Date(Date.now() + TZ * 3600_000);
+  local.setUTCDate(local.getUTCDate() + dayOffset);
+  local.setUTCHours(hour, 0, 0, 0);
+  return new Date(local.getTime() - TZ * 3600_000).toISOString();
 };
 
 /** Минимальная база в памяти: только то, чем пользуется обработчик команд. */
