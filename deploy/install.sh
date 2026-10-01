@@ -58,23 +58,31 @@ fi
 # имя не найдено, и скрипт молча умирал ровно там, где должен был объяснить,
 # что A-записи нет.
 DOMAIN_IP="$(getent ahostsv4 "$ASCII_DOMAIN" 2>/dev/null | awk 'NR==1{print $1}' || true)"
+# Домен, который ещё не отвечает, — не повод останавливаться. Всё долгое
+# (Node, сборка, служба) можно поставить сейчас, а сертификат доделать потом
+# одним повторным запуском. Иначе человек ждёт домен, ничего не делая.
+DNS_OK=1
 if [[ -z "$DOMAIN_IP" ]]; then
-  echo "   Домен никуда не ведёт: A-записи нет." >&2
-  echo "   В панели регистратора добавь A-запись $DOMAIN на адрес этого сервера" >&2
-  echo "   и подожди несколько минут — DNS расходится не мгновенно." >&2
-  exit 1
+  DNS_OK=0
+  echo "   Домен пока никуда не ведёт: A-записи нет."
+  echo "   Поставлю всё остальное, а сертификат доделаем потом — просто"
+  echo "   запусти этот же скрипт ещё раз, когда домен заработает."
+  echo
 fi
 
 # Свой адрес определяем тремя способами подряд: на разных машинах работает
 # разное, а ошибиться тут нельзя — ложный запрет хуже отсутствия проверки.
-MY_IP="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+MY_IP=""
+[[ "$DNS_OK" == "1" ]] && MY_IP="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
 [[ -z "$MY_IP" ]] && MY_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)"
 [[ -z "$MY_IP" ]] && MY_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 # Последняя строка с [[ ]] вернёт 1, если адрес уже нашёлся, — а это при set -e
 # означает конец скрипта. Поэтому ставим точку, на которой он не спотыкается.
 true
 
-if [[ -z "$MY_IP" ]]; then
+if [[ "$DNS_OK" != "1" ]]; then
+  : # сверять не с чем
+elif [[ -z "$MY_IP" ]]; then
   echo "   Свой адрес определить не вышло — проверю домен выпуском сертификата."
 elif [[ "$DOMAIN_IP" == "$MY_IP" ]]; then
   echo "   $DOMAIN → $MY_IP, всё верно"
@@ -170,28 +178,56 @@ chown -R sara:sara "$APP_DIR"
 chmod 600 "$APP_DIR/.env"
 
 echo "==> nginx"
-sed "s/ДОМЕН/$ASCII_DOMAIN/g" deploy/nginx.conf > /etc/nginx/sites-available/sara
-ln -sf /etc/nginx/sites-available/sara /etc/nginx/sites-enabled/sara
-rm -f /etc/nginx/sites-enabled/default
-
-echo "==> Сертификат Let's Encrypt"
-# До выписки сертификата конфиг ссылается на несуществующие файлы и nginx не
-# стартует. Поэтому сначала поднимаем временный сервер только на 80 порту.
-if [[ ! -f "/etc/letsencrypt/live/$ASCII_DOMAIN/fullchain.pem" ]]; then
-  cat > /etc/nginx/sites-available/sara <<TMP
+mkdir -p /var/www/html
+# Сначала всегда ставим конфиг только на 80 порт: до выписки сертификата
+# конфиг с HTTPS ссылается на несуществующие файлы, и nginx вообще не стартует.
+# Приложение при этом уже доступно по адресу сервера — можно проверить, что
+# оно живо, не дожидаясь домена.
+cat > /etc/nginx/sites-available/sara <<TMP
 server {
     listen 80;
-    server_name $ASCII_DOMAIN;
+    listen [::]:80;
+    server_name $ASCII_DOMAIN _;
     location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 200 'ставлю сертификат'; add_header content-type text/plain; }
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host  \$host;
+        proxy_set_header Host              \$host;
+        proxy_read_timeout 120s;
+    }
 }
 TMP
-  mkdir -p /var/www/html
-  nginx -t && systemctl reload nginx
-  certbot certonly --webroot -w /var/www/html -d "$ASCII_DOMAIN" --agree-tos --register-unsafely-without-email --non-interactive
-  sed "s/ДОМЕН/$ASCII_DOMAIN/g" "$SRC_DIR/deploy/nginx.conf" > /etc/nginx/sites-available/sara
+ln -sf /etc/nginx/sites-available/sara /etc/nginx/sites-enabled/sara
+rm -f /etc/nginx/sites-enabled/default
+nginx -t >/dev/null && systemctl reload nginx
+
+echo "==> Сертификат Let\'s Encrypt"
+CERT_OK=0
+if [[ -f "/etc/letsencrypt/live/$ASCII_DOMAIN/fullchain.pem" ]]; then
+  echo "   сертификат уже есть"
+  CERT_OK=1
+elif [[ "$DNS_OK" != "1" ]]; then
+  # Нет смысла дёргать Let's Encrypt, если домен не отвечает: попытки
+  # ограничены (пять неудач на домен в час), и сжечь их на заведомо
+  # безнадёжном запросе — худшее, что можно сделать.
+  echo "   пропускаю: домен ещё не отвечает"
+elif certbot certonly --webroot -w /var/www/html -d "$ASCII_DOMAIN" \
+       --agree-tos --register-unsafely-without-email --non-interactive; then
+  CERT_OK=1
+else
+  echo "   сертификат выписать не вышло — подробности выше"
 fi
-nginx -t && systemctl reload nginx
+
+# Конфиг с HTTPS ставим ТОЛЬКО когда сертификат есть. Иначе nginx упадёт и
+# заберёт с собой доступ к приложению по обычному адресу.
+if [[ "$CERT_OK" == "1" ]]; then
+  sed "s/ДОМЕН/$ASCII_DOMAIN/g" "$SRC_DIR/deploy/nginx.conf" > /etc/nginx/sites-available/sara
+  nginx -t >/dev/null && systemctl reload nginx
+  echo "   HTTPS включён"
+fi
 
 echo "==> Служба"
 cp deploy/sara.service /etc/systemd/system/sara.service
@@ -205,8 +241,12 @@ CRON
 
 echo
 echo "────────────────────────────────────────────────────"
-if grep -q '^BOT_TOKEN=$' "$APP_DIR/.env"; then
-  echo "Почти всё. Осталось вписать секреты:"
+
+# Пустым считаем и незаполненный токен, и строку с одними пробелами
+TOKENS_LEFT="$(grep -cE '^(BOT_TOKEN|OWNER_ID|YANDEX_API_KEY|YANDEX_FOLDER_ID)=[[:space:]]*$' "$APP_DIR/.env" || true)"
+
+if [[ "$TOKENS_LEFT" != "0" ]]; then
+  echo "Осталось вписать секреты:"
   echo
   echo "    nano $APP_DIR/.env"
   echo
@@ -214,11 +254,37 @@ if grep -q '^BOT_TOKEN=$' "$APP_DIR/.env"; then
   echo "       YANDEX_API_KEY, YANDEX_FOLDER_ID."
   echo "WEBHOOK_SECRET и MAX_WEBHOOK_SECRET уже сгенерированы."
   echo
-  echo "Потом запустить:  systemctl start sara"
+  echo "Потом:  systemctl start sara"
 else
   systemctl restart sara
-  echo "Запущено. Проверка:"
-  echo "    curl https://$DOMAIN/version"
-  echo "    journalctl -u sara -f"
+  sleep 2
+  if systemctl is-active --quiet sara; then
+    echo "Служба запущена."
+  else
+    echo "Служба не поднялась. Что случилось:  journalctl -u sara -n 50"
+  fi
 fi
+
+echo
+if [[ "$CERT_OK" == "1" ]]; then
+  echo "Адрес:  https://$DOMAIN"
+  echo "Проверить:  curl https://$DOMAIN/version"
+else
+  echo "Сертификата пока нет, поэтому HTTPS не работает."
+  echo "Приложение уже отвечает по адресу сервера:"
+  echo "    curl http://$MY_IP/version"
+  echo
+  if [[ "$DNS_OK" != "1" ]]; then
+    echo "Домен $DOMAIN ещё не отвечает. Как заработает — запусти этот же"
+    echo "скрипт ещё раз, он доделает сертификат и включит HTTPS:"
+  else
+    echo "Домен отвечает, но сертификат не выписался. Разберись с причиной"
+    echo "выше и запусти ещё раз:"
+  fi
+  echo "    bash deploy/install.sh $DOMAIN"
+  echo
+  echo "Пока сертификата нет, боты работать не будут: и Telegram, и MAX"
+  echo "принимают вебхук только по HTTPS."
+fi
+echo "Журнал:  journalctl -u sara -f"
 echo "────────────────────────────────────────────────────"
