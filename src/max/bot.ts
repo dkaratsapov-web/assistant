@@ -247,17 +247,12 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
    */
   async function appButtons(): Promise<MaxButton[]> {
     const sets = await appButtonSets();
-    const okRaw = await db.getSetting("max_kb_button");
-    if (okRaw != null) {
-      if (!okRaw) return sets[sets.length - 1]; // платформа не принимает open_app — только ссылка
-      try {
-        const saved = JSON.parse(okRaw) as MaxButton;
-        const match = sets.find((set) => set[0] && set[0].type === "open_app" && sameAppButton(set[0], saved));
-        if (match) return match;
-      } catch {
-        // настройка испортилась — падаем на общий путь
-      }
-    }
+    // Раньше здесь подставлялась запомненная кнопка open_app, когда-то принятая
+    // платформой. Выяснилось, что принимает она её охотно, а вот payload с
+    // токеном до приложения не доносит: в адресе приходит пустой
+    // WebAppStartParam, и войти по такой кнопке нельзя — она просто выглядит
+    // рабочей. Поэтому запомненный выбор больше не учитываем и всегда отдаём
+    // первый набор: там ссылка, в которой токен лежит прямо в адресе.
     return sets[0];
   }
 
@@ -294,9 +289,13 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     if (appUrl) addApp({ type: "open_app", text: "📲 Открыть", web_app: appUrl, payload: token });
     if (me?.user_id) addApp({ type: "open_app", text: "📲 Открыть", contact_id: me.user_id, payload: token });
 
-    // одна кнопка на сообщение: запасная ссылка нужна, только если open_app не принят
-    const variants: MaxButton[][] = candidates.map((b) => [b]);
-    variants.push(base);
+    // Ссылка — первой, а open_app после неё.
+    //
+    // Боевой случай: open_app платформа принимает и кнопку рисует, но payload с
+    // токеном до приложения не доносит — в адресе приходит пустой
+    // WebAppStartParam. Кнопка выглядит рабочей, а войти по ней нельзя. В
+    // ссылке токен лежит прямо в адресе и ни от чего не зависит.
+    const variants: MaxButton[][] = [base, ...candidates.map((b) => [b])];
     return variants;
   }
 
