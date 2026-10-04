@@ -314,6 +314,14 @@ if [[ "$TOKENS_LEFT" != "0" ]]; then
   echo "WEBHOOK_SECRET и MAX_WEBHOOK_SECRET уже сгенерированы."
   echo
   echo "Потом:  systemctl start sara"
+  # Служба может уже работать с прошлой установки. Тогда на диске лежит новый
+  # код, а в памяти — старый, и /version честно показывает старую метку. Без
+  # перезапуска это выглядит так, будто правка не доехала.
+  if systemctl is-active --quiet sara; then
+    systemctl restart sara
+    echo
+    echo "(служба уже работала — перезапустил на новом коде)"
+  fi
 else
   systemctl restart sara
   sleep 2
