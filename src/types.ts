@@ -6,7 +6,12 @@ export interface Env {
   BOT_TOKEN: string;
   OWNER_ID: string;
   WEBHOOK_SECRET: string;
-  PUBLIC_HOST?: string;   // публичный хост воркера — нужен фоновой самонастройке вебхуков
+  PUBLIC_HOST?: string;   // хост, на который подписываются вебхуки Telegram и MAX
+  // Адрес, который видит ЧЕЛОВЕК: кнопки и личные ссылки на Mini App. Отличается
+  // от PUBLIC_HOST, когда перед воркером стоит свой домен: вебхуки пусть идут
+  // как шли, а телефон должен открывать российский адрес — до workers.dev он
+  // без VPN не достучится.
+  APP_HOST?: string;
   BOT_USERNAME?: string;  // ник бота без @ (нужен grammy для разбора команд вида /tasks@bot)
   BOT_NAME?: string;      // отображаемое имя бота
   // ИИ-«мозги» и голос — Yandex Cloud (YandexGPT + SpeechKit), один API-ключ на оба сервиса

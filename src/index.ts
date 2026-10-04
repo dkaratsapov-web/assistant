@@ -281,6 +281,14 @@ async function handleMaxStatus(request: Request, env: Env, origin: string): Prom
 }
 
 /** Приём обновлений MAX по webhook. */
+/**
+ * Адрес, который видит человек. Берём PUBLIC_HOST, если он задан, иначе — тот,
+ * по которому пришёл запрос.
+ */
+function publicOrigin(env: Env, fallback: string): string {
+  return env.APP_HOST ? `https://${env.APP_HOST}` : fallback;
+}
+
 async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx: ExecutionContext): Promise<Response> {
   const db = new DB(env.DB);
   const url = new URL(request.url);
@@ -313,8 +321,13 @@ async function handleMaxWebhook(request: Request, env: Env, origin: string, ctx:
       );
     })().catch(() => {})
   );
-  // Обрабатываем в фоне, MAX ждёт 200 в течение 30 секунд
-  ctx.waitUntil(handleMaxUpdate(update, env, origin).catch((e) => console.error("max update failed", e)));
+  // Обрабатываем в фоне, MAX ждёт 200 в течение 30 секунд.
+  //
+  // Ссылки на приложение строим от ПУБЛИЧНОГО адреса, а не от того, по которому
+  // пришёл запрос. Это разные вещи, когда перед воркером стоит свой домен:
+  // запрос приходит на workers.dev, а телефон человека должен открывать
+  // bot-sara.ru — до workers.dev он без VPN не достучится.
+  ctx.waitUntil(handleMaxUpdate(update, env, publicOrigin(env, origin)).catch((e) => console.error("max update failed", e)));
   return new Response("ok");
 }
 
