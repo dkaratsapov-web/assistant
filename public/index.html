@@ -266,7 +266,15 @@
       box-shadow: var(--shadow); border: 1px solid var(--border); text-align: center;
       transform: scale(.94); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
     .ask-bg.show .ask { transform: scale(1); }
-    .ask-title { font-size: 16px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
+    /* Значок над заголовком: окно перестаёт выглядеть системным и становится
+       частью приложения. Круг и толщина обводки — те же, что у кнопок. */
+    .ask-ico { width: 56px; height: 56px; margin: 2px auto 12px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--fg); color: var(--fg-contrast); }
+    .ask-ico.danger { background: #ff3b30; color: #fff; }
+    .ask-ico svg { width: 26px; height: 26px; }
+    .ask-ico img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; }
+    .ask-title { font-size: 17px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
     .ask-text { color: var(--muted); font-size: 13.5px; line-height: 1.45; margin-bottom: 18px; }
     .ask-row { display: flex; flex-direction: column; gap: 8px; }
     .ask-row .btn { width: 100%; }
@@ -440,6 +448,7 @@
 
   <div class="ask-bg" id="ask-bg" role="dialog" aria-modal="true">
     <div class="ask">
+      <div class="ask-ico" id="ask-ico" hidden></div>
       <div class="ask-title" id="ask-title"></div>
       <div class="ask-text" id="ask-text"></div>
       <div class="ask-row" id="ask-row"></div>
@@ -605,11 +614,24 @@
      * браузера — в мессенджере оно выглядело чужеродно и пугало адресом сайта.
      * @param msg вопрос; @param opts.ok надпись на кнопке действия; @param opts.danger красная кнопка
      */
+    /** Значок для окон об удалении — ставится сам, чтобы не вписывать его в каждое. */
+    const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>';
+
     function ask(msg, opts = {}) {
       return new Promise((res) => {
         const bg = $("ask-bg"), row = $("ask-row");
         if (!bg || !row) { res(true); return; }
         const [title, ...rest] = String(msg).split("\n");
+        // Значок делает окно своим, а не системным. Без него ведём себя как раньше.
+        const ico = $("ask-ico");
+        if (ico) {
+          // У окон об удалении значок свой и красный — он ставится сам, чтобы
+          // не вписывать его в каждое из восьми мест, откуда их зовут.
+          const pic = opts.icon || (opts.danger ? TRASH_SVG : "");
+          ico.classList.toggle("danger", !!opts.danger && !opts.icon);
+          if (pic) { ico.innerHTML = pic; ico.hidden = false; }
+          else { ico.innerHTML = ""; ico.hidden = true; }
+        }
         $("ask-title").textContent = title;
         $("ask-text").textContent = rest.join(" ") || opts.text || "";
         $("ask-text").style.display = $("ask-text").textContent ? "" : "none";
@@ -2420,8 +2442,8 @@
       const KEY = "sara-mic-asked";
       try { if (localStorage.getItem(KEY)) return true; } catch (e) { return true; }
       const ok = await ask(
-        "Разрешить микрофон?\nСкажи фразу — Сара сама заведёт задачу, встречу или запись о еде. Сейчас телефон спросит доступ: он нужен только на время записи, запись уходит на распознавание и нигде не хранится.",
-        { ok: "Разрешить", cancel: "Не сейчас" }
+        "Сара слушает\nСкажи фразу — и задача, встреча или запись о еде заведётся сама. Сейчас телефон спросит доступ к микрофону: он нужен только на время записи, сама запись нигде не хранится.",
+        { ok: "Разрешить микрофон", cancel: "Не сейчас", icon: MIC_SVG }
       );
       if (!ok) return false;
       try { localStorage.setItem(KEY, "1"); } catch (e) {}
