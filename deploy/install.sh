@@ -256,9 +256,36 @@ fi
 # Конфиг с HTTPS ставим ТОЛЬКО когда сертификат есть. Иначе nginx упадёт и
 # заберёт с собой доступ к приложению по обычному адресу.
 if [[ "$CERT_OK" == "1" ]]; then
+  # Рабочий конфиг откладываем: если новый не пройдёт проверку, вернём этот.
+  # Без этого на диске остаётся сломанный конфиг, и nginx не поднимется при
+  # следующем перезапуске — а узнаётся это в самый неподходящий момент.
+  cp /etc/nginx/sites-available/sara /etc/nginx/sites-available/sara.working
   sed "s/ДОМЕН/$ASCII_DOMAIN/g" "$SRC_DIR/deploy/nginx.conf" > /etc/nginx/sites-available/sara
-  nginx -t >/dev/null && systemctl reload nginx
-  echo "   HTTPS включён"
+
+  # Директива «http2 on» появилась только в nginx 1.25.1. В Ubuntu 22.04 стоит
+  # 1.18, и она валит проверку конфига целиком: «unknown directive http2».
+  # Там то же самое пишется флагом в строке listen.
+  NGINX_VER="$(nginx -v 2>&1 | sed 's|.*/||; s|[^0-9.].*||')"
+  older_than() { [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]; }
+  if older_than "$NGINX_VER" "1.25.1"; then
+    echo "   nginx $NGINX_VER — пишу http2 по-старому"
+    sed -i -e '/^[[:space:]]*http2 on;$/d' -e 's/^\([[:space:]]*listen .*443 ssl\);/\1 http2;/' \
+      /etc/nginx/sites-available/sara
+  fi
+
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx
+    rm -f /etc/nginx/sites-available/sara.working
+    echo "   HTTPS включён"
+  else
+    # Молчать тут нельзя: раньше сообщение «HTTPS включён» печаталось в любом
+    # случае, и поломка конфига выглядела как успех.
+    echo "   конфиг nginx не прошёл проверку — возвращаю рабочий:" >&2
+    nginx -t 2>&1 | sed 's/^/     /' >&2
+    mv /etc/nginx/sites-available/sara.working /etc/nginx/sites-available/sara
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    CERT_OK=0
+  fi
 fi
 
 echo "==> Служба"
