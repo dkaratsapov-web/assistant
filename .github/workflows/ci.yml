@@ -14,9 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Node 22: на нём держится node:sqlite, без которого не идут тесты
+      # переноса базы на свой сервер. На Node 20 они молча не запускались, и
+      # сборка падала — вместе с выкладкой.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - name: Typecheck
@@ -71,9 +74,12 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
+      # Node 22: на нём держится node:sqlite, без которого не идут тесты
+      # переноса базы на свой сервер. На Node 20 они молча не запускались, и
+      # сборка падала — вместе с выкладкой.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - name: Нет ключей Cloudflare — пропускаем выкладку
