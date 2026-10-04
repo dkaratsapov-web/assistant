@@ -202,6 +202,10 @@ else
   sed -i "s|^PUBLIC_HOST=.*|PUBLIC_HOST=$DOMAIN|" "$APP_DIR/.env"
   echo "   $APP_DIR/.env уже есть, секреты не трогаю"
 fi
+# Правили .env в Блокноте — в конце строк окажется windows-овский возврат
+# каретки, и systemd утащит его прямо внутрь токена. Telegram такой токен не
+# примет, а ошибка будет выглядеть загадочно: токен на вид правильный.
+sed -i 's/\r$//' "$APP_DIR/.env"
 chown -R sara:sara "$APP_DIR"
 chmod 600 "$APP_DIR/.env"
 
