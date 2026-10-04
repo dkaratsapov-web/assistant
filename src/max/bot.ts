@@ -371,6 +371,29 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
     if (callbackPayload.startsWith("onb:")) return onbStep(callbackPayload.slice(4));
     const [action, arg, arg2] = callbackPayload.split(":");
 
+    // Подтверждение входа в Mini App. Сюда попадаем только после проверки
+    // доступа выше, то есть нажал кнопку настоящий владелец аккаунта — а
+    // значит приложению можно выдать сессию.
+    if (action === "login") {
+      const raw = await db.getSetting(`maxlogin:${arg}`);
+      if (!raw) return void (await reply("Запрос входа не найден или уже использован.").catch(() => {}));
+      let rec: { maxId: number; code: string; at: number; token: string };
+      try {
+        rec = JSON.parse(raw);
+      } catch {
+        return void (await reply("Запрос входа испорчен. Открой приложение заново.").catch(() => {}));
+      }
+      // Чужой запрос подтвердить нельзя, даже случайно
+      if (rec.maxId !== senderId) return void (await reply("Этот запрос не твой.").catch(() => {}));
+      if (Date.now() - rec.at > 5 * 60_000) {
+        return void (await reply("Запрос устарел — открой приложение заново.").catch(() => {}));
+      }
+      rec.token = await db.webSessionFor(uid);
+      await db.setSetting(`maxlogin:${arg}`, JSON.stringify(rec));
+      await reply("✅ Вход подтверждён. Возвращайся в приложение — оно уже открылось.").catch(() => {});
+      return;
+    }
+
     if (action === "access") {
       if (!isOwner) return;
       const targetMax = parseInt(arg2, 10);

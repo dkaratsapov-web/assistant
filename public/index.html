@@ -3128,7 +3128,8 @@
           <div style="color:var(--muted);font-size:13.5px;line-height:1.45;margin-bottom:16px">
             Открой приложение кнопкой <b>«📲 Открыть»</b> в чате с Сарой — дальше вход запомнится, и это окно больше не появится.
           </div>
-          <button class="btn primary" style="width:100%;margin-bottom:8px" onclick="openBotChat()">Открыть чат с Сарой</button>
+          <button class="btn primary" style="width:100%;margin-bottom:8px" onclick="askConfirmLogin()">Войти через чат</button>
+          <button class="btn" style="width:100%;margin-bottom:8px" onclick="openBotChat()">Открыть чат с Сарой</button>
           <button class="btn" style="width:100%" onclick="retryLogin()">Попробовать ещё раз</button>
           <div id="login-msg" style="color:var(--muted);font-size:12.5px;min-height:18px;margin-top:10px">${note ? esc(note) : ""}</div>
           <div id="login-diag" style="color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px;text-align:left;white-space:pre-wrap;word-break:break-all;opacity:.85"></div>
@@ -3140,6 +3141,67 @@
         .catch(() => {});
       showLoginDiag();
     }
+
+    /**
+     * Вход с подтверждением в чате.
+     *
+     * Единственный путь, который работает ВНУТРИ мессенджера. Подпись запуска
+     * MAX проверить нечем, токен из кнопки open_app платформа не доносит, а
+     * кнопка-ссылка открывает внешний браузер — то есть другое приложение.
+     * Поэтому говорим серверу, за кого себя выдаём, а он спрашивает об этом у
+     * настоящего владельца этого аккаунта, в его чате. Код из четырёх цифр
+     * показываем здесь же: человек сверяет его с тем, что пришло в чат, и не
+     * подтверждает чужой вход машинально.
+     */
+    let loginPoll = null;
+    window.askConfirmLogin = async () => {
+      const scan = bridgeScan();
+      const uid = scan.userId;
+      const msg = $("login-msg");
+      if (!uid) {
+        if (msg) msg.textContent = "Мессенджер не сказал, кто ты. Открой приложение из чата с Сарой.";
+        return;
+      }
+      if (msg) msg.textContent = "Спрашиваю у тебя в чате…";
+      let res;
+      try {
+        const r = await fetch("/api/auth/max/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ maxUserId: uid }),
+        });
+        res = await r.json();
+        if (!r.ok) throw new Error(res.message || res.error || r.status);
+      } catch (e) {
+        if (msg) msg.textContent = "Не вышло: " + e.message;
+        return;
+      }
+      if (msg) {
+        msg.innerHTML = `Открой чат с Сарой и нажми <b>«Это я (${esc(res.code)})»</b>.<br>Код должен совпасть: <b>${esc(res.code)}</b>`;
+      }
+      // Ждём подтверждения: опрашиваем, пока человек переключается в чат и обратно
+      if (loginPoll) clearInterval(loginPoll);
+      const started = Date.now();
+      loginPoll = setInterval(async () => {
+        if (Date.now() - started > 5 * 60_000) { clearInterval(loginPoll); loginPoll = null; if (msg) msg.textContent = "Время вышло. Нажми «Войти через чат» ещё раз."; return; }
+        try {
+          const r = await fetch("/api/auth/max/poll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requestId: res.requestId }),
+          });
+          const out = await r.json();
+          if (out.token) {
+            clearInterval(loginPoll);
+            loginPoll = null;
+            await saveSession(out.token);
+            location.replace("/app?max=" + encodeURIComponent(out.token));
+          }
+        } catch (e) {
+          // сеть моргнула — следующая попытка через две секунды
+        }
+      }, 2000);
+    };
 
     /** Что страница увидела при запуске — по этим строкам налаживается вход без кодов. */
     let lastAuthError = "";

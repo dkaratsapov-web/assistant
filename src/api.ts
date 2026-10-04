@@ -217,6 +217,68 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     });
   }
 
+  /* ---------- Вход в MAX с подтверждением в чате ----------
+   *
+   * Зачем он нужен. Подпись запуска MAX проверить нечем — платформа отдаёт
+   * свой формат (ip, user, query_), и доверять ему нельзя. Кнопка open_app
+   * payload с токеном до приложения не доносит: в адресе приходит пустой
+   * WebAppStartParam. А кнопка-ссылка открывается во внешнем браузере, то есть
+   * внутри мессенджера приложение так и остаётся без входа.
+   *
+   * Поэтому: приложение говорит, за кого себя выдаёт, а бот спрашивает об этом
+   * у настоящего владельца этого аккаунта — в его чате. Подделать id может кто
+   * угодно, но подтверждение придёт не ему, а тому, чей id назвали. Код из
+   * четырёх цифр показывается и в приложении, и в сообщении: он защищает от
+   * того, чтобы человек машинально подтвердил чужой вход.
+   */
+
+  // POST /api/auth/max/request {maxUserId} — попросить вход
+  if (path === "/api/auth/max/request" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { maxUserId?: number | string };
+    const maxId = parseInt(String(body.maxUserId ?? ""), 10);
+    if (!maxId || maxId < 1) return json({ error: "no_user" }, 400);
+    if (!env.MAX_BOT_TOKEN) return json({ error: "max_off" }, 400);
+
+    const reqId = crypto.randomUUID();
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    await db.setSetting(
+      `maxlogin:${reqId}`,
+      JSON.stringify({ maxId, code, at: Date.now(), token: "" })
+    );
+
+    const client = new MaxClient(env.MAX_BOT_TOKEN, env.MAX_API_URL);
+    try {
+      await client.sendMessage(
+        { userId: maxId },
+        `🔐 Вход в приложение\n\nКод: ${code}\n\nЕсли это ты и код совпадает — подтверди. Если нет — просто не нажимай.`,
+        [[{ type: "callback", text: `✅ Это я (${code})`, payload: `login:${reqId}` }]]
+      );
+    } catch (e) {
+      return json({ error: "send_failed", message: (e as Error).message }, 502);
+    }
+    return json({ requestId: reqId, code });
+  }
+
+  // POST /api/auth/max/poll {requestId} — подтвердили или ещё нет
+  if (path === "/api/auth/max/poll" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { requestId?: string };
+    const raw = await db.getSetting(`maxlogin:${String(body.requestId ?? "")}`);
+    if (!raw) return json({ error: "unknown" }, 404);
+    let rec: { maxId: number; code: string; at: number; token: string };
+    try {
+      rec = JSON.parse(raw);
+    } catch {
+      return json({ error: "unknown" }, 404);
+    }
+    // Запрос живёт пять минут: столько нужно человеку, чтобы переключиться в чат
+    if (Date.now() - rec.at > 5 * 60_000) return json({ error: "expired" }, 410);
+    if (!rec.token) return json({ pending: true });
+    await db.setSetting(`maxlogin:${String(body.requestId)}`, "");
+    return new Response(JSON.stringify({ token: rec.token }), {
+      headers: { "content-type": "application/json", "set-cookie": sessionCookie(rec.token) },
+    });
+  }
+
   // Два способа входа: подпись Telegram initData либо токен сессии, выданный ботом
   // в другом канале (MAX) — там подписи Telegram нет.
   const tgUser = await validateInitData(request.headers.get("X-Telegram-Init-Data") ?? "", env.BOT_TOKEN);
