@@ -282,7 +282,33 @@ console.log("\nСценарий: создать задачу → закрыть 
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".tiles .tile", { timeout: 8000 });
 
-  console.log("\nСценарий: знакомство с приложением");
+  /* ---------- Выбранное лицо ассистента не роняет приложение ---------- */
+{
+  // Боевой случай: лица ассистента объявлены через const, а avatarSrc зовётся
+  // при запуске, до отрисовки любого экрана. Пока объявление лежало ниже по
+  // файлу, выбранное лицо роняло приложение на старте целиком —
+  // «Cannot access FACES before initialization», и дальше не поднималось
+  // ничего. Видно это только с непустым avatar в настройках.
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, { ...BASE, avatar: "face:nika" });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: выбранное лицо ассистента");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+  check(await page.evaluate(() => typeof window.go === "function"), "приложение поднялось");
+  check(await page.evaluate(() => {
+    const a = document.getElementById("avatar");
+    return !!a && a.src.startsWith("data:image/svg+xml");
+  }), "лицо подставилось вместо фото");
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+}
+
+console.log("\nСценарий: знакомство с приложением");
   const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
 
   // Новому человеку тур показывается сам
