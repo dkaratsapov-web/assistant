@@ -108,7 +108,10 @@ function serve() {
     const p = req.url.split("?")[0];
     if (p.startsWith("/api/")) {
       res.setHeader("content-type", "application/json; charset=utf-8");
-      if (p === "/api/prefs") return res.end(JSON.stringify(PREFS));
+      // Тему отдаём текущую, а не зашитую в PREFS: приложение спрашивает
+      // настройки у сервера и перебивает ими то, что лежит на устройстве, —
+      // из-за этого «светлая» серия снималась тёмной.
+      if (p === "/api/prefs") return res.end(JSON.stringify({ ...PREFS, theme: currentTheme }));
       // Фильтры приложение передаёт в адресе. Заглушка, которая их не
       // разбирает, покажет во вкладке «Рабочие» личные задачи — на снимке
       // для сайта это сразу бросается в глаза.
@@ -135,26 +138,13 @@ function serve() {
   return new Promise((r) => s.listen(PORT, "127.0.0.1", () => r(s)));
 }
 
+/** Тема текущего прохода: её отдаёт и сервер настроек, и страница. */
+let currentTheme = "dark";
+
 const server = await serve();
-fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
-const ctx = await browser.newContext({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2 });
-// Туры и подсказки на снимках не нужны — они закрывают интерфейс
-await ctx.addInitScript((p) => {
-  try {
-    localStorage.setItem("sara-prefs", JSON.stringify(p));
-    for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1");
-    localStorage.setItem("sara-mic-asked", "1");
-  } catch (e) {}
-}, PREFS);
 
-const page = await ctx.newPage();
-page.on("pageerror", (e) => console.log("ОШИБКА СТРАНИЦЫ:", String(e).slice(0, 300)));
-page.on("console", (m) => { if (m.type() === "error") console.log("КОНСОЛЬ:", m.text().slice(0, 200)); });
-await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
-await page.waitForFunction(() => { const v = document.getElementById("view"); return v && v.children.length && !v.querySelector(".loading, .skel"); }, { timeout: 15000 });
-
-const shots = [
+const SHOTS = [
   ["01-glavnaya", "home", "Главный экран"],
   ["02-zadachi", "tasks", "Задачи"],
   ["03-kalendar", "calendar", "Календарь"],
@@ -163,32 +153,64 @@ const shots = [
   ["06-sara", "ai", "Чат с Сарой"],
 ];
 
-for (const [file, tab, title] of shots) {
-  await page.evaluate((t) => window.go(t), tab);
-  await page.waitForTimeout(700);
-  await page.screenshot({ path: path.join(OUT, `${file}.png`) });
-  console.log("  ✓", title, "→", `case/screens/${file}.png`);
+/** Один полный проход по разделам в заданной теме. */
+async function shootTheme(theme) {
+  const dir = path.join(OUT, theme === "light" ? "svetlaya" : "tyomnaya");
+  fs.mkdirSync(dir, { recursive: true });
+  currentTheme = theme;
+  const prefs = { ...PREFS, theme };
+
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2 });
+  // Туры и вопрос про микрофон на снимках не нужны — они закрывают интерфейс
+  await ctx.addInitScript((p) => {
+    try {
+      localStorage.setItem("sara-prefs", JSON.stringify(p));
+      localStorage.setItem("sara-theme", p.theme);
+      for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1");
+      localStorage.setItem("sara-mic-asked", "1");
+    } catch (e) {}
+  }, prefs);
+
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log("ОШИБКА СТРАНИЦЫ:", String(e).slice(0, 300)));
+  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => { const v = document.getElementById("view"); return v && v.children.length && !v.querySelector(".loading, .skel"); }, { timeout: 15000 });
+
+  console.log(`\n${theme === "light" ? "Светлая" : "Тёмная"} тема:`);
+  for (const [file, tab, title] of SHOTS) {
+    await page.evaluate((t) => window.go(t), tab);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: path.join(dir, `${file}.png`) });
+    console.log("  ✓", title);
+  }
+
+  // Раскрытая карточка задачи: видно, что строки списка разворачиваются
+  await page.evaluate(() => window.go("tasks"));
+  await page.waitForTimeout(500);
+  const row = await page.$("#tasklist .row-item .rh");
+  if (row) {
+    await row.click();
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: path.join(dir, "07-kartochka-zadachi.png") });
+    console.log("  ✓ Раскрытая карточка задачи");
+  }
+
+  // Форма постановки задачи
+  await page.evaluate(() => window.openAddTask());
+  await page.waitForSelector("#f-title", { timeout: 5000 });
+  await page.fill("#f-title", "Подготовить отчёт по Директу");
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(dir, "08-novaya-zadacha.png") });
+  console.log("  ✓ Постановка задачи");
+
+  await ctx.close();
 }
 
-// Раскрытая карточка задачи: видно, что строки списка разворачиваются
-await page.evaluate(() => window.go("tasks"));
-await page.waitForTimeout(500);
-const row = await page.$("#tasklist .row-item .rh");
-if (row) {
-  await row.click();
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: path.join(OUT, "07-kartochka-zadachi.png") });
-  console.log("  ✓ Раскрытая карточка задачи → case/screens/07-kartochka-zadachi.png");
-}
-
-// Форма постановки задачи
-await page.evaluate(() => window.openAddTask());
-await page.waitForSelector("#f-title", { timeout: 5000 });
-await page.fill("#f-title", "Подготовить отчёт по Директу");
-await page.waitForTimeout(400);
-await page.screenshot({ path: path.join(OUT, "08-novaya-zadacha.png") });
-console.log("  ✓ Постановка задачи → case/screens/08-novaya-zadacha.png");
+// Старые снимки убираем, иначе в папке смешаются два прогона
+fs.rmSync(OUT, { recursive: true, force: true });
+await shootTheme("dark");
+await shootTheme("light");
 
 await browser.close();
 server.close();
-console.log("\nГотово. Снимки в case/screens/");
+console.log("\nГотово. Снимки в case/screens/tyomnaya и case/screens/svetlaya");
