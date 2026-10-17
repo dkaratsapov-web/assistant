@@ -297,7 +297,49 @@ console.log("\nСценарий: создать задачу → закрыть 
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".tiles .tile", { timeout: 8000 });
 
-  console.log("\nСценарий: выбранное лицо ассистента");
+  /* ---------- Выключенный голос прячет микрофон ---------- */
+{
+  // Выключатель живёт на сервере, а интерфейс только спрашивает. Проверяем не
+  // то, что кнопка перестала работать, а что её вовсе нет: предлагать человеку
+  // кнопку, которая ничего не делает, хуже, чем не предлагать её.
+  const off = await startStubServer(BASE, port + 1, { voice: false });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${off.port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".tiles .tile", { timeout: 8000 });
+
+  console.log("\nСценарий: голос выключен");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  const micShown = async () => await page.evaluate(() => {
+    const m = document.getElementById("fab-mic");
+    return !!m && getComputedStyle(m).display !== "none";
+  });
+  check(!(await micShown()), "большой микрофон скрыт на главной");
+
+  await page.evaluate(() => window.go("tasks"));
+  await page.waitForTimeout(500);
+  check(!(await micShown()), "и в задачах тоже");
+
+  await page.evaluate(() => window.openAddTask());
+  await page.waitForSelector("#f-title", { timeout: 5000 });
+  check(await page.evaluate(() => !document.querySelector(".mic-btn")), "кнопок диктовки в форме нет");
+  // textContent у body включает исходник встроенного скрипта, где эта строка
+  // есть всегда. Смотрим только то, что видно человеку.
+  check(await page.evaluate(() => {
+    const seen = [...document.querySelectorAll("button, a, .btn")].map((e) => e.textContent || "");
+    return !seen.some((t) => /Сказать голосом/.test(t));
+  }), "предложения сказать голосом нет");
+
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+  await ctx.close();
+  off.server.close();
+}
+
+console.log("\nСценарий: выбранное лицо ассистента");
   const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
   check(await page.evaluate(() => typeof window.go === "function"), "приложение поднялось");
   check(await page.evaluate(() => {

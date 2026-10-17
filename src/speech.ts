@@ -22,6 +22,25 @@ export function sttKey(env: { YANDEX_STT_API_KEY?: string; YANDEX_API_KEY?: stri
   return env.YANDEX_STT_API_KEY || env.YANDEX_API_KEY || "";
 }
 
+/**
+ * Включён ли голосовой ввод.
+ *
+ * Отдельный выключатель, а не только наличие ключей: голос иногда нужно
+ * погасить временно, не трогая ключи Яндекса. Микрофон в приложении гаснет
+ * сам — интерфейс спрашивает об этом сервер и прячет все кнопки диктовки.
+ *
+ * Выключается переменной VOICE=off.
+ */
+export function voiceEnabled(env: {
+  VOICE?: string;
+  YANDEX_STT_API_KEY?: string;
+  YANDEX_API_KEY?: string;
+  YANDEX_FOLDER_ID?: string;
+}): boolean {
+  if ((env.VOICE ?? "").trim().toLowerCase() === "off") return false;
+  return !!(sttKey(env) && env.YANDEX_FOLDER_ID);
+}
+
 export async function transcribeVoice(
   apiKey: string,
   folderId: string,

@@ -15,7 +15,7 @@ import { lookupWeb } from "../search";
 import { DB } from "../db";
 import { MEAL_RU, tryPerformCommand } from "../intent";
 import { buildDigest } from "../reports";
-import { sttKey, transcribeVoice } from "../speech";
+import { sttKey, transcribeVoice, voiceEnabled } from "../speech";
 import {
   Env,
   ROLE_CLIENT,
@@ -469,12 +469,12 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   // ===== Голосовое сообщение =====
   let raw = (text ?? "").trim();
   if (!raw && audioUrl) {
-    if (!sttKey(env) || !env.YANDEX_FOLDER_ID) {
-      return void (await reply("Голосовой ввод не настроен: добавь YANDEX_API_KEY и YANDEX_FOLDER_ID."));
+    if (!voiceEnabled(env)) {
+      return void (await reply("Голосовой ввод сейчас выключен. Напиши текстом — пойму так же."));
     }
     try {
       const audio = await (await fetch(audioUrl)).arrayBuffer();
-      raw = (await transcribeVoice(sttKey(env), env.YANDEX_FOLDER_ID, audio)).trim();
+      raw = (await transcribeVoice(sttKey(env), env.YANDEX_FOLDER_ID ?? "", audio)).trim();
     } catch (e) {
       return void (await reply(`⚠️ Не удалось распознать голос: ${(e as Error).message}`));
     }

@@ -52,7 +52,12 @@ const API = {
   "/api/profile": { sex: "", height: 0, weight: 0, birth_year: 0, goal: "", allergies: "" },
 };
 
-export function startStubServer(prefs, port = 8977) {
+/**
+ * @param opts.voice — отдавать ли голос включённым. Выключатель голоса живёт на
+ * сервере, а интерфейс только спрашивает: без этого проверить, что микрофон
+ * действительно исчезает, нечем.
+ */
+export function startStubServer(prefs, port = 8977, opts = {}) {
   // Настройки держим в памяти и возвращаем изменённые: заглушка, которая молча
   // откатывает только что сохранённое, показывает несуществующие ошибки.
   let current = { ...prefs };
@@ -110,6 +115,7 @@ export function startStubServer(prefs, port = 8977) {
         return res.end(JSON.stringify({ ok: true }));
       }
 
+      if (p === "/api/me") return res.end(JSON.stringify({ ...API["/api/me"], voice: opts.voice !== false }));
       const key = Object.keys(API).find((k) => p === k);
       if (key) return res.end(JSON.stringify(API[key]));
       return res.end(JSON.stringify({ ok: true }));
