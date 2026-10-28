@@ -339,6 +339,46 @@ console.log("\nСценарий: создать задачу → закрыть 
   off.server.close();
 }
 
+/* ---------- Закрытый режим показывает заглушку ---------- */
+{
+  const off = await startStubServer(BASE, port + 2, { locked: true });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((p) => { try { localStorage.setItem("sara-prefs", JSON.stringify(p)); for (const k of ["done", "tasks", "calendar", "health", "clients", "ai"]) localStorage.setItem("sara-tour-" + k, "1"); } catch (e) {} }, BASE);
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await page.goto(`http://127.0.0.1:${off.port}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+
+  console.log("\nСценарий: доступ закрыт");
+  const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
+
+  await page.waitForSelector("#locked-screen", { timeout: 6000 }).catch(() => {});
+  const txt = (await page.textContent("#locked-screen").catch(() => "")) || "";
+  check(/Бесплатный доступ закончился/.test(txt), "заглушка видна", txt.slice(0, 80));
+  check(/администратор/i.test(txt), "сказано, к кому обращаться");
+
+  // Оставленное меню создавало бы ощущение поломки: тыкаешь, а ничего нет
+  const hidden = await page.evaluate(() => ["nav", "fab", "fab-mic"].every((id) => {
+    const el = document.getElementById(id);
+    return !el || getComputedStyle(el).display === "none";
+  }));
+  check(hidden, "меню и кнопки убраны");
+  // Заглушка должна быть сверху: ниже неё лежит экран входа, и если слой
+  // окажется под ним, человек увидит «Нет доступа» вместо объяснения
+  check(await page.evaluate(() => {
+    const el = document.getElementById("locked-screen");
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.width / 2, r.height / 2);
+    return !!top && el.contains(top);
+  }), "заглушка поверх остального");
+  check(errs.length === 0, "ошибок JS нет", errs.join(" | "));
+
+  await ctx.close();
+  off.server.close();
+}
+
 console.log("\nСценарий: выбранное лицо ассистента");
   const check = (ok, name, detail = "") => { if (ok) console.log("  ✓", name); else { failed++; console.log("  ✗", name, detail); } };
   check(await page.evaluate(() => typeof window.go === "function"), "приложение поднялось");

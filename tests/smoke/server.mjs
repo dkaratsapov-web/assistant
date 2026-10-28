@@ -115,6 +115,13 @@ export function startStubServer(prefs, port = 8977, opts = {}) {
         return res.end(JSON.stringify({ ok: true }));
       }
 
+      // Закрытый режим: сервер отвечает 402 на ВСЁ, как в бою. Проверять надо
+      // именно так — заглушка должна появляться от любого запроса, а не только
+      // от того, который тест решил сделать первым.
+      if (opts.locked) {
+        res.statusCode = 402;
+        return res.end(JSON.stringify({ error: "locked", message: "🔒 Бесплатный доступ закончился\n\nЧтобы продолжить пользоваться Сарой, напишите администратору — он откроет доступ." }));
+      }
       if (p === "/api/me") return res.end(JSON.stringify({ ...API["/api/me"], voice: opts.voice !== false }));
       const key = Object.keys(API).find((k) => p === k);
       if (key) return res.end(JSON.stringify(API[key]));

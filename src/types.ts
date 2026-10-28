@@ -26,6 +26,7 @@ export interface Env {
   YOUGILE_MCP_URL?: string;        // адрес MCP-сервера YouGile, если он изменится
   WEB_SEARCH?: string;             // "off" — выключить поиск в интернете целиком
   VOICE?: string;                  // "off" — выключить голосовой ввод целиком
+  LOCKED?: string;                 // "on" — закрытый режим: бот отвечает только владельцу
   YANDEX_FOLDER_ID?: string;       // идентификатор каталога Yandex Cloud
   YANDEX_GPT_MODEL?: string;       // основная модель, по умолчанию "yandexgpt/latest"
   YANDEX_GPT_ROUTER_MODEL?: string;// дешёвая модель для разбора команд, по умолчанию "yandexgpt-lite/latest"

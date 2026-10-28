@@ -31,6 +31,7 @@ import {
 import { lookupWeb } from "./search";
 import { bytesToBase64, nowContext } from "./utils";
 import { spellTitle } from "./spell";
+import { LOCKED_TEXT, lockedFor } from "./access";
 import { localInputToUtc, mealByHour, mealFromText, parseDue, startOfLocalDayIso, startOfLocalDayOffsetIso, tzOffsetOf } from "./utils";
 
 const enc = new TextEncoder();
@@ -299,6 +300,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
   const isOwner = user.role === ROLE_OWNER;
   const uid = user.user_id;
+
+  // Закрытый режим. Стоит сразу после опознания и до любого действия: иначе
+  // часть запросов проходила бы мимо заглушки. Владельца не трогаем — ему и
+  // открывать доступ остальным.
+  if (lockedFor(env, user)) return json({ error: "locked", message: LOCKED_TEXT }, 402);
 
   // Имена клиентов нужны проверке орфографии: свои названия («Ромашка»,
   // «ДиАвто69») словарь не знает и норовит «исправить». Читаем их лениво —

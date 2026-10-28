@@ -8,6 +8,7 @@ import { tryPerformCommand } from "./intent";
 import { onboardingAnswer, onboardingDone, onboardingStart, onboardingState, OnbQuestion } from "./onboarding";
 import { telemostExchangeCode, metrikaStats, MetrikaReport } from "./telemost";
 import { sttKey, transcribeVoice, voiceEnabled } from "./speech";
+import { LOCKED_TEXT, lockedFor } from "./access";
 import { DB } from "./db";
 import { buildClientsOverview, buildDigest } from "./reports";
 import {
@@ -197,6 +198,18 @@ export function createBot(env: Env, origin: string): Bot<MyContext> {
       if (user.username !== (from.username ?? null) || user.full_name !== fn) {
         await db.updateProfile(from.id, from.username ?? null, fn);
       }
+    }
+
+    // Закрытый режим: всем, кроме владельца, одна заглушка и ничего больше.
+    // Стоит ДО разбора команд и до /start — иначе заявку на доступ можно было
+    // бы отправить, а смысла в ней сейчас нет.
+    if (lockedFor(env, user)) {
+      if (ctx.callbackQuery) {
+        await ctx.answerCallbackQuery({ text: "Доступ закрыт.", show_alert: true }).catch(() => {});
+        return;
+      }
+      await ctx.reply(LOCKED_TEXT).catch(() => {});
+      return;
     }
 
     const isKnown = user && user.role !== ROLE_PENDING;

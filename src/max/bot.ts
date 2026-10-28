@@ -16,6 +16,7 @@ import { DB } from "../db";
 import { MEAL_RU, tryPerformCommand } from "../intent";
 import { buildDigest } from "../reports";
 import { sttKey, transcribeVoice, voiceEnabled } from "../speech";
+import { LOCKED_TEXT, lockedForMax } from "../access";
 import {
   Env,
   ROLE_CLIENT,
@@ -217,6 +218,14 @@ export async function handleMaxUpdate(update: MaxUpdate, env: Env, appUrl?: stri
   }
 
   const isOwner = user.role === ROLE_OWNER;
+
+  // Закрытый режим: всем, кроме владельца, одна заглушка. Стоит выше заявки на
+  // доступ — подавать её сейчас некуда и незачем.
+  if (lockedForMax(env, isOwnerMax)) {
+    if (callbackId) await client.answerCallback(callbackId).catch(() => {});
+    await reply(LOCKED_TEXT).catch(() => {});
+    return;
+  }
 
   // Заявка на доступ: новичок ждёт подтверждения владельца
   if (user.role === ROLE_PENDING) {

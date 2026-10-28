@@ -820,8 +820,48 @@
         ...opts,
         headers: { "Content-Type": "application/json", ...AUTH_HEADERS, ...(opts.headers || {}) },
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.status); }
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        // Закрытый режим: показываем заглушку целым экраном и глушим остальное.
+        // Внутри вкладки это выглядело бы как сбой, а это не сбой, а решение
+        // владельца — человек должен понять, что делать дальше.
+        if (res.status === 402 && e.error === "locked") showLocked(e.message || "");
+        throw new Error(e.error || res.status);
+      }
       return res.json();
+    }
+
+    /**
+     * Экран «доступ закрыт».
+     *
+     * Кладётся ПОВЕРХ всего отдельным слоем, а не в #view. Причина из жизни:
+     * первый же отказ роняет и вход, и вкладку, и каждый из них рисует свой
+     * экран — заглушку затирало сообщение «Нет доступа, получи у владельца».
+     * Слой сверху не зависит от того, кто отрисуется последним.
+     *
+     * Меню и кнопки убираем: нажимать нечего, а оставленный интерфейс создаёт
+     * ощущение поломки вместо понятного «доступ закрыт».
+     */
+    let lockedShown = false;
+    function showLocked(text) {
+      if (lockedShown) return;
+      lockedShown = true;
+      const lines = String(text || "").split("\n").map((x) => x.trim()).filter(Boolean);
+      const head = (lines[0] || "Доступ закрыт").replace(/^🔒\s*/, "");
+      const body = lines.slice(1).join(" ") || "Обратитесь к администратору.";
+      const box = document.createElement("div");
+      box.id = "locked-screen";
+      box.style.cssText =
+        "position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;" +
+        "padding:24px;background:var(--bg);";
+      box.innerHTML = `
+        <div class="card" style="padding:24px;text-align:center;max-width:340px">
+          <div style="font-size:42px;line-height:1;margin-bottom:14px">🔒</div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:8px">${esc(head)}</div>
+          <div style="color:var(--muted);font-size:14px;line-height:1.5">${esc(body)}</div>
+        </div>`;
+      document.body.appendChild(box);
+      for (const id of ["nav", "fab", "fab-mic"]) { const el = $(id); if (el) el.style.display = "none"; }
     }
 
     function fmtDue(iso) {
@@ -849,6 +889,7 @@
     function err(e) {
       const m = String(e.message || e);
       if (m === "no_access") return emptyBox("Нет доступа", "Получи доступ у владельца бота.");
+      if (m === "locked") return "";   // заглушку уже показали целым экраном
       return `<div class="empty errbox"><div class="big">Ошибка</div><div>${esc(m)}</div></div>`;
     }
     const ARROW = '<svg class="arw" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
